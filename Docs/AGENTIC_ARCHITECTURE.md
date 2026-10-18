@@ -132,6 +132,9 @@ Decisions driven by current guidance:
   - The LangChain Azure AI Search retriever lives in `langchain-community`, outside the first-party Azure provider page.
   - A thin custom `@tool` over `azure-search-documents` gives full control of filters, ACL trimming, identifier boosting and dedup.
   - Keep the knowledge-base MCP endpoint for later Foundry IQ interoperability.
+* **Knowledge graph:** an evidence-linked domain KG in a new `crv_kg` schema, projected to
+  Apache AGE on the same PostgreSQL server ([design](./KNOWLEDGE_GRAPH_DESIGN.md)). The agent reaches it only through parameterised tools
+  and never cites it directly. The full rationale and the A/B gate are in §8.
 * **MCP:** use the built-in `langchain.mcp.MCPAdapter` (`langchain[mcp]`, ≥1.4) for external
   connectors. The standalone `langchain-mcp-adapters` package is superseded
   ([migration](https://docs.langchain.com/oss/python/migrate/langchain-mcp-adapters)).
@@ -196,13 +199,13 @@ flowchart TD
 | Node | Kind | Responsibility | Model tier |
 |---|---|---|---|
 | `guard_in` | function | Size limits, prompt-shield / injection screen, PII middleware, attachment typing | — |
-| `understand` | LLM, structured output (`QueryPlan`) | Intent (A–G + advisory / external / image / writing / out-of-scope), language, entities **resolved through the gazetteer** (MAA→Tizert, etc.), time window, **premises to verify** (catches Q63's "2022 pilot report"), sub-questions, criticality | fast |
+| `understand` | LLM, structured output (`QueryPlan`) | Intent (A–G + advisory / external / image / writing / out-of-scope), language, entities **resolved through the gazetteer** (`resolve_entities`, MAA→Tizert, etc.), time window, **premises to verify** (catches Q63's "2022 pilot report", via `find_studies` + search), sub-questions, criticality | fast |
 | `clarify` | `interrupt()` | "Cet essai?" with no attachment or project context → ask the user; resume with `Command(resume=…)` | — |
 | `evidence_rag` | subgraph | Hybrid search → grade (structured) → rewrite (≤ 2 loops) → **sufficiency check** → `abstain` flag | fast |
-| `plan_fanout` | LLM | Split into facets (per site / deposit / period / scale), and select **doc cards** first so coverage does not depend on chunk top-k | reasoning |
+| `plan_fanout` | LLM | Split into facets (per site / deposit / period / scale), and select **doc cards** first (plus `find_studies` / `find_precedents` when the KG is enabled, §8) so coverage does not depend on chunk top-k | reasoning |
 | `evidence_worker` | `Send` target | For one facet, search chunks inside the selected documents and return typed `Claim`s (value, unit, sample/ore, scale, date, citation) | fast |
 | `reconcile` | function + LLM | Dedup by `content_hash`/version family, prefer final reports, **detect conflicts** (same quantity, different value/date/scope), normalise units via `pint` | reasoning |
-| `catalog_lookup` | tool (SQL read functions) | Versions, duplicates, stubs, lineage, "documents of phase X" from the ingestion catalog/manifest | — |
+| `catalog_lookup` | tool (SQL read functions) | Versions, duplicates, stubs, lineage (`document_lineage`, KG Tier 1), "documents of phase X" from the ingestion catalog/manifest | — |
 | `calculator` | tool | Safe expression and unit arithmetic over cited inputs (Q64, Q65) | — |
 | `literature` | `create_agent` subagent | OpenAlex/Crossref/patents tools; DOI validation; output labelled **external** | fast |
 | `vision` | `create_agent` subagent | Froth/SEM image commentary + retrieval of similar internal cases; output labelled advisory | vision |
@@ -332,13 +335,148 @@ reducer-backed keys.
 
 ---
 
-## 8. Roadmap
+## 8. Knowledge graph (ontology): decision
+
+**Verdict: yes, a targeted, evidence-linked domain KG built incrementally, used as a
+*navigation and reconciliation layer* for the agent. No to an ontology-first programme and no
+to an auto-extracted "GraphRAG" community graph.** Answers and citations always come from text
+chunks; the graph tells the agent *where to look, what belongs together, and what disagrees*.
+
+### 8.1 Why (golden set + corpus)
+
+| Category | # | KG value | What the graph contributes |
+|---|---|---|---|
+| A: fact lookup | 36 | Low | Entity resolution (aliases, spelling variants) and duplicate collapse only; hybrid search already answers these |
+| B: synthesis / timeline | 14 | **High** | Complete study spine per deposit/process (lab → mini-pilot → pilot → industrial, dated), so coverage does not depend on top-k |
+| C: comparison / enumeration | 10 | **High** | "All studies on X", "all reagents tested on Y": an exhaustive list is a query, not a retrieval guess |
+| D: conflict / version / scope | 6 | **High** | Results stored as n-ary observations (value, unit, basis, sample, date, scale) make Q45 / Q46 / Q54 / Q58 / Q59 / Q66 conflicts *detectable* rather than hoped-for |
+| E: catalogue / provenance | 4 | **High** | `VERSION_OF`, `DUPLICATE_OF`, `SUPERSEDES`, `PART_OF` lineage (Q52, Q55, Q56, Q70) |
+| F: abstention / false premise | 4 | Medium | Premise check ("2022 Tizert pilot" → no such campaign); absence in a curated graph is only a *signal*, confirmed by search |
+| G: arithmetic | 2 | Medium | Typed value + unit inputs for the calculator |
+
+About **34 / 76** questions (categories B–E) get high value. In Sheet1, rows 12, 21 and 22 benefit most: "has a
+similar ore / mineral / reagent been tested internally?" is a graph traversal. The corpus has
+exactly that shape: the same deposits (Hajar, Tighardine, Koudiat Aicha, Agoujgal, Jbel Laasel,
+Amensif, Pumpi…) recur in reports from 1994 to 2018, scattered across folders where
+**folder ≠ site** (MAA, SOMIFER, CMO, AGM, CMG, RDC), under spelling variants and heavy duplication.
+
+Literature is consistent with this split. A systematic evaluation finds RAG and GraphRAG
+complementary, with RAG stronger on single-hop detail and graph methods stronger on multi-hop or
+aggregate questions ([arXiv 2502.11371](https://arxiv.org/abs/2502.11371)). A 2026 benchmark
+finds agentic search narrows the gap, but graph structure still helps complex multi-hop
+reasoning and stabilises agent behaviour once its offline cost is amortised
+([arXiv 2604.09666](https://arxiv.org/abs/2604.09666)). Hence the A/B gate in §8.6
+rather than an up-front commitment.
+
+**Why not an auto community graph (Microsoft-GraphRAG style):** LLM-extracted triples with no
+review conflict with the evidence-first gates. The questions here are about *specific* studies,
+values and versions, not global "themes". Re-indexing 1,967 documents (24.5 GB, OCR-heavy) is costly.
+
+**Why not ontology-first (OWL, reasoning, upper ontologies):** the value lies in a few dozen
+classes with good instance data, not in axioms. Reasoning adds maintenance and gives no golden-set lift.
+
+### 8.2 Scope in three tiers (build in order; each is useful alone)
+
+| Tier | Content | How it is built | Review |
+|---|---|---|---|
+| **1. Deterministic** | Document lineage (`VERSION_OF`, `DUPLICATE_OF` via `content_hash` / normalised title, `SUPERSEDES`, `PART_OF` for FS chapters, doc ↔ pdf pairs) + **gazetteer** (Organisation / Site / Deposit with `altLabel`s: MAA→Tizert, Laasel/Laassel/Laasal…) | Rules over the ingestion catalog + a curated seed list | Gazetteer owned by domain experts; lineage auto-`observed` |
+| **2. Study spine** | `Study/Campaign` (scale, date, facility, partner such as MINTEK), `Sample/Material`, `Process`, `Deposit`, `Document` | LLM structured extraction from title, summary and first pages → `candidate` | Experts approve the high-traffic entities |
+| **3. Results** | n-ary `Observation`: property, value *as printed*, unit, basis/scope, sample, study, evidence locator (page / table cell / span), status | Seeded from existing `ScientificObservation` table cells + LLM extraction | Stays `candidate` unless reviewed; always shown with its source |
+
+### 8.3 Minimal ontology
+
+Classes: `Organisation`, `Site`, `Deposit/Zone`, `Sample/Material`, `Mineral`, `Reagent` (with
+role: collector, depressant, frother, lixiviant…), `Process/UnitOperation` (flotation, gravity,
+leaching, cementation…), `Study/Campaign`, `Observation`, `Document` / `VersionFamily`,
+`CharacterisationTechnique` (XRD, QEMSCAN, SEM…), `ProjectMilestone`.
+
+Core relations: `operatedBy`, `locatedIn`, `sampledFrom`, `studies` (Study → Deposit / Sample /
+Process), `usedReagent`, `performedBy` / `partner`, `reportedIn` (→ Document + locator),
+`hasObservation`, `observedProperty`, `versionOf` / `supersedes` / `duplicateOf` / `partOf`.
+
+Alignment is light, by IRI annotation only: PROV-O (provenance), SOSA/SSN (observations),
+QUDT/UCUM (units; `pint` for conversion), SKOS (labels and aliases). Optionally ChEBI (reagents)
+and Mindat (minerals). No OWL reasoning.
+
+### 8.4 Storage: a CRV-native schema, reusing proven patterns
+
+The detailed design, based on a corpus sample, is in [KNOWLEDGE_GRAPH_DESIGN.md](./KNOWLEDGE_GRAPH_DESIGN.md).
+
+* The `kg.*` tables ([0011_kg_store.sql](../src/ingestion/ingest_pipeline/sql/0011_kg_store.sql)
+  to [0013_kg_context.sql](../src/ingestion/ingest_pipeline/sql/0013_kg_context.sql)) come from a
+  previous maintenance project. They use the `urn:tizert:` namespace, an Equipment / InstrumentTag
+  vocabulary, and closed CHECK constraints. Tizert is also a real site in this corpus, so those
+  names would be ambiguous.
+* Create a new **`crv_kg`** schema and AGE graph **`crv_research`** with `urn:crv:` IRIs.
+  Reuse only the governance *pattern*:
+  - runs and entity records with `review_status`;
+  - approved identifiers with decision ids;
+  - evidence locators with `scope_key`;
+  - assertions with status history;
+  - releases projected to AGE, with a SQL fallback;
+  - bounded read functions.
+
+  Observations stay relational (n-ary).
+* Graph engine: **Apache AGE on the existing Azure PostgreSQL Flexible Server** (PG16, per
+  [postgresql-flexible-server.bicep](../infra/core/database/postgresql-flexible-server.bicep);
+  AGE is a supported extension there). This means one database, one identity model, and one
+  backup. Do not add Neo4j. Retire the Fuseki pilot ([fuseki-pilot.ttl](../infra/knowledge/fuseki-pilot.ttl))
+  for this use case.
+* ACL: every entity and assertion inherits the `scope_key`s of its evidence, and read functions
+  take `p_scopes`. The graph can never reveal the *existence* of a restricted study.
+
+### 8.5 How the agent uses it (LangGraph integration)
+
+Parameterised, read-only tools over SQL functions, using a dedicated Entra-authenticated
+`crv_kg_reader` role (same pattern as [kg_access.py](../src/ingestion/ingest_pipeline/adapters/postgres/kg_access.py)).
+**No free-form text-to-Cypher.**
+
+| Tool | Used by | Returns |
+|---|---|---|
+| `resolve_entities(text)` | `understand` | Canonical IRIs + aliases + ambiguity list (feeds `QueryPlan.entities`) |
+| `find_studies(deposit?, process?, reagent?, scale?, period?)` | `plan_fanout`, `understand` (premise check) | Study list with document ids and status |
+| `get_results(study? / deposit?, property)` | `reconcile`, `calculator` | Observations with value, unit, basis, locator |
+| `find_precedents(material / mineral / reagent)` | `plan_fanout` (Sheet1 row 12 type) | Similar internal studies, ranked |
+| `document_lineage(doc)` | `catalog_lookup`, `reconcile` | Version family, duplicates, superseding document |
+
+**Graph-guided retrieval:** KG results yield document ids and locators. `evidence_worker` then
+calls `search_evidence` filtered to those documents, so citations always come from text. The
+answer shows each graph fact's review status ("candidate, unreviewed"), and `verify` rejects any
+claim whose only support is a graph assertion.
+
+### 8.6 Decide by measurement: A/B pilot on Dossier Cu
+
+Every golden question is grounded in `Geometallurgy Cu\Week 22-06-2026\Dossier Cu` (186 files),
+so the pilot can be small and complete:
+
+1. Build Tiers 1–2 (and Tier 3 for the properties used in the golden set) for those 186 files only.
+2. Run **variant A** (agentic RAG + document cards, P2 design) against **variant B** (A + KG tools)
+   on the 76 questions.
+3. Adopt the KG for the full corpus if B improves **B / C / D / E** by at least 10 points on
+   key-fact recall or citation correctness and causes **no regression on A / F**, at an
+   acceptable extraction-plus-review cost per document. Otherwise keep only Tier 1 (lineage +
+   gazetteer), which pays for itself regardless.
+
+### 8.7 Risks and mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Confidently wrong structured facts | Text-only citations; review status shown; `verify` rejects graph-only claims |
+| Closed-world fallacy ("not in graph" ⇒ "doesn't exist") | Absence triggers a search confirmation before any F-type abstention |
+| Ontology / curation burden | Small class set; expert review limited to high-traffic entities; Tier 1 is rule-based |
+| OCR noise in old reports (1990s scans) | Extraction confidence threshold; values kept "as printed" with locator |
+| PII (author names, signatories) | Do not model persons in v1; `PIIMiddleware` on outputs |
+| Drift between index and graph | Graph built from the same ingestion catalog run ids; release pointer per environment |
+
+---
+
+## 9. Roadmap
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
 | **P0: prerequisites** | ACL enforcement; index v2 fields (date, version family, stub, entities); gazetteer table; golden JSONL + evaluator harness; baseline on plain hybrid RAG | Baseline numbers per category |
-| **P1: core graph** | `guard_in` → `understand` → `evidence_rag` → `compose` → `verify` → `guard_out`; `catalog_lookup`, `calculator`; abstention; streaming API on AKS | Gates met for A, E, F, G |
-| **P2: research fan-out** | Document cards; `plan_fanout` / `evidence_worker` (`Send`) / `reconcile`; conflict & unit handling; project memory | Gates met for B, C, D |
+| **P1: core graph** | `guard_in` → `understand` → `evidence_rag` → `compose` → `verify` → `guard_out`; `catalog_lookup`, `calculator`; abstention; streaming API on AKS; **KG Tier 1** (lineage + gazetteer in `crv_kg` under `urn:crv:`, `resolve_entities`, `document_lineage`) | Gates met for A, E, F, G |
+| **P2: research fan-out** | Document cards; `plan_fanout` / `evidence_worker` (`Send`) / `reconcile`; conflict & unit handling; project memory; **KG Tiers 2–3 on Dossier Cu + A/B (§8.6)** | Gates met for B, C, D; KG adopt / limit-to-Tier-1 decision |
 | **P3: beyond corpus** | Literature subagent (OpenAlex / Crossref / patents / licensed Elsevier), scheduled watch (Deep Agents), vision subagent, writing mode | Golden set extended to Sheet1 types; expert acceptance |
 | **P4: expert loop** | HITL review for *bloquant* outputs, purchasing-DB connector (cost), procedure library ingestion (normes / QSE folders currently empty) | Domain sign-off on safety-critical categories |
 
@@ -348,3 +486,6 @@ reducer-backed keys.
 2. Model tiers: run the existing bake-off approach against the golden set to pick the fast, reasoning and vision deployments in Foundry.
 3. Whether LangSmith (self-hosted) is approved for traces containing corpus text, or only App Insights.
 4. Ownership of the gazetteer and of golden-set `expected_sources` (domain experts).
+5. KG curation: who reviews `candidate` studies and observations, and at what throughput. Also,
+   whether to drop the legacy `kg.*` / `tizert_pilot` objects from the CRV database (see
+   [KNOWLEDGE_GRAPH_DESIGN.md](./KNOWLEDGE_GRAPH_DESIGN.md) §10).

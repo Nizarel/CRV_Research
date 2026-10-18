@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crv-transfer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: corpus-transfer
+  namespace: crv-transfer
+  annotations:
+    azure.workload.identity/client-id: 1e0235f4-591c-4216-bb70-966df7337094
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${TRANSFER_JOB}
+  namespace: crv-transfer
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 86400
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: corpus-transfer
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: corpus-transfer
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: rclone
+          image: acrcrvscus.azurecr.io/corpus-rclone@sha256:3103526c506266a9ecdf064efe99bf3677d92ef6407af124d8c56b4f49cbaa51
+          command: ["/bin/sh", "-c", "cp /usr/local/bin/rclone /tools/rclone"]
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tools, mountPath: /tools}
+      containers:
+        - name: transfer
+          image: acrcrvscus.azurecr.io/corpus-python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+          command:
+            - /bin/sh
+            - -c
+            - >-
+              cat /etc/ssl/certs/ca-certificates.crt /certificates/nextcloud-ca.pem
+              > /tmp/ca-bundle.pem &&
+              export SSL_CERT_FILE=/tmp/ca-bundle.pem &&
+              exec python -u /scripts/transfer.py
+          env:
+            - name: TRANSFER_JOB
+              value: ${TRANSFER_JOB}
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: HOME
+              value: /tmp
+          resources:
+            requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+            limits: {cpu: "1", memory: 1Gi, ephemeral-storage: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tools, mountPath: /tools, readOnly: true}
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+            - {name: certificates, mountPath: /certificates, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
+      volumes:
+        - name: tools
+          emptyDir: {sizeLimit: 128Mi}
+        - name: scripts
+          configMap:
+            name: corpus-transfer
+        - name: scratch
+          emptyDir: {sizeLimit: 128Mi}
+        - name: certificates
+          configMap:
+            name: corpus-transfer-ca
