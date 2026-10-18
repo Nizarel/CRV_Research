@@ -1,0 +1,23 @@
+fullnameOverride: ingress-azure
+
+image:
+  repository: ${AGIC_IMAGE_REPOSITORY}
+  tag: ${AGIC_IMAGE_TAG}
+
+appgw:
+  subscriptionId: ${AZURE_SUBSCRIPTION_ID}
+  resourceGroup: ${AZURE_RESOURCE_GROUP}
+  name: ${APPLICATION_GATEWAY_NAME}
+  subnetID: ${APPLICATION_GATEWAY_SUBNET_ID}
+  usePrivateIP: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+
+rbac:
+  enabled: true
+
+kubernetes:
+  nodeSelector:
+    kubernetes.io/os: linux

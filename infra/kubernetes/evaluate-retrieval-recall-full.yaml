@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: retrieval-recall-full-
+  namespace: crv
+  labels:
+    app: retrieval-recall-full
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: retrieval-recall-full
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: evaluate
+          image: acrcrvscus.azurecr.io/crv-ingestion:retrieval-recall-20260723a
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              python -m ingestion.cli evaluate-retrieval
+              --questions /data/golden.csv
+              --output /tmp/evidence.json
+              --search-endpoint https://gptkb-nyuwyhzhjriuu.search.windows.net
+              --embeddings-endpoint https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com/
+              --embeddings-deployment text-embedding-3-large
+              --modes bm25 hybrid hybrid-semantic
+              && python -m ingestion.cli analyze-retrieval-recall
+              --evidence /tmp/evidence.json
+              --pg-host psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com
+              --pg-user id-crv-aks-workload
+              --pg-database ingestion-catalog
+              --output /tmp/recall.json
+              && echo "---RECALL-FULL---"
+              && cat /tmp/recall.json
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "390adbf3-2f0e-4f3d-b6ca-cdc0628cd055"
+          volumeMounts:
+            - name: golden-questions
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: golden-questions
+          configMap:
+            name: hybrid-eval-golden

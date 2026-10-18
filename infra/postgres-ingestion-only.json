@@ -1,0 +1,335 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "11972918052009852564"
+    }
+  },
+  "parameters": {
+    "postgresLocation": {
+      "type": "string",
+      "defaultValue": "northcentralus",
+      "metadata": {
+        "description": "Location of the PostgreSQL Flexible Server."
+      }
+    },
+    "postgresServerName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the PostgreSQL Flexible Server."
+      }
+    },
+    "postgresSkuName": {
+      "type": "string",
+      "defaultValue": "Standard_B1ms",
+      "metadata": {
+        "description": "SKU name for the PostgreSQL Flexible Server."
+      }
+    },
+    "postgresSkuTier": {
+      "type": "string",
+      "defaultValue": "Burstable",
+      "allowedValues": [
+        "Burstable",
+        "GeneralPurpose",
+        "MemoryOptimized"
+      ],
+      "metadata": {
+        "description": "SKU tier for PostgreSQL."
+      }
+    },
+    "postgresVersion": {
+      "type": "string",
+      "defaultValue": "16",
+      "metadata": {
+        "description": "PostgreSQL major version."
+      }
+    },
+    "postgresStorageSizeGB": {
+      "type": "int",
+      "defaultValue": 32,
+      "minValue": 32,
+      "metadata": {
+        "description": "Storage size in GB."
+      }
+    },
+    "ingestionCatalogDatabaseName": {
+      "type": "string",
+      "defaultValue": "ingestion-catalog",
+      "metadata": {
+        "description": "Name of the ingestion catalog database."
+      }
+    },
+    "agentMemoryDatabaseName": {
+      "type": "string",
+      "defaultValue": "agent-memory",
+      "metadata": {
+        "description": "Name of the agent memory database."
+      }
+    },
+    "retrievalEvalDatabaseName": {
+      "type": "string",
+      "defaultValue": "retrieval-eval",
+      "metadata": {
+        "description": "Name of the isolated PostgreSQL hybrid retrieval evaluation database."
+      }
+    },
+    "privateEndpointsSubnetId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the private endpoints subnet in the existing VNet."
+      }
+    },
+    "virtualNetworkName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the existing VNet used for private DNS links."
+      }
+    },
+    "postgresAdminObjectId": {
+      "type": "string",
+      "metadata": {
+        "description": "Principal object ID for PostgreSQL Entra admin (AKS workload identity principalId)."
+      }
+    },
+    "postgresAdminPrincipalName": {
+      "type": "string",
+      "metadata": {
+        "description": "Principal display name for PostgreSQL Entra admin (AKS workload identity name)."
+      }
+    },
+    "postgresAdminPrincipalType": {
+      "type": "string",
+      "defaultValue": "ServicePrincipal",
+      "allowedValues": [
+        "User",
+        "Group",
+        "ServicePrincipal",
+        "Unknown"
+      ],
+      "metadata": {
+        "description": "Principal type for PostgreSQL Entra admin."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags applied to resources."
+      }
+    }
+  },
+  "variables": {
+    "tenantId": "[tenant().tenantId]",
+    "privateDnsZoneName": "privatelink.postgres.database.azure.com",
+    "privateEndpointName": "[format('{0}-pe', parameters('postgresServerName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2024-08-01",
+      "name": "[parameters('postgresServerName')]",
+      "location": "[parameters('postgresLocation')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "[parameters('postgresSkuName')]",
+        "tier": "[parameters('postgresSkuTier')]"
+      },
+      "properties": {
+        "version": "[parameters('postgresVersion')]",
+        "createMode": "Default",
+        "storage": {
+          "storageSizeGB": "[parameters('postgresStorageSizeGB')]",
+          "autoGrow": "Enabled"
+        },
+        "authConfig": {
+          "activeDirectoryAuth": "Enabled",
+          "passwordAuth": "Disabled",
+          "tenantId": "[variables('tenantId')]"
+        },
+        "network": {
+          "publicNetworkAccess": "Disabled"
+        },
+        "highAvailability": {
+          "mode": "Disabled"
+        },
+        "backup": {
+          "backupRetentionDays": 7,
+          "geoRedundantBackup": "Disabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('postgresServerName'), parameters('postgresAdminObjectId'))]",
+      "properties": {
+        "principalName": "[parameters('postgresAdminPrincipalName')]",
+        "principalType": "[parameters('postgresAdminPrincipalType')]",
+        "tenantId": "[variables('tenantId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/configurations",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('postgresServerName'), 'azure.extensions')]",
+      "properties": {
+        "value": "vector,pg_trgm,unaccent,pg_stat_statements,age"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/configurations",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('postgresServerName'), 'shared_preload_libraries')]",
+      "properties": {
+        "value": "pg_cron,pg_stat_statements,age"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/configurations', parameters('postgresServerName'), 'azure.extensions')]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('postgresServerName'), parameters('ingestionCatalogDatabaseName'))]",
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.utf8"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/administrators', parameters('postgresServerName'), parameters('postgresAdminObjectId'))]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('postgresServerName'), parameters('agentMemoryDatabaseName'))]",
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.utf8"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/administrators', parameters('postgresServerName'), parameters('postgresAdminObjectId'))]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('postgresServerName'), parameters('retrievalEvalDatabaseName'))]",
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.utf8"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/administrators', parameters('postgresServerName'), parameters('postgresAdminObjectId'))]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2024-06-01",
+      "name": "[variables('privateDnsZoneName')]",
+      "location": "global",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2024-06-01",
+      "name": "[format('{0}/{1}', variables('privateDnsZoneName'), format('{0}-dnslink', parameters('virtualNetworkName')))]",
+      "location": "global",
+      "properties": {
+        "virtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworkName'))]"
+        },
+        "registrationEnabled": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('privateDnsZoneName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('privateEndpointName')]",
+      "location": "[resourceGroup().location]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "subnet": {
+          "id": "[parameters('privateEndpointsSubnetId')]"
+        },
+        "privateLinkServiceConnections": [
+          {
+            "name": "[format('{0}-connection', variables('privateEndpointName'))]",
+            "properties": {
+              "privateLinkServiceId": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]",
+              "groupIds": [
+                "postgresqlServer"
+              ]
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('privateEndpointName'), format('{0}-group', variables('privateEndpointName')))]",
+      "properties": {
+        "privateDnsZoneConfigs": [
+          {
+            "name": "postgres",
+            "properties": {
+              "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('privateDnsZoneName'))]"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('privateDnsZoneName'))]",
+        "[resourceId('Microsoft.Network/privateEndpoints', variables('privateEndpointName'))]",
+        "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('privateDnsZoneName'), format('{0}-dnslink', parameters('virtualNetworkName')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "postgresServer": {
+      "type": "string",
+      "value": "[parameters('postgresServerName')]"
+    },
+    "postgresFqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName')), '2024-08-01').fullyQualifiedDomainName]"
+    },
+    "postgresLocationOutput": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('postgresServerName')), '2024-08-01', 'full').location]"
+    },
+    "ingestionCatalogDatabase": {
+      "type": "string",
+      "value": "[parameters('ingestionCatalogDatabaseName')]"
+    },
+    "agentMemoryDatabase": {
+      "type": "string",
+      "value": "[parameters('agentMemoryDatabaseName')]"
+    },
+    "privateEndpoint": {
+      "type": "string",
+      "value": "[variables('privateEndpointName')]"
+    }
+  }
+}

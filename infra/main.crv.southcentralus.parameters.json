@@ -1,0 +1,153 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "CRV"
+    },
+    "resourceGroupName": {
+      "value": "rg-CRV-southcentralus"
+    },
+    "location": {
+      "value": "southcentralus"
+    },
+    "principalId": {
+      "value": "cfe68e67-49a1-4197-aa31-eb6537e9d766"
+    },
+    "openAiHost": {
+      "value": "azure"
+    },
+    "openAiLocation": {
+      "value": "southcentralus"
+    },
+    "openAiSkuName": {
+      "value": "S0"
+    },
+    "cosmosDbSkuName": {
+      "value": "serverless"
+    },
+    "useIngestionPipeline": {
+      "value": true
+    },
+    "postgresLocation": {
+      "value": "northcentralus"
+    },
+    "postgresServerName": {
+      "value": "psql-nyuwyhzhjriuu-ncus-085512"
+    },
+    "defaultReasoningEffort": {
+      "value": "low"
+    },
+    "documentIntelligenceResourceGroupLocation": {
+      "value": "eastus"
+    },
+    "documentIntelligenceSkuName": {
+      "value": "S0"
+    },
+    "searchFieldNameEmbedding": {
+      "value": "embedding3"
+    },
+    "searchIndexName": {
+      "value": "gptkbindex"
+    },
+    "searchServiceLocation": {
+      "value": "southcentralus"
+    },
+    "searchQueryLanguage": {
+      "value": "en-us"
+    },
+    "searchQuerySpeller": {
+      "value": "lexicon"
+    },
+    "searchServiceQueryRewriting": {
+      "value": "false"
+    },
+    "searchServiceSemanticRankerLevel": {
+      "value": "free"
+    },
+    "searchServiceSkuName": {
+      "value": "standard"
+    },
+    "speechServiceSkuName": {
+      "value": "S0"
+    },
+    "storageSkuName": {
+      "value": "Standard_LRS"
+    },
+    "useAgenticKnowledgeBase": {
+      "value": false
+    },
+    "useApplicationInsights": {
+      "value": true
+    },
+    "useAuthentication": {
+      "value": false
+    },
+    "useChatHistoryCosmos": {
+      "value": false
+    },
+    "useCloudIngestion": {
+      "value": true
+    },
+    "useCloudIngestionAcls": {
+      "value": false
+    },
+    "useEval": {
+      "value": false
+    },
+    "useIntegratedVectorization": {
+      "value": false
+    },
+    "useMediaDescriberAzureCU": {
+      "value": true
+    },
+    "useMultimodal": {
+      "value": true
+    },
+    "visionResourceGroupLocation": {
+      "value": "southcentralus"
+    },
+    "useSpeechOutputAzure": {
+      "value": false
+    },
+    "useUserUpload": {
+      "value": false
+    },
+    "useVpnGateway": {
+      "value": true
+    },
+    "aksClusterName": {
+      "value": "aks-crv-southcentralus"
+    },
+    "aksContainerRegistryName": {
+      "value": "acrcrvscus"
+    },
+    "aksNodeVmSize": {
+      "value": "Standard_D4ds_v5"
+    },
+    "aksMinNodeCount": {
+      "value": 2
+    },
+    "aksMaxNodeCount": {
+      "value": 5
+    },
+    "aksEnableMonitoringAddon": {
+      "value": false
+    },
+    "aksWorkloadIdentityName": {
+      "value": "id-crv-aks-workload"
+    },
+    "applicationGatewayName": {
+      "value": "agw-crv-southcentralus"
+    },
+    "applicationGatewayPublicIpName": {
+      "value": "pip-crv-southcentralus"
+    },
+    "applicationGatewayMinCapacity": {
+      "value": 1
+    },
+    "applicationGatewayMaxCapacity": {
+      "value": 2
+    }
+  }
+}

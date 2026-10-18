@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: exploration-agent-corpus-set-compare-20260829
+  namespace: crv-exploration
+  labels:
+    app: exploration-agent-postgres
+    operation: corpus-set-compare
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-agent-postgres
+        operation: corpus-set-compare
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: exploration-agent
+      containers:
+        - name: compare
+          image: acrcrvscus.azurecr.io/exploration-agent@sha256:4982158c5158d5047875ce5347f1b60e7980332c6083f70d1cc8ce744a845869
+          command: ["python", "-c"]
+          args:
+            - >-
+              import json;
+              from azure.identity import DefaultAzureCredential;
+              from azure.search.documents import SearchClient;
+              import psycopg;
+              credential = DefaultAzureCredential();
+              search_client = SearchClient("https://gptkb-nyuwyhzhjriuu.search.windows.net", "expl-content-v2", credential);
+              azure_ids = {result["chunk_id"] for result in search_client.search(search_text="*", select=["chunk_id"], top=1000)};
+              azure_ids.update(result["chunk_id"] for result in search_client.search(search_text="*", select=["chunk_id"], top=1000, skip=1000));
+              connection = psycopg.connect(host="psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com", user="id-crv-expl-agent", dbname="retrieval-eval", password=credential.get_token("https://ossrdbms-aad.database.windows.net/.default").token, sslmode="require");
+              postgres_rows = connection.execute("SELECT chunk_id, document_id, document_type, extraction_route, page_number FROM retrieval.expl_chunk ORDER BY chunk_id").fetchall();
+              postgres_ids = {row[0] for row in postgres_rows};
+              print(json.dumps({"azure_count": len(azure_ids), "postgres_count": len(postgres_ids), "postgres_only": [{"chunk_id": row[0], "document_id": row[1], "document_type": row[2], "extraction_route": row[3], "page_number": row[4]} for row in postgres_rows if row[0] not in azure_ids], "azure_only": sorted(azure_ids - postgres_ids)}, ensure_ascii=True, indent=2));
+              connection.close();
+              search_client.close();
+              credential.close()
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "9ad73a30-9143-48ed-af87-51cc623d7780"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,97 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: index-migrate-load-20260828-v2
+  namespace: crv
+  labels:
+    app: index-migrate
+    operation: load
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: index-migrate
+        operation: load
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: snapshot-download
+          image: mcr.microsoft.com/azure-cli:2.77.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              az login --service-principal
+              --username "$AZURE_CLIENT_ID"
+              --tenant "$AZURE_TENANT_ID"
+              --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")"
+              --allow-no-subscriptions --output none &&
+              az storage blob download
+              --account-name stnyuwyhzhjriuu
+              --container-name explorastore-cache
+              --name migration/expl-content-v2-20260828.jsonl
+              --file /data/expl-content-v2-20260828.jsonl
+              --auth-mode login
+              --no-progress
+              --only-show-errors
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "390adbf3-2f0e-4f3d-b6ca-cdc0628cd055"
+            - name: AZURE_CONFIG_DIR
+              value: /tmp/.azure
+          volumeMounts:
+            - name: migration-data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: index-migrate
+          image: acrcrvscus.azurecr.io/crv-index-migrate@sha256:a5a0bfacb5b9e4df6fda0eae0aa6ae7bf190788b8471bc978a426b5a012c2189
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              index-migrate inspect /data/expl-content-v2-20260828.jsonl &&
+              index-migrate load /data/expl-content-v2-20260828.jsonl --replace &&
+              index-migrate reconcile
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "390adbf3-2f0e-4f3d-b6ca-cdc0628cd055"
+            - name: AZURE_POSTGRES_HOST
+              value: psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com
+            - name: AZURE_POSTGRES_USER
+              value: id-crv-aks-workload
+            - name: AZURE_POSTGRES_RETRIEVAL_DB
+              value: retrieval-eval
+          volumeMounts:
+            - name: migration-data
+              mountPath: /data
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: migration-data
+          emptyDir:
+            sizeLimit: 256Mi

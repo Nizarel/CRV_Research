@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crv-exploration
+  labels:
+    workstream: exploration
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv-exploration
+  namespace: crv-exploration
+  annotations:
+    # Distinct from the maintenance workload identity so exploration cannot inherit
+    # write access to the maint-* indexes.
+    azure.workload.identity/client-id: ${EXPLORATION_IDENTITY_CLIENT_ID}
+  labels:
+    azure.workload.identity/use: "true"

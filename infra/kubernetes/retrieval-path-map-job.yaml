@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: retrieval-path-map-20260919
+  namespace: crv
+  labels:
+    app: retrieval-path-map
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: retrieval-path-map
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: dump-paths
+          image: acrcrvscus.azurecr.io/crv-ingestion:retrieval-recall-20260723a
+          command: ["python", "/data/dump_paths.py"]
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "390adbf3-2f0e-4f3d-b6ca-cdc0628cd055"
+            - name: PG_HOST
+              value: psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com
+            - name: PG_USER
+              value: id-crv-aks-workload
+            - name: PG_DATABASE
+              value: ingestion-catalog
+          volumeMounts:
+            - name: input
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: input
+          configMap:
+            name: retrieval-path-map-input

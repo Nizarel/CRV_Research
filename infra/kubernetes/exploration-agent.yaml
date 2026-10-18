@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: exploration-agent
+  namespace: crv-exploration
+  annotations:
+    azure.workload.identity/client-id: ${EXPL_AGENT_IDENTITY_CLIENT_ID}
+  labels:
+    azure.workload.identity/use: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exploration-agent
+  namespace: crv-exploration
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: exploration-agent
+  template:
+    metadata:
+      labels:
+        app: exploration-agent
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: exploration-agent
+      containers:
+        - name: exploration-agent
+          image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/exploration-agent:${IMAGE_TAG}
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: exploration-agent-settings
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exploration-agent
+  namespace: crv-exploration
+spec:
+  type: ClusterIP
+  selector:
+    app: exploration-agent
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+# Separate Ingress in the exploration namespace: an Ingress can only reference Services in its
+# own namespace, and this must not share a resource with the maintenance routes.
+# backend-path-prefix rewrites /expl/... to /... so the app serves unprefixed routes. Keep
+# the trailing slash segment boundary so AGIC's /expl/* rule cannot capture /exploration/*.
+# The maintenance ingress keeps its catch-all "/" and AGIC prefers the longer match.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: exploration-agent
+  namespace: crv-exploration
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /expl/
+            pathType: Prefix
+            backend:
+              service:
+                name: exploration-agent
+                port:
+                  name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exploration-agent-settings
+  namespace: crv-exploration
+data:
+  AZURE_CLIENT_ID: ${EXPL_AGENT_IDENTITY_CLIENT_ID}
+  ROOT_PATH: "/expl"
+
+  APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+  APPLICATIONINSIGHTS_METRIC_NAMESPACE_OPT_IN: "true"
+  APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: "true"
+  OTEL_SERVICE_NAME: "exploration-agent"
+  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "SPAN_AND_EVENT"
+  OTEL_SEMCONV_STABILITY_OPT_IN: "gen_ai_latest_experimental"
+  AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING: "true"
+
+  # Exploration corpus only. exploration_agent.search_guard rejects any name not prefixed expl-.
+  AZURE_SEARCH_SERVICE: ${AZURE_SEARCH_SERVICE}
+  AZURE_SEARCH_INDEX: "expl-content-v2"
+  AZURE_SEARCH_SEMANTIC_CONFIG: "expl-content-semantic"
+  # Backend switch ("azure" or "postgres"): flip and restart, no rebuild. An unrecognised
+  # value fails startup rather than silently serving from Azure.
+  RETRIEVAL_PROVIDER: "azure"
+  AZURE_SEARCH_API_VERSION: "2024-07-01"
+  # Flip to "false" if the service tier has no semantic ranking; the fan-out then uses RRF only.
+  SEMANTIC_RANKER_ENABLED: "true"
+
+  AZURE_OPENAI_SERVICE: ${AZURE_OPENAI_SERVICE}
+  AZURE_OPENAI_ENDPOINT: "https://${AZURE_OPENAI_SERVICE}.cognitiveservices.azure.com"
+  AZURE_OPENAI_CHATGPT_DEPLOYMENT: "gpt-5.4-mini"
+  AZURE_OPENAI_API_VERSION: "2026-05-01-preview"
+
+  # Claim extraction blocks the first answer token, so it runs capped. Leave the deployment blank
+  # to share the answer model; set it to split the workload onto its own deployment.
+  EXPL_EXTRACTION_DEPLOYMENT: ""
+  EXPL_EXTRACTION_REASONING_EFFORT: "low"
+  EXPL_EXTRACTION_MAX_TOKENS: "8192"
+
+  AZURE_STORAGE_ACCOUNT: ${AZURE_STORAGE_ACCOUNT}
+  EXPLORATION_CONTAINER: "explorastore"
+  EXPLORATION_CACHE_CONTAINER: "explorastore-cache"
+
+  # Own database on the shared server — never the maintenance agent-memory db.
+  AZURE_POSTGRES_HOST: ${AZURE_POSTGRES_HOST}
+  AZURE_POSTGRES_AGENT_MEMORY_DB: "expl-agent-memory"
+  AZURE_POSTGRES_USER: ${EXPL_AGENT_IDENTITY_NAME}
+
+  # Default-deny. Setting this to "true" disables ACL filtering entirely — dev only.
+  EXPL_ACL_DEV_OVERRIDE: "false"

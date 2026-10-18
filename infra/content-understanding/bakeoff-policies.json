@@ -1,0 +1,81 @@
+{
+  "policies": {
+    "routing-v1": {
+      "release_id": "evidence-shadow-v1",
+      "policy": {"version": "routing-v1"}
+    },
+    "bakeoff-cu-first-v1": {
+      "release_id": "bakeoff-cu-first-v1",
+      "superseded_by": "bakeoff-cu-first-v1r",
+      "policy": {
+        "version": "bakeoff-cu-first-v1",
+        "cu_profiles": [
+          {"unit_kinds": ["drawing_sheet"], "analyzer_id": "tizert_pfd_sheet_v1"},
+          {"unit_kinds": ["pdf_pages", "office_document", "image"], "analyzer_id": "tizert_doc_fields_v1"}
+        ]
+      }
+    },
+    "bakeoff-cu-first-v1r": {
+      "release_id": "bakeoff-cu-first-v1r",
+      "policy": {
+        "version": "bakeoff-cu-first-v1r",
+        "cu_profiles": [
+          {"unit_kinds": ["drawing_sheet"], "analyzer_id": "tizert_pfd_sheet_v1"},
+          {"unit_kinds": ["pdf_pages", "office_document", "image"], "analyzer_id": "tizert_doc_fields_v1"}
+        ]
+      }
+    },
+    "bakeoff-selective-v1": {
+      "release_id": "bakeoff-selective-v1",
+      "superseded_by": "bakeoff-drawings-cu-v2",
+      "policy": {
+        "version": "bakeoff-selective-v1",
+        "escalation": [
+          {
+            "unit_kinds": ["drawing_sheet"],
+            "analyzer_id": "tizert_pfd_sheet_v1",
+            "min_words_per_page": 40,
+            "min_word_confidence": 0.8
+          },
+          {
+            "unit_kinds": ["pdf_pages", "image"],
+            "analyzer_id": "tizert_doc_fields_v1",
+            "min_words_per_page": 20,
+            "min_word_confidence": 0.85
+          }
+        ]
+      }
+    },
+    "bakeoff-docsearch-v1": {
+      "release_id": "bakeoff-docsearch-v1",
+      "superseded_by": "bakeoff-drawings-cu-v2",
+      "policy": {
+        "version": "bakeoff-docsearch-v1",
+        "cu_profiles": [
+          {
+            "unit_kinds": ["drawing_sheet", "pdf_pages", "office_document", "image"],
+            "analyzer_id": "prebuilt-documentSearch"
+          }
+        ]
+      }
+    },
+    "bakeoff-drawings-cu-v2": {
+      "release_id": "bakeoff-drawings-cu-v2",
+      "policy": {
+        "version": "bakeoff-drawings-cu-v2",
+        "cu_profiles": [
+          {"unit_kinds": ["drawing_sheet"], "analyzer_id": "tizert_pfd_sheet_v2"}
+        ]
+      }
+    },
+    "bakeoff-drawings-cu-v3": {
+      "release_id": "bakeoff-drawings-cu-v3",
+      "policy": {
+        "version": "bakeoff-drawings-cu-v3",
+        "cu_profiles": [
+          {"unit_kinds": ["drawing_sheet"], "analyzer_id": "tizert_pfd_sheet_v3"}
+        ]
+      }
+    }
+  }
+}

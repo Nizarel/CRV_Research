@@ -1,0 +1,89 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: extract-layout-preflight-
+  namespace: crv
+  labels:
+    app: extract-layout-pilot
+    pilot-stage: preflight
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: extract-layout-pilot
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: preflight
+          image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-ingestion:${IMAGE_TAG}
+          args:
+            - preflight-layout
+            - --account
+            - ${AZURE_STORAGE_ACCOUNT}
+            - --source-container
+            - ${AZURE_STORAGE_CONTAINER}
+            - --cache-container
+            - ${EXTRACTION_CACHE_CONTAINER}
+            - --prefix
+            - ${GRINDING_PREFIX}
+          env:
+            - name: AZURE_CLIENT_ID
+              value: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: extract-layout-run-
+  namespace: crv
+  labels:
+    app: extract-layout-pilot
+    pilot-stage: extraction
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: extract-layout-pilot
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: extraction
+          image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-ingestion:${IMAGE_TAG}
+          args:
+            - extract-layout
+            - --account
+            - ${AZURE_STORAGE_ACCOUNT}
+            - --source-container
+            - ${AZURE_STORAGE_CONTAINER}
+            - --cache-container
+            - ${EXTRACTION_CACHE_CONTAINER}
+            - --document-intelligence-endpoint
+            - ${DOCUMENT_INTELLIGENCE_ENDPOINT}
+            - --prefix
+            - ${GRINDING_PREFIX}
+          env:
+            - name: AZURE_CLIENT_ID
+              value: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi

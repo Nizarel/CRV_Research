@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: expl-baseline-retrieval-v2
+  namespace: crv-exploration
+  labels:
+    app: exploration-evaluate-retrieval
+    workstream: exploration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-evaluate-retrieval
+        workstream: exploration
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-exploration
+      containers:
+        - name: evaluate-retrieval
+          image: acrcrvscus.azurecr.io/crv-exploration:vector-fix-20260827
+          args:
+            - evaluate-retrieval
+            - --index
+            - expl-content-v2
+            - --search-endpoint
+            - https://gptkb-nyuwyhzhjriuu.search.windows.net
+            - --top
+            - "20"
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "23809998-7773-47cc-a12c-5059b0b03d8b"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,148 @@
+{
+  "apiVersion": "2025-11-01",
+  "modelDeployments": {
+    "gpt-5.4-mini": "crv-gpt-5.4-mini",
+    "text-embedding-3-large": "crv-embedding-3-large",
+    "prebuilt-analyzer-completion": "crv-gpt-5.4-mini",
+    "prebuilt-analyzer-completion-mini": "crv-gpt-5.4-mini",
+    "prebuilt-analyzer-embedding": "crv-embedding-3-large"
+  },
+  "modelVersions": {
+    "crv-gpt-5.4-mini": "2026-03-17",
+    "crv-embedding-3-large": "1"
+  },
+  "prebuiltAnalyzers": ["prebuilt-documentSearch"],
+  "analyzers": {
+    "tizert_doc_fields_v1": {
+      "baseAnalyzerId": "prebuilt-document",
+      "description": "Extract printed maintenance document headers and equipment identifiers. Leave absent or illegible values missing; do not infer currentness or approval.",
+      "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
+      "config": {
+        "returnDetails": true, "omitContent": false, "enableOcr": true,
+        "enableLayout": true, "tableFormat": "html", "enableFormula": false,
+        "enableFigureDescription": false,
+        "enableFigureAnalysis": false, "estimateFieldSourceAndConfidence": true
+      },
+      "fieldSchema": {
+        "name": "TizertMaintenanceDocument",
+        "fields": {
+          "DocumentCode": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Code du document imprime dans l'entete ou le cartouche; preserve exact characters. Also labeled Document No., Drawing No. or Reference."},
+          "Title": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Titre imprime du document, tel quel, sans resume ni traduction."},
+          "Revision": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Revision imprimee, sans deduire une revision du nom du fichier."},
+          "IssueStatus": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Statut d'emission imprime, sans deduire une approbation: ISSUED FOR DESIGN, ISSUED FOR COMMENTS, pour information ou pour approbation."},
+          "IssueDateRaw": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Date d'emission imprimee dans son format original, sans normalisation ni inference."},
+          "EquipmentTags": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Identifiants d'equipement effectivement imprimes, caracteres exacts. Do not correct area prefixes, invent tags, or resolve identities."}
+        }
+      }
+    },
+    "tizert_pfd_sheet_v1": {
+      "baseAnalyzerId": "prebuilt-document",
+      "description": "Extract evidence from one original PFD sheet or a mapped region. Keep table columns, case notes and printed identifiers distinct. Never calculate flows or approve a process connection.",
+      "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
+      "config": {
+        "returnDetails": true, "omitContent": false, "enableOcr": true,
+        "enableLayout": true, "tableFormat": "html", "enableFormula": false,
+        "enableFigureDescription": true,
+        "enableFigureAnalysis": true, "estimateFieldSourceAndConfidence": true
+      },
+      "fieldSchema": {
+        "name": "TizertPfdSheet",
+        "fields": {
+          "DrawingNumber": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Drawing number printed in this sheet's title block, exact characters. Do not use the PDF filename as drawing identity."},
+          "Title": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed sheet title, without translation or interpretation."},
+          "Revision": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Revision printed in this sheet's title block, including leading zeros."},
+          "IssueStatus": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed issue status on this sheet. ISSUED FOR DESIGN and ISSUED FOR COMMENTS are different observations; neither is operational approval."},
+          "IssueDateRaw": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed issue date in its original format."},
+          "EquipmentTags": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal printed equipment tags visible on this sheet. Preserve conflicting prefixes and do not identify an unlabelled symbol."},
+          "CaseNotes": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal printed process-case notes and column qualifiers, especially WITH BACKFILL, WITHOUT BACKFILL, fresh feed, recycle and design conditions."},
+          "StreamNumbers": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal stream labels on this sheet. Repeated labels remain sheet-local occurrences, never global stream identities."}
+        }
+      }
+    },
+    "tizert_pfd_sheet_v2": {
+      "baseAnalyzerId": "prebuilt-document",
+      "description": "Extract evidence from one original drawing sheet (PFD, P&ID, arrangement or detail) or a mapped region. Identity fields come only from this sheet's own title block. Keep table columns, case notes and printed identifiers distinct. Never calculate flows or approve a process connection.",
+      "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
+      "config": {
+        "returnDetails": true, "omitContent": false, "enableOcr": true,
+        "enableLayout": true, "tableFormat": "html", "enableFormula": false,
+        "enableFigureDescription": true,
+        "enableFigureAnalysis": true, "estimateFieldSourceAndConfidence": true
+      },
+      "fieldSchema": {
+        "name": "TizertDrawingSheet",
+        "fields": {
+          "DrawingNumber": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "This sheet's own drawing number, read from its title block (normally the bottom-right frame). Numbers in reference-drawing lists, notes or SEE cross-references belong to other drawings. When the title block prints the number in separate cells (project, area, discipline, document type, sequence), join those cells with hyphens in printed order, e.g. SP0904 | 6200 | M | GADR | 10001 gives SP0904-6200-M-GADR-10001; the sheet and revision cells are not part of it. Exact characters; never the PDF filename."},
+          "Title": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed title of this sheet from its own title block, without translation or interpretation. Titles in reference-drawing lists belong to other drawings."},
+          "Revision": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Revision printed in this sheet's title block, including leading zeros."},
+          "IssueStatus": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed issue status on this sheet. ISSUED FOR DESIGN and ISSUED FOR COMMENTS are different observations; neither is operational approval."},
+          "IssueDateRaw": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Date printed for the current revision: the revision-table row whose revision matches Revision, otherwise the title-block date. Original format, without normalization or inference."},
+          "EquipmentTags": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal printed equipment tags visible on this sheet. Preserve conflicting prefixes and do not identify an unlabelled symbol."},
+          "CaseNotes": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal printed process-case notes and column qualifiers, especially WITH BACKFILL, WITHOUT BACKFILL, fresh feed, recycle and design conditions."},
+          "StreamNumbers": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal stream labels on this sheet. Repeated labels remain sheet-local occurrences, never global stream identities."}
+        }
+      }
+    },
+    "tizert_pfd_sheet_v3": {
+      "baseAnalyzerId": "prebuilt-document",
+      "description": "Extract evidence from one original drawing sheet (PFD, P&ID, arrangement or detail) or a mapped region. Identity fields come only from this sheet's own title block. Keep table columns, case notes and printed identifiers distinct. Never calculate flows or approve a process connection.",
+      "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
+      "config": {
+        "returnDetails": true, "omitContent": false, "enableOcr": true,
+        "enableLayout": true, "tableFormat": "html", "enableFormula": false,
+        "enableFigureDescription": true,
+        "enableFigureAnalysis": true, "estimateFieldSourceAndConfidence": true
+      },
+      "fieldSchema": {
+        "name": "TizertDrawingSheet",
+        "fields": {
+          "DrawingNumber": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "This sheet's own drawing number, read from its title block (normally the bottom-right frame). Numbers in reference-drawing lists, notes or SEE cross-references belong to other drawings. When the title block prints the number in separate cells (project, area, discipline, document type, sequence), join those cells with hyphens in printed order, e.g. SP0904 | 6200 | M | GADR | 10001 gives SP0904-6200-M-GADR-10001; the sheet and revision cells are not part of it. Exact characters; never the PDF filename."},
+          "Title": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed title of this sheet from its own title block, without translation or interpretation. Titles in reference-drawing lists belong to other drawings."},
+          "Revision": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Revision printed in this sheet's title block, including leading zeros."},
+          "IssueStatus": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed issue status on this sheet. ISSUED FOR DESIGN and ISSUED FOR COMMENTS are different observations; neither is operational approval."},
+          "IssueDateRaw": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Printed issue date in its original format."},
+          "EquipmentTags": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal printed equipment tags visible on this sheet. Preserve conflicting prefixes and do not identify an unlabelled symbol."},
+          "CaseNotes": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal printed process-case notes and column qualifiers, especially WITH BACKFILL, WITHOUT BACKFILL, fresh feed, recycle and design conditions."},
+          "StreamNumbers": {"type": "array", "items": {"type": "string"}, "method": "extract", "estimateSourceAndConfidence": true, "description": "Literal stream labels on this sheet. Repeated labels remain sheet-local occurrences, never global stream identities."}
+        }
+      }
+    },
+    "tizert_drawing_search_v1": {
+      "baseAnalyzerId": "prebuilt-document",
+      "description": "Create source-linked searchable descriptions of engineering drawings. Descriptions are generated candidates, never evidence of exact values, causality, safe isolation or approved connectivity.",
+      "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
+      "config": {
+        "returnDetails": true, "omitContent": false, "enableOcr": true,
+        "enableLayout": true, "tableFormat": "html", "enableFormula": false,
+        "enableFigureDescription": true,
+        "enableFigureAnalysis": false, "estimateFieldSourceAndConfidence": true
+      },
+      "fieldSchema": {
+        "name": "TizertDrawingSearch",
+        "fields": {
+          "DrawingNumber": {"type": "string", "method": "extract", "estimateSourceAndConfidence": true, "description": "Exact drawing identifier printed in the title block; do not infer from filename."},
+          "DrawingDescription": {"type": "string", "method": "generate", "description": "Describe the visible subject for retrieval. State ambiguous or illegible features as uncertain. Do not infer exact numerical values, control causality or approved process connections."}
+        }
+      }
+    },
+    "tizert_classify_v1": {
+      "baseAnalyzerId": "prebuilt-document",
+      "description": "Classify ambiguous maintenance documents without chaining analyses. Keep unsupported or mixed material in other for explicit planning.",
+      "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
+      "config": {
+        "returnDetails": true, "omitContent": false, "enableOcr": true,
+        "enableLayout": true, "tableFormat": "html", "enableFormula": false,
+        "enableSegment": false,
+        "enableFigureDescription": false, "enableFigureAnalysis": false,
+        "contentCategories": {
+          "pfd": {"description": "Process flow diagram with equipment, directional streams and process balances; not a detailed instrumentation drawing."},
+          "drawing": {"description": "Engineering drawing, P&ID, wiring diagram or mechanical view, excluding process flow diagrams."},
+          "manual": {"description": "Maintenance or operating manual, instruction or multi-step procedure."},
+          "datasheet": {"description": "Technical specification, equipment datasheet or bill of materials."},
+          "register": {"description": "Structured equipment, tag or zone register. Route to a native parser, not another paid analyzer."},
+          "other": {"description": "Mixed, ambiguous, unrelated or unsupported content which does not clearly fit another category."}
+        }
+      }
+    }
+  }
+}

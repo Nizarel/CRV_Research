@@ -1,0 +1,88 @@
+{
+  "name": "maint-evidence-v2",
+  "kind": "searchIndex",
+  "description": "Cited evidence chunks from the Tizert maintenance corpus: equipment dossiers, vendor manuals, datasheets, process flow diagrams, engineering and shop drawings, in French and English. Search here for equipment, maintenance, drawing, part and process questions.",
+  "searchIndexParameters": {
+    "searchIndexName": "maint-evidence-v2-20261009",
+    "semanticConfigurationName": "maintenance-evidence-semantic",
+    "baseFilter": "release_id eq '${RELEASE_ID}' and access_scope_id ne 'unassigned'",
+    "searchFields": [
+      {"name": "content"},
+      {"name": "content_fr"},
+      {"name": "content_en"},
+      {"name": "title"},
+      {"name": "identifiers"},
+      {"name": "document_code"},
+      {"name": "source_paths"},
+      {"name": "equipment_folder"}
+    ],
+    "sourceDataFields": [
+      {"name": "title"},
+      {"name": "content"},
+      {"name": "document_code"},
+      {"name": "document_class"},
+      {"name": "revision"},
+      {"name": "issue_status"},
+      {"name": "equipment_folder"},
+      {"name": "zone_name"},
+      {"name": "original_page_numbers"},
+      {"name": "drawing_sheet_id"},
+      {"name": "process_case_id"},
+      {"name": "source_locators"},
+      {"name": "source_uri"},
+      {"name": "evidence_kind"},
+      {"name": "is_generated"},
+      {"name": "release_id"},
+      {"name": "chunk_id"},
+      {"name": "placement_id"},
+      {"name": "content_hash"}
+    ],
+    "queryHints": {
+      "filters": [
+        {
+          "field": "document_class",
+          "fieldValues": [
+            "plan",
+            "manufacturer_manual",
+            "technical_datasheet",
+            "bom",
+            "operating_procedure",
+            "preventive_maintenance",
+            "electrical_instrumentation_schematic",
+            "lubrication",
+            "certificate",
+            "catalogue",
+            "calculation_note",
+            "model"
+          ],
+          "filterInstructions": "Filter only when the user explicitly asks for one document type: drawing or plan, manufacturer manual (manuel constructeur), technical datasheet (fiche technique), bill of materials (BOM, nomenclature), operating procedure (mode opératoire), preventive maintenance routine (gamme préventive), electrical or instrumentation schematic or P&ID (schéma électrique, instrumentation), lubrication plan (PMP, lubrification), certificate, catalogue, calculation note (note de calcul) or 3D model. Never filter on a topic, an equipment name or a question type alone."
+        },
+        {
+          "field": "zone_name",
+          "fieldValues": [
+            "Zone Stockage & concassage",
+            "Zone Broyage",
+            "Zone Flottation",
+            "Epaississeur concentré & Flocculant",
+            "Zone filtration",
+            "Epaississeur du rejet & Flocculant",
+            "Digue",
+            "Réactifs",
+            "Utilités - Eau & Air",
+            "Installation électrique & Instrumentation",
+            "OFF SITE",
+            "Pont bascule",
+            "Workshop",
+            "Conduites",
+            "Laboratoire",
+            "Station de remblayage",
+            "Sample Cabinet 6220-BN-2277 & 6320-BN-3201 & 6610-BN-5401",
+            "Pompe des eaux usées 7700-PP-001",
+            "palans"
+          ],
+          "filterInstructions": "Filter only when the user explicitly names one of these corpus zone folders. Never infer a zone from an equipment tag, an equipment name or a process step: electrical and instrumentation documents of every area are filed under 'Installation électrique & Instrumentation'."
+        }
+      ]
+    }
+  }
+}

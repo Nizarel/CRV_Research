@@ -1,0 +1,12 @@
+{
+  "description": "Promotion gates for the maintenance agent, checked by evaluate_golden_api.py --gates on the approved deep-eval pack. Baseline agent-v2-20261013d: covered answer pass 0.72-0.80 (run-to-run +-2 cases, so re-run once before blocking), source match 0.88, 0 invalid citations, TTFT p95 16-22 s. A metric that was not measured fails its gate.",
+  "golden_file": "question_drafts.jsonl",
+  "gates": [
+    { "metric": "contract_pass_rate", "min": 0.95 },
+    { "metric": "eligible", "min": 10 },
+    { "metric": "answer_pass_rate", "min": 0.70 },
+    { "metric": "source_match_rate", "min": 0.80 },
+    { "metric": "invalid_citation_answers", "max": 0 },
+    { "metric": "first_token_seconds_p95", "max": 25 }
+  ]
+}

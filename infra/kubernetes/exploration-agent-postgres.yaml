@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exploration-agent-postgres
+  namespace: crv-exploration
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exploration-agent-postgres
+  template:
+    metadata:
+      labels:
+        app: exploration-agent-postgres
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: exploration-agent
+      containers:
+        - name: exploration-agent-postgres
+          image: acrcrvscus.azurecr.io/exploration-agent:backend-comparison-token-20260829-2245
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: exploration-agent-postgres-settings
+          env:
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              valueFrom:
+                configMapKeyRef:
+                  name: exploration-agent-settings
+                  key: APPLICATIONINSIGHTS_CONNECTION_STRING
+            - name: APPLICATIONINSIGHTS_METRIC_NAMESPACE_OPT_IN
+              value: "true"
+            - name: APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL
+              value: "true"
+            - name: OTEL_SERVICE_NAME
+              value: exploration-agent-postgres
+            - name: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+              value: SPAN_AND_EVENT
+            - name: OTEL_SEMCONV_STABILITY_OPT_IN
+              value: gen_ai_latest_experimental
+            - name: AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING
+              value: "true"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exploration-agent-postgres
+  namespace: crv-exploration
+spec:
+  type: ClusterIP
+  selector:
+    app: exploration-agent-postgres
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: exploration-agent-postgres
+  namespace: crv-exploration
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/"
+    appgw.ingress.kubernetes.io/health-probe-path: "/healthz"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /expl-pg/
+            pathType: Prefix
+            backend:
+              service:
+                name: exploration-agent-postgres
+                port:
+                  name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exploration-agent-postgres-settings
+  namespace: crv-exploration
+data:
+  AZURE_CLIENT_ID: "9ad73a30-9143-48ed-af87-51cc623d7780"
+  ROOT_PATH: "/expl-pg"
+
+  RETRIEVAL_PROVIDER: "postgres"
+  SEMANTIC_RANKER_ENABLED: "false"
+  AZURE_SEARCH_INDEX: "expl-content-v2"
+
+  AZURE_OPENAI_SERVICE: "cog-nyuwyhzhjriuu"
+  AZURE_OPENAI_ENDPOINT: "https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com"
+  AZURE_OPENAI_CHATGPT_DEPLOYMENT: "gpt-5.4-mini"
+  AZURE_OPENAI_API_VERSION: "2026-05-01-preview"
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT: "text-embedding-3-large"
+  AZURE_OPENAI_EMBEDDING_API_VERSION: "2024-10-21"
+
+  AZURE_STORAGE_ACCOUNT: "stnyuwyhzhjriuu"
+  EXPLORATION_CONTAINER: "explorastore"
+  EXPLORATION_CACHE_CONTAINER: "explorastore-cache"
+
+  AZURE_POSTGRES_HOST: "psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com"
+  AZURE_POSTGRES_RETRIEVAL_DB: "retrieval-eval"
+  AZURE_POSTGRES_USER: "id-crv-expl-agent"
+
+  EXPL_ACL_DEV_OVERRIDE: "false"

@@ -1,0 +1,89 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: exploration-evaluate-answers-postgres
+  namespace: crv-exploration
+  labels:
+    app: exploration-evaluate-answers
+    workstream: exploration
+    retrieval-provider: postgres
+spec:
+  schedule: "0 5 * * 1-5"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: exploration-evaluate-answers
+            retrieval-provider: postgres
+            azure.workload.identity/use: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: crv-exploration
+          containers:
+            - name: evaluate-answers
+              image: acrcrvscus.azurecr.io/crv-exploration:backend-comparison-20260829-2130
+              args:
+                - evaluate-answers
+                - --agent-url
+                - http://exploration-agent-postgres
+                - --retrieval-provider
+                - postgres
+                - --foundry-url
+                - https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com
+                - --deployment
+                - gpt-5.4-mini
+                - --timeout-seconds
+                - "600"
+                - --out
+                - /work/golden-answer-eval.json
+              env:
+                - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+                  valueFrom:
+                    configMapKeyRef:
+                      name: exploration-agent-settings
+                      key: APPLICATIONINSIGHTS_CONNECTION_STRING
+                - name: APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL
+                  value: "true"
+                - name: OTEL_SERVICE_NAME
+                  value: exploration-evaluation
+                - name: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+                  value: SPAN_AND_EVENT
+                - name: OTEL_SEMCONV_STABILITY_OPT_IN
+                  value: gen_ai_latest_experimental
+                - name: AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING
+                  value: "true"
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                runAsUser: 1000
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 100Mi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 100Mi

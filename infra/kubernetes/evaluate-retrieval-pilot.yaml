@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: evaluate-retrieval-pilot-
+  namespace: crv
+  labels:
+    app: evaluate-retrieval-pilot
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: evaluate-retrieval-pilot
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: evaluate
+          image: acrcrvscus.azurecr.io/crv-ingestion:retrieval-eval-20260722b
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              python -m ingestion.cli evaluate-retrieval
+              --questions /data/golden.csv
+              --output /tmp/evidence.json
+              --search-endpoint https://gptkb-nyuwyhzhjriuu.search.windows.net
+              --embeddings-endpoint https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com/
+              --embeddings-deployment text-embedding-3-large
+              --modes bm25 hybrid hybrid-semantic
+              --limit 3
+              && cat /tmp/evidence.json
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "390adbf3-2f0e-4f3d-b6ca-cdc0628cd055"
+          volumeMounts:
+            - name: golden-questions
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: golden-questions
+          configMap:
+            name: hybrid-eval-golden

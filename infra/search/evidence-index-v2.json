@@ -1,0 +1,123 @@
+{
+  "name": "maint-evidence-v2-20261009",
+  "description": "Cited evidence from the Tizert copper mine maintenance corpus (Managem / SENET project SP0904): one row per chunk of one distinct source file. Files are filed by plant zone and equipment dossier (for example 'Concentrate Stockpile Feed Conveyor N°2 6520-CV-5237') and include vendor manuals, datasheets, process flow diagrams, engineering and shop drawings (PDF and DWG), IFC model summaries and spreadsheets, in French and English. title names the document, its equipment folder and the cited page or sheet; identifiers holds equipment tags (pattern 6520-CV-5237), SENET document codes (pattern SP0904-...), drawing part marks and process stream labels printed in the chunk or named in its folder paths; source_path is the canonical corpus location and source_paths lists every folder holding a copy of the same file. document_class is the document type named by its category folder (plan, manufacturer_manual, technical_datasheet, bom, operating_procedure, preventive_maintenance, electrical_instrumentation_schematic, lubrication, certificate, catalogue, calculation_note, model, otherwise unclassified). Every row belongs to one ingestion release (release_id). Use it for equipment, maintenance, drawing, part and process questions; quote numbers, tags and revisions only from returned content and cite title with original_page_numbers or drawing_sheet_id.",
+  "fields": [
+    {"name": "projection_id", "type": "Edm.String", "key": true, "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "release_id", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "chunk_id", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "placement_id", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "placement_ids", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "source_snapshot_id", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "source_object_id", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "content_hash", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "evidence_ids", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "retrievable": true},
+
+    {"name": "title", "type": "Edm.String", "searchable": true, "analyzer": "standard.lucene", "filterable": false, "retrievable": true},
+    {"name": "content", "type": "Edm.String", "searchable": true, "analyzer": "standard.lucene", "filterable": false, "retrievable": true},
+    {"name": "content_fr", "type": "Edm.String", "searchable": true, "analyzer": "fr.microsoft", "filterable": false, "retrievable": false},
+    {"name": "content_en", "type": "Edm.String", "searchable": true, "analyzer": "en.microsoft", "filterable": false, "retrievable": false},
+    {"name": "source_path", "type": "Edm.String", "searchable": true, "analyzer": "standard.lucene", "filterable": false, "retrievable": true},
+    {"name": "source_paths", "type": "Collection(Edm.String)", "searchable": true, "analyzer": "standard.lucene", "filterable": false, "retrievable": true},
+    {"name": "equipment_folder", "type": "Edm.String", "searchable": true, "analyzer": "standard.lucene", "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "equipment_folders", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+
+    {"name": "identifiers", "type": "Collection(Edm.String)", "searchable": true, "indexAnalyzer": "identifier_index", "searchAnalyzer": "identifier_query", "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "document_code", "type": "Edm.String", "searchable": true, "indexAnalyzer": "identifier_index", "searchAnalyzer": "identifier_query", "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "document_code_basis", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "mentioned_tags", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "path_tags", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "equipment_tags", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+
+    {"name": "zone_name", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "zone_names", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "document_class", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "document_classes", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "family", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "file_extension", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "unit_kind", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "chunk_kind", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "extraction_route", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "language", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "revision", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "issue_status", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "normalizer": "standard", "retrievable": true},
+    {"name": "drawing_sheet_id", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "process_case_id", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "original_page_numbers", "type": "Collection(Edm.Int32)", "filterable": true, "retrievable": true},
+    {"name": "evidence_kind", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "is_generated", "type": "Edm.Boolean", "filterable": true, "facetable": true, "retrievable": true},
+
+    {"name": "source_locators", "type": "Collection(Edm.String)", "searchable": false, "filterable": false, "retrievable": true},
+    {"name": "source_uri", "type": "Edm.String", "searchable": false, "filterable": false, "retrievable": true},
+    {"name": "page_image_uri", "type": "Edm.String", "searchable": false, "filterable": false, "retrievable": true},
+
+    {"name": "access_scope_id", "type": "Edm.String", "searchable": false, "filterable": true, "facetable": true, "retrievable": true},
+    {"name": "acl_groups", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "acl_users", "type": "Collection(Edm.String)", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "policy_version", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+    {"name": "payload_sha256", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true},
+
+    {"name": "content_vector", "type": "Collection(Edm.Single)", "searchable": true, "retrievable": false, "stored": false, "dimensions": 3072, "vectorSearchProfile": "evidence-vector"}
+  ],
+  "tokenizers": [
+    {
+      "@odata.type": "#Microsoft.Azure.Search.PatternTokenizer",
+      "name": "identifier_query_tokenizer",
+      "pattern": "[\\s,;:!?()\\[\\]{}<>\"'«»]+|\\.(?=\\s|$)"
+    }
+  ],
+  "analyzers": [
+    {
+      "@odata.type": "#Microsoft.Azure.Search.CustomAnalyzer",
+      "name": "identifier_index",
+      "tokenizer": "keyword_v2",
+      "tokenFilters": ["lowercase", "asciifolding"]
+    },
+    {
+      "@odata.type": "#Microsoft.Azure.Search.CustomAnalyzer",
+      "name": "identifier_query",
+      "tokenizer": "identifier_query_tokenizer",
+      "tokenFilters": ["lowercase", "asciifolding"]
+    }
+  ],
+  "similarity": {"@odata.type": "#Microsoft.Azure.Search.BM25Similarity"},
+  "vectorSearch": {
+    "algorithms": [
+      {"name": "evidence-hnsw", "kind": "hnsw", "hnswParameters": {"metric": "cosine", "m": 4, "efConstruction": 400, "efSearch": 500}}
+    ],
+    "compressions": [
+      {
+        "name": "evidence-int8",
+        "kind": "scalarQuantization",
+        "scalarQuantizationParameters": {"quantizedDataType": "int8"},
+        "rescoringOptions": {"enableRescoring": true, "defaultOversampling": 4, "rescoreStorageMethod": "preserveOriginals"}
+      }
+    ],
+    "vectorizers": [
+      {
+        "name": "evidence-embedding",
+        "kind": "azureOpenAI",
+        "azureOpenAIParameters": {
+          "resourceUri": "${EMBEDDING_RESOURCE_URI}",
+          "deploymentId": "${QUERY_EMBEDDING_DEPLOYMENT}",
+          "modelName": "text-embedding-3-large"
+        }
+      }
+    ],
+    "profiles": [
+      {"name": "evidence-vector", "algorithm": "evidence-hnsw", "compression": "evidence-int8", "vectorizer": "evidence-embedding"}
+    ]
+  },
+  "semantic": {
+    "defaultConfiguration": "maintenance-evidence-semantic",
+    "configurations": [
+      {
+        "name": "maintenance-evidence-semantic",
+        "prioritizedFields": {
+          "titleField": {"fieldName": "title"},
+          "prioritizedContentFields": [{"fieldName": "content"}],
+          "prioritizedKeywordsFields": [{"fieldName": "identifiers"}, {"fieldName": "equipment_folder"}]
+        }
+      }
+    ]
+  }
+}

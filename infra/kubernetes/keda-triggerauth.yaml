@@ -1,0 +1,85 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: azure-servicebus-auth
+  namespace: crv
+spec:
+  podIdentity:
+    provider: azure-workload
+    identityId: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: ingestion-consumer
+  namespace: crv
+spec:
+  jobTargetRef:
+    template:
+      metadata:
+        labels:
+          azure.workload.identity/use: "true"
+      spec:
+        restartPolicy: Never
+        serviceAccountName: crv
+        containers:
+          - name: consumer
+            image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-ingestion:${IMAGE_TAG}
+            imagePullPolicy: IfNotPresent
+            args:
+              - run-worker
+              - --account
+              - ${AZURE_STORAGE_ACCOUNT}
+              - --source-container
+              - ${AZURE_STORAGE_CONTAINER}
+              - --cache-container
+              - ${EXTRACTION_CACHE_CONTAINER}
+              - --document-intelligence-endpoint
+              - ${DOCUMENT_INTELLIGENCE_ENDPOINT}
+              - --service-bus-namespace
+              - ${SERVICE_BUS_NAMESPACE}
+              - --queue-name
+              - ${SERVICE_BUS_QUEUE_NAME}
+              - --pg-host
+              - ${PG_HOST}
+              - --pg-user
+              - ${PG_USER}
+              - --pg-database
+              - ${PG_DATABASE}
+              - --embeddings-endpoint
+              - ${EMBEDDINGS_ENDPOINT}
+              - --embeddings-deployment
+              - ${EMBEDDINGS_DEPLOYMENT}
+              - --search-endpoint
+              - ${SEARCH_ENDPOINT}
+              - --max-messages
+              - "1"
+              - --max-attempts
+              - "5"
+              - --max-wait-time
+              - "30"
+            env:
+              - name: AZURE_CLIENT_ID
+                value: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: "2"
+                memory: 2Gi
+    backoffLimit: 3
+    activeDeadlineSeconds: 900
+    ttlSecondsAfterFinished: 3600
+  pollingInterval: 15
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  maxReplicaCount: 10
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        queueName: ${SERVICE_BUS_QUEUE_NAME}
+        namespace: ${SERVICE_BUS_NAMESPACE_NAME}
+        messageCount: "1"
+      authenticationRef:
+        name: azure-servicebus-auth

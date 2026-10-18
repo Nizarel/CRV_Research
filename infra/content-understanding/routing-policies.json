@@ -1,0 +1,17 @@
+{
+  "policies": {
+    "routing-v1": {
+      "release_id": "evidence-shadow-v1",
+      "policy": {"version": "routing-v1"}
+    },
+    "routing-v2": {
+      "release_id": "corpus-v2-20261009",
+      "policy": {
+        "version": "routing-v2",
+        "cu_profiles": [
+          {"unit_kinds": ["drawing_sheet"], "analyzer_id": "tizert_pfd_sheet_v2"}
+        ]
+      }
+    }
+  }
+}

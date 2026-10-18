@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: exploration-agent-postgres-provider-probe-20260829
+  namespace: crv-exploration
+  labels:
+    app: exploration-agent-postgres
+    operation: provider-probe
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-agent-postgres
+        operation: provider-probe
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: exploration-agent
+      containers:
+        - name: provider-probe
+          image: acrcrvscus.azurecr.io/exploration-agent@sha256:4982158c5158d5047875ce5347f1b60e7980332c6083f70d1cc8ce744a845869
+          command: ["python", "-c"]
+          args:
+            - >-
+              import asyncio;
+              from azure.identity.aio import DefaultAzureCredential;
+              from exploration_agent.retrieval.filters import Eq;
+              from exploration_agent.retrieval.postgres_provider import create_postgres_provider;
+              from exploration_agent.retrieval.provider import RetrievalQuery;
+              from exploration_agent.settings import Settings;
+              credential = DefaultAzureCredential();
+              provider = create_postgres_provider(Settings(), credential);
+              runner = asyncio.Runner();
+              scan = runner.run(provider.search(RetrievalQuery(text=None, filter=Eq("acl_classification", "general"), select=("chunk_id",), top=3)));
+              print({"scan_chunk_ids": [hit.fields["chunk_id"] for hit in scan]});
+              hybrid = runner.run(provider.search(RetrievalQuery(text="Quels indices geologiques sont documentes?", vector_text="Quels indices geologiques sont documentes?", filter=Eq("acl_classification", "general"), select=("chunk_id", "document_id", "page_number"), top=3, k=12)));
+              print({"hybrid_hits": [{"chunk_id": hit.fields["chunk_id"], "document_id": hit.fields.get("document_id"), "page_number": hit.fields.get("page_number"), "score": hit.score} for hit in hybrid]});
+              runner.run(provider.close());
+              runner.run(credential.close());
+              runner.close()
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "9ad73a30-9143-48ed-af87-51cc623d7780"
+            - name: AZURE_POSTGRES_HOST
+              value: psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com
+            - name: AZURE_POSTGRES_USER
+              value: id-crv-expl-agent
+            - name: AZURE_POSTGRES_RETRIEVAL_DB
+              value: retrieval-eval
+            - name: AZURE_OPENAI_ENDPOINT
+              value: https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com
+            - name: AZURE_OPENAI_API_VERSION
+              value: 2026-05-01-preview
+            - name: AZURE_OPENAI_EMBEDDING_API_VERSION
+              value: 2024-10-21
+            - name: AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+              value: text-embedding-3-large
+            - name: AZURE_SEARCH_INDEX
+              value: expl-content-v2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]

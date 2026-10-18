@@ -1,0 +1,434 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crv
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ingress-azure
+  namespace: kube-system
+  annotations:
+    azure.workload.identity/client-id: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+  labels:
+    azure.workload.identity/use: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv
+  namespace: crv
+  annotations:
+    azure.workload.identity/client-id: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+  labels:
+    azure.workload.identity/use: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: crv
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: crv
+      containers:
+        - name: backend
+          image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-backend:${IMAGE_TAG}
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: crv-agent-settings
+          env:
+            # Cloud role name in Application Insights (shared with the Exploration workloads).
+            - name: OTEL_SERVICE_NAME
+              value: maintenance-agent
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              cpu: "1"
+              # PDFium renders cited drawing pages in-process; large sheets need headroom.
+              memory: 3Gi
+          volumeMounts:
+            - name: media-cache
+              mountPath: /var/cache/crv-media
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+      volumes:
+        # Source-document cache for page rendering; MEDIA_CACHE_BYTES keeps it under the limit.
+        - name: media-cache
+          emptyDir:
+            sizeLimit: 3Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: crv
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+# Pilot retention: conversations idle for 30 days and photos uploaded 30 days ago are deleted.
+# Runs on weekdays at midday because the cluster is stopped outside site hours.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crv-retention
+  namespace: crv
+spec:
+  schedule: "30 12 * * 1-5"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app: crv-retention
+            azure.workload.identity/use: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: crv
+          containers:
+            - name: purge
+              image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-backend:${IMAGE_TAG}
+              command: ["python", "-m", "backend.ops", "purge", "--days", "30"]
+              envFrom:
+                - configMapRef:
+                    name: crv-agent-settings
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+---
+# Online evaluation: judges whether a sample of the last day's answers (10 %, at most 50) is
+# grounded in the sources they cite, and publishes the scores as gen_ai.evaluation.result events
+# (role maintenance-evaluation). Evaluation threads (golden-eval-*) are excluded.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: maintenance-eval-online
+  namespace: crv
+spec:
+  schedule: "0 15 * * 1-5"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app: maintenance-eval-online
+            azure.workload.identity/use: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: crv
+          containers:
+            - name: evaluate
+              image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-backend:${IMAGE_TAG}
+              command:
+                ["python", "-m", "backend.ops", "evaluate-online", "--hours", "24",
+                 "--rate", "0.1", "--limit", "50"]
+              envFrom:
+                - configMapRef:
+                    name: crv-agent-settings
+              env:
+                - name: OTEL_SERVICE_NAME
+                  value: maintenance-evaluation
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 384Mi
+                limits:
+                  cpu: 500m
+                  memory: 768Mi
+---
+# Web application (React/Vite, served by nginx-unprivileged on port 8080).
+# Does NOT use workload identity - static file server has no Azure API access.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: crv
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/crv-web:${IMAGE_TAG}
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # nginx needs /tmp and /var/cache/nginx
+            runAsNonRoot: true
+            runAsUser: 101  # nginx-unprivileged default uid
+          volumeMounts:
+            # subPath mounts do not refresh: restart the deployment after changing the ConfigMap.
+            - name: runtime-config
+              mountPath: /usr/share/nginx/html/config.js
+              subPath: config.js
+              readOnly: true
+      volumes:
+        - name: runtime-config
+          configMap:
+            name: web-runtime-config
+---
+# Browser runtime configuration (src/web/src/telemetry.ts). Events carry no question/answer text.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-runtime-config
+  namespace: crv
+data:
+  config.js: |
+    window.__TIZAGENT_CONFIG__ = {
+      applicationInsightsConnectionString: "${APPLICATIONINSIGHTS_CONNECTION_STRING}",
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: crv
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend
+  namespace: crv
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          # API routes — explicit prefixes routed to the backend service.
+          # Listed before the catch-all so they are unambiguous regardless of
+          # Application Gateway's longest-prefix-match evaluation order.
+          - path: /chat
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /conversations
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /images
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /documents
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /media
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /feedback
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  name: http
+          # Catch-all: everything else (including /) goes to the React web app.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+# Browser telemetry relay (nginx -> Application Insights). Its opaque JSON envelopes run under the
+# Detection-mode telemetry WAF policy; AGIC applies a path policy to every path of an Ingress, so
+# the relay has its own exact route.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-telemetry
+  namespace: crv
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/waf-policy-for-path: "/subscriptions/da9dea7f-1fc8-44de-93da-ce5c58314cdb/resourceGroups/rg-CRV-southcentralus/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/agw-crv-southcentralus-telemetry-waf"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /telemetry/v2/track
+            pathType: Exact
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crv-agent-settings
+  namespace: crv
+data:
+  # Agent-only runtime settings. Ingestion owns crv-settings separately.
+  AZURE_CLIENT_ID: ${AKS_WORKLOAD_IDENTITY_CLIENT_ID}
+  AZURE_STORAGE_ACCOUNT: ${AZURE_STORAGE_ACCOUNT}
+  AZURE_SEARCH_SERVICE: ${AZURE_SEARCH_SERVICE}
+  AZURE_SEARCH_INDEX: "maint-content"
+  AZURE_SEARCH_ASSETS_INDEX: "maint-assets"
+  AZURE_SEARCH_KNOWLEDGE_BASE: "maint-kb"
+  AZURE_SEARCH_API_VERSION: "2026-05-01-preview"
+  AZURE_OPENAI_SERVICE: ${AZURE_OPENAI_SERVICE}
+  AZURE_OPENAI_ENDPOINT: "https://${AZURE_OPENAI_SERVICE}.cognitiveservices.azure.com"
+  AZURE_OPENAI_CHATGPT_DEPLOYMENT: "gpt-5.4-mini"
+  AZURE_OPENAI_EMB_DEPLOYMENT: "text-embedding-3-large"
+  AZURE_OPENAI_EMB_DIMENSIONS: "3072"
+  AZURE_OPENAI_API_VERSION: "2026-05-01-preview"
+  IMAGES_CONTAINER: "images"
+  AZURE_POSTGRES_HOST: ${AZURE_POSTGRES_HOST}
+  AZURE_POSTGRES_AGENT_MEMORY_DB: "agent-memory"
+  AZURE_POSTGRES_USER: ${AKS_WORKLOAD_IDENTITY_NAME}
+  # Maintenance agent v2: evidence index v2 only (legacy maint-content/maint-kb clients are
+  # not built), no ACL filter yet.
+  EVIDENCE_INDEX_ENABLED: "true"
+  AZURE_SEARCH_EVIDENCE_INDEX: "maint-evidence-v2-20261009"
+  EVIDENCE_RELEASE_ID: "corpus-v2-20261009"
+  MEDIA_CACHE_DIR: "/var/cache/crv-media"
+  MEDIA_CACHE_BYTES: "2147483648"
+  # Model roles from the 2026-10-13 probe (Docs/evidence/model-probe-20261013): gpt-6-luna has no
+  # image input, so photo turns are planned by gpt-5.4-mini; gpt-6.x rejects temperature 0.
+  # Planner effort none: same plans, 3.0 s -> 1.4 s (Docs/evidence/agent-v2-golden-20261013).
+  AGENT_PLANNER_DEPLOYMENT: "gpt-6-luna"
+  AGENT_VISION_PLANNER_DEPLOYMENT: "gpt-5.4-mini"
+  AGENT_ANSWER_DEPLOYMENT: "gpt-6.1-sol"
+  AGENT_TEMPERATURE: "null"
+  AGENT_PLANNER_REASONING_EFFORT: "none"
+  # Registry facts from the pinned graph release (kg read API in ingestion-catalog on the same
+  # server). The agent identity logs in and runs SET ROLE tizert_kg_reader (execute-only).
+  KG_ENABLED: "true"
+  KG_RELEASE_ID: "kg-20261014-88d9a099fb56"
+  # Traces, metrics and feedback events to Application Insights (backend/observability.py).
+  # Each workload sets OTEL_SERVICE_NAME (its cloud role). Question/answer text stays out of
+  # telemetry until AppGenAIContent is protected (Docs/pilot/runbook.md, Observability).
+  APPLICATIONINSIGHTS_CONNECTION_STRING: "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  OTEL_RESOURCE_ATTRIBUTES: "service.version=${IMAGE_TAG},deployment.environment.name=pilot"
+  # Pilot volume is low: keep every turn (the distro default is 5 traces/s).
+  OTEL_TRACES_SAMPLER: "always_on"
+  OTEL_SEMCONV_STABILITY_OPT_IN: "gen_ai_latest_experimental"
+  APPLICATIONINSIGHTS_METRIC_NAMESPACE_OPT_IN: "true"
+  APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: "true"
+  TELEMETRY_CAPTURE_CONTENT: "false"
+

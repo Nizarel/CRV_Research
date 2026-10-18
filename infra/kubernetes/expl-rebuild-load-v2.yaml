@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: expl-load-v2
+  namespace: crv-exploration
+  labels:
+    app: exploration-load
+    workstream: exploration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 5400
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-load
+        workstream: exploration
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-exploration
+      containers:
+        - name: load
+          image: acrcrvscus.azurecr.io/crv-exploration:vector-fix-20260827
+          args:
+            - load
+            - --storage-account
+            - stnyuwyhzhjriuu
+            - --container
+            - explorastore
+            - --cache-container
+            - explorastore-cache
+            - --work-dir
+            - /work
+            - --index
+            - expl-content-v2
+            - --search-endpoint
+            - https://gptkb-nyuwyhzhjriuu.search.windows.net
+            - --foundry-url
+            - https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "23809998-7773-47cc-a12c-5059b0b03d8b"
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 1Gi

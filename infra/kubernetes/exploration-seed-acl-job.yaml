@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: exploration-seed-acl-
+  namespace: crv-exploration
+  labels:
+    app: exploration-seed-acl
+    workstream: exploration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-seed-acl
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-exploration
+      containers:
+        - name: seed-acl
+          image: acrcrvscus.azurecr.io/crv-exploration:${EXPLORATION_IMAGE_TAG}
+          args:
+            - seed-acl
+            - --search-endpoint
+            - https://gptkb-nyuwyhzhjriuu.search.windows.net
+            - --index
+            - expl-content-v2
+            - --classification
+            - general
+          env:
+            - name: AZURE_CLIENT_ID
+              value: ${EXPLORATION_IDENTITY_CLIENT_ID}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]

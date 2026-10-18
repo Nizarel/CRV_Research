@@ -1,0 +1,47 @@
+{
+  "name": "maint-evidence-pilot-20261007",
+  "fields": [
+    {"name": "projection_id", "type": "Edm.String", "key": true, "filterable": true},
+    {"name": "content", "type": "Edm.String", "searchable": true},
+    {"name": "content_vector", "type": "Collection(Edm.Single)", "searchable": true, "dimensions": 3072, "vectorSearchProfile": "maintenance-evidence-vector"},
+    {"name": "release_id", "type": "Edm.String", "filterable": true},
+    {"name": "chunk_id", "type": "Edm.String", "filterable": true},
+    {"name": "placement_id", "type": "Edm.String", "filterable": true},
+    {"name": "source_snapshot_id", "type": "Edm.String", "filterable": true},
+    {"name": "source_object_id", "type": "Edm.String", "filterable": true},
+    {"name": "content_hash", "type": "Edm.String", "filterable": true},
+    {"name": "evidence_ids", "type": "Collection(Edm.String)", "filterable": true},
+    {"name": "entity_ids", "type": "Collection(Edm.String)", "filterable": true},
+    {"name": "assertion_ids", "type": "Collection(Edm.String)", "filterable": true},
+    {"name": "process_case_id", "type": "Edm.String", "filterable": true},
+    {"name": "document_version_id", "type": "Edm.String", "filterable": true},
+    {"name": "drawing_sheet_id", "type": "Edm.String", "filterable": true},
+    {"name": "document_code", "type": "Edm.String", "searchable": true, "filterable": true},
+    {"name": "revision", "type": "Edm.String", "filterable": true},
+    {"name": "issue_status", "type": "Edm.String", "filterable": true},
+    {"name": "document_class", "type": "Edm.String", "filterable": true},
+    {"name": "language", "type": "Edm.String", "filterable": true},
+    {"name": "zone_name", "type": "Edm.String", "filterable": true},
+    {"name": "primary_equipment_tag", "type": "Edm.String", "filterable": true},
+    {"name": "equipment_tags", "type": "Collection(Edm.String)", "filterable": true},
+    {"name": "original_page_numbers", "type": "Collection(Edm.Int32)", "filterable": true},
+    {"name": "source_locators", "type": "Collection(Edm.String)"},
+    {"name": "source_uri", "type": "Edm.String"},
+    {"name": "page_image_uri", "type": "Edm.String"},
+    {"name": "figure_image_uri", "type": "Edm.String"},
+    {"name": "evidence_kind", "type": "Edm.String", "filterable": true},
+    {"name": "is_generated", "type": "Edm.Boolean", "filterable": true},
+    {"name": "access_scope_id", "type": "Edm.String", "filterable": true},
+    {"name": "acl_groups", "type": "Collection(Edm.String)", "filterable": true},
+    {"name": "acl_users", "type": "Collection(Edm.String)", "filterable": true},
+    {"name": "policy_version", "type": "Edm.String", "filterable": true},
+    {"name": "payload_sha256", "type": "Edm.String", "filterable": true}
+  ],
+  "vectorSearch": {
+    "algorithms": [{"name": "maintenance-evidence-hnsw", "kind": "hnsw", "hnswParameters": {"metric": "cosine", "m": 4, "efConstruction": 400, "efSearch": 500}}],
+    "profiles": [{"name": "maintenance-evidence-vector", "algorithm": "maintenance-evidence-hnsw"}]
+  },
+  "semantic": {
+    "configurations": [{"name": "maintenance-evidence-semantic", "prioritizedFields": {"prioritizedContentFields": [{"fieldName": "content"}], "prioritizedKeywordsFields": [{"fieldName": "document_code"}]}}]
+  }
+}

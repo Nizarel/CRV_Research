@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: crv-fuseki-pilot
+  namespace: crv
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: crv-fuseki-pilot
+  ports:
+    - name: sparql
+      port: 3030
+      targetPort: sparql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: crv-fuseki-pilot
+  namespace: crv
+spec:
+  serviceName: crv-fuseki-pilot
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crv-fuseki-pilot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crv-fuseki-pilot
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fuseki
+          image: acrcrvscus.azurecr.io/crv-fuseki@sha256:556627736ecbded1dd17fcca80454b58c4e3dce7560cec4bd7b0654d8ce08f04
+          env:
+            - name: FUSEKI_BASE
+              value: /tmp/fuseki
+          ports:
+            - name: sparql
+              containerPort: 3030
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1536Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            tcpSocket:
+              port: sparql
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            tcpSocket:
+              port: sparql
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: sparql
+            periodSeconds: 20
+          volumeMounts:
+            - name: dataset
+              mountPath: /data
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: scratch
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: crv-fuseki-pilot
+        - name: scratch
+          emptyDir:
+            sizeLimit: 128Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: dataset
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: managed-csi
+        resources:
+          requests:
+            storage: 16Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crv-fuseki-pilot
+  namespace: crv
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: crv-fuseki-pilot
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingestion-pilot-bootstrap
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: knowledge-publisher
+      ports:
+        - protocol: TCP
+          port: 3030
+  egress: []

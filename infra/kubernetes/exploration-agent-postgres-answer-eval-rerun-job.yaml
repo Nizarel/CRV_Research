@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: exploration-agent-postgres-answer-eval-rerun-20260829
+  namespace: crv-exploration
+  labels:
+    app: exploration-agent-answer-evaluation
+    retrieval-provider: postgres
+    evaluation-run: rerun
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 5400
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-agent-answer-evaluation
+        retrieval-provider: postgres
+        evaluation-run: rerun
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-exploration
+      containers:
+        - name: evaluate-answers
+          image: acrcrvscus.azurecr.io/crv-exploration:backend-comparison-20260829-2130
+          args:
+            - evaluate-answers
+            - --agent-url
+            - http://exploration-agent-postgres
+            - --retrieval-provider
+            - postgres
+            - --foundry-url
+            - https://cog-nyuwyhzhjriuu.cognitiveservices.azure.com
+            - --deployment
+            - gpt-5.4-mini
+            - --timeout-seconds
+            - "600"
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "23809998-7773-47cc-a12c-5059b0b03d8b"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]

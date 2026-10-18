@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exploration-web-runtime-config
+  namespace: crv-exploration
+data:
+  config.js: |
+    window.__EXPLORATION_CONFIG__ = {
+      applicationInsightsConnectionString: "${APPLICATIONINSIGHTS_CONNECTION_STRING}",
+      applicationInsightsEndpointUrl: "/exploration/telemetry/v2/track",
+      enableContentCapture: true,
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exploration-web
+  namespace: crv-exploration
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: exploration-web
+  template:
+    metadata:
+      labels:
+        app: exploration-web
+    spec:
+      containers:
+        - name: exploration-web
+          image: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}/exploration-web:${IMAGE_TAG}
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 101
+          volumeMounts:
+            - name: runtime-config
+              mountPath: /usr/share/nginx/html/config.js
+              subPath: config.js
+              readOnly: true
+      volumes:
+        - name: runtime-config
+          configMap:
+            name: exploration-web-runtime-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exploration-web
+  namespace: crv-exploration
+spec:
+  type: ClusterIP
+  selector:
+    app: exploration-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+# The longer /exploration prefix remains independent from the /expl API Ingress.
+# Application Gateway rewrites the prefix to / before nginx serves the SPA assets.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: exploration-web
+  namespace: crv-exploration
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /exploration
+            pathType: Prefix
+            backend:
+              service:
+                name: exploration-web
+                port:
+                  name: http
+---
+# Isolate opaque Application Insights envelopes under a Detection-mode WAF policy.
+# AGIC applies path policies to every path in an Ingress, so this relay uses its own exact route.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: exploration-telemetry
+  namespace: crv-exploration
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/telemetry/v2/track"
+    appgw.ingress.kubernetes.io/waf-policy-for-path: "/subscriptions/da9dea7f-1fc8-44de-93da-ce5c58314cdb/resourceGroups/rg-CRV-southcentralus/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/agw-crv-southcentralus-telemetry-waf"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /exploration/telemetry/v2/track
+            pathType: Exact
+            backend:
+              service:
+                name: exploration-web
+                port:
+                  name: http

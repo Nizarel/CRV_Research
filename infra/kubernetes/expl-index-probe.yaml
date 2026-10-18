@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: expl-index-probe
+  namespace: crv-exploration
+  labels:
+    app: expl-index-probe
+    workstream: exploration
+    azure.workload.identity/use: "true"
+spec:
+  restartPolicy: Never
+  # Loader identity: the only one holding a role on both exploration indexes.
+  serviceAccountName: crv-exploration
+  containers:
+    - name: probe
+      image: acrcrvscus.azurecr.io/exploration-agent@sha256:983c284e13fd493ec763eca2afcca2851ea9dc38146af0e77afd51da77a6825b
+      command: ["sleep", "1800"]
+      env:
+        - name: AZURE_CLIENT_ID
+          value: "23809998-7773-47cc-a12c-5059b0b03d8b"
+        - name: COMPARE_INDEXES
+          value: "expl-content,expl-content-20260819,expl-content-v2"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 1000
+        capabilities:
+          drop: ["ALL"]

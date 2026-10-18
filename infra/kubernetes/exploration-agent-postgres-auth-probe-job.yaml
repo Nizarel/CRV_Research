@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: exploration-agent-postgres-auth-probe-20260829
+  namespace: crv-exploration
+  labels:
+    app: exploration-agent-postgres
+    operation: auth-probe
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: exploration-agent-postgres
+        operation: auth-probe
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: exploration-agent
+      containers:
+        - name: auth-probe
+          image: acrcrvscus.azurecr.io/crv-index-migrate@sha256:1697dc03d94f4d673c0f5a2298d6f9ecf127957eb0cfaef7e10aa17335d3fa6c
+          command: ["python", "-c"]
+          args:
+            - >-
+              from index_migrate.postgres import PostgresSettings, connect;
+              settings = PostgresSettings.from_environment();
+              connection = connect(settings);
+              cursor = connection.cursor();
+              cursor.execute("SELECT current_user, count(*) FROM retrieval.expl_chunk");
+              print({"connection_identity_and_chunks": cursor.fetchone()})
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "9ad73a30-9143-48ed-af87-51cc623d7780"
+            - name: AZURE_POSTGRES_HOST
+              value: psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com
+            - name: AZURE_POSTGRES_USER
+              value: id-crv-expl-agent
+            - name: AZURE_POSTGRES_RETRIEVAL_DB
+              value: retrieval-eval
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]

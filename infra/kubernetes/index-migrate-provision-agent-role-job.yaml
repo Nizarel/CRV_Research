@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: index-migrate-ensure-exploration-agent-role-20260829
+  namespace: crv
+  labels:
+    app: index-migrate
+    operation: provision-agent-read-role
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: index-migrate
+        operation: provision-agent-read-role
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: provision
+          image: acrcrvscus.azurecr.io/crv-index-migrate@sha256:1697dc03d94f4d673c0f5a2298d6f9ecf127957eb0cfaef7e10aa17335d3fa6c
+          command: ["python", "-c"]
+          args:
+            - >-
+              from psycopg import sql;
+              from index_migrate.postgres import PostgresSettings, connect;
+              role = "id-crv-expl-agent";
+              object_id = "eb4eaae9-e6a8-42f6-9c94-d6f2481ce578";
+              settings = PostgresSettings.from_environment();
+              admin_connection = connect(settings, database="postgres");
+              admin_cursor = admin_connection.cursor();
+              admin_cursor.execute("SELECT label FROM pg_shseclabel WHERE provider = 'pgaadauth' AND objoid = (SELECT oid FROM pg_roles WHERE rolname = %s)", (role,));
+              existing_mapping = admin_cursor.fetchone();
+              expected_mapping = f"aadauth,oid={object_id},type=service";
+              assert existing_mapping is None or existing_mapping[0] == expected_mapping, f"Unexpected Entra mapping for {role}";
+              admin_cursor.execute("SELECT pgaadauth_create_principal_with_oid(%s, %s, %s, false, false)", (role, object_id, "service")) if existing_mapping is None else None;
+              admin_connection.commit();
+              retrieval_connection = connect(settings);
+              retrieval_cursor = retrieval_connection.cursor();
+              retrieval_cursor.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(settings.database), sql.Identifier(role)));
+              retrieval_cursor.execute(sql.SQL("GRANT USAGE ON SCHEMA retrieval TO {}").format(sql.Identifier(role)));
+              retrieval_cursor.execute(sql.SQL("GRANT SELECT ON TABLE retrieval.expl_chunk TO {}").format(sql.Identifier(role)));
+              retrieval_connection.commit();
+              retrieval_cursor.execute("SELECT rolname, rolcanlogin, rolcreaterole, rolcreatedb, rolsuper FROM pg_roles WHERE rolname = %s", (role,));
+              print({"role": retrieval_cursor.fetchone()});
+              print({"entra_mapping": existing_mapping[0] if existing_mapping else expected_mapping});
+              retrieval_cursor.execute("SELECT has_database_privilege(%s, current_database(), 'CONNECT'), has_schema_privilege(%s, 'retrieval', 'USAGE'), has_table_privilege(%s, 'retrieval.expl_chunk', 'SELECT')", (role, role, role));
+              print({"read_grants": retrieval_cursor.fetchone()})
+          env:
+            - name: AZURE_CLIENT_ID
+              value: "390adbf3-2f0e-4f3d-b6ca-cdc0628cd055"
+            - name: AZURE_POSTGRES_HOST
+              value: psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com
+            - name: AZURE_POSTGRES_USER
+              value: id-crv-aks-workload
+            - name: AZURE_POSTGRES_RETRIEVAL_DB
+              value: retrieval-eval
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]

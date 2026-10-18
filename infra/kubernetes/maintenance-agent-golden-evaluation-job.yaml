@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: maintenance-agent-golden-evaluation-
+  namespace: crv
+  labels:
+    app: maintenance-agent-golden-evaluation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: maintenance-agent-golden-evaluation
+        azure.workload.identity/use: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      containers:
+        - name: evaluate
+          image: acrcrvscus.azurecr.io/crv-backend:evidence-20260724c
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              python /evaluation/evaluate_golden_api.py \
+                --base-url http://backend.crv.svc.cluster.local \
+                --golden-file /evaluation/maintenance_agent_golden.jsonl \
+                --output /tmp/maintenance-agent-golden-results.json \
+                --timeout 180 \
+                --concurrency 2 \
+                --judge \
+                --minimum-answer-score 1.0 \
+                --minimum-pass-rate 0.0 \
+                --minimum-source-match-rate 0.0
+              status=$?
+              cat /tmp/maintenance-agent-golden-results.json
+              exit $status
+          envFrom:
+            - configMapRef:
+                name: crv-agent-settings
+          volumeMounts:
+            - name: evaluator
+              mountPath: /evaluation
+              readOnly: true
+            - name: results
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: evaluator
+          configMap:
+            name: maintenance-agent-golden-evaluation
+        - name: results
+          emptyDir: {}

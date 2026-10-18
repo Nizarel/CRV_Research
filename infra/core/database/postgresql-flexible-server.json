@@ -1,0 +1,199 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "9467743526421120473"
+    },
+    "description": "Creates an Azure Database for PostgreSQL Flexible Server with Microsoft Entra-only authentication, private-endpoint-ready networking, and one or more databases. Used as the ingestion catalog/state store and the agent memory backend (LangGraph Postgres checkpointer + store with pgvector)."
+  },
+  "parameters": {
+    "name": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the PostgreSQL Flexible Server."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for the server."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags to apply to the server."
+      }
+    },
+    "skuName": {
+      "type": "string",
+      "defaultValue": "Standard_B1ms",
+      "metadata": {
+        "description": "Compute SKU name. Burstable avoids zone-redundant capacity constraints."
+      }
+    },
+    "skuTier": {
+      "type": "string",
+      "defaultValue": "Burstable",
+      "allowedValues": [
+        "Burstable",
+        "GeneralPurpose",
+        "MemoryOptimized"
+      ],
+      "metadata": {
+        "description": "Compute tier for the SKU."
+      }
+    },
+    "version": {
+      "type": "string",
+      "defaultValue": "16",
+      "metadata": {
+        "description": "PostgreSQL major version."
+      }
+    },
+    "storageSizeGB": {
+      "type": "int",
+      "defaultValue": 32,
+      "minValue": 32,
+      "metadata": {
+        "description": "Storage size in GB (minimum 32)."
+      }
+    },
+    "publicNetworkAccess": {
+      "type": "string",
+      "defaultValue": "Disabled",
+      "allowedValues": [
+        "Enabled",
+        "Disabled"
+      ],
+      "metadata": {
+        "description": "Public network access. Disabled when fronted by a private endpoint."
+      }
+    },
+    "backupRetentionDays": {
+      "type": "int",
+      "defaultValue": 7,
+      "metadata": {
+        "description": "Backup retention in days."
+      }
+    },
+    "databaseNames": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "Databases to create on the server."
+      }
+    },
+    "administrators": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "Microsoft Entra administrators: array of objects with objectId, principalName, and principalType."
+      }
+    }
+  },
+  "variables": {
+    "tenantId": "[tenant().tenantId]",
+    "allowedExtensions": "vector,pg_trgm,unaccent,pg_stat_statements"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2024-08-01",
+      "name": "[parameters('name')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "[parameters('skuName')]",
+        "tier": "[parameters('skuTier')]"
+      },
+      "properties": {
+        "version": "[parameters('version')]",
+        "createMode": "Default",
+        "storage": {
+          "storageSizeGB": "[parameters('storageSizeGB')]",
+          "autoGrow": "Enabled"
+        },
+        "authConfig": {
+          "activeDirectoryAuth": "Enabled",
+          "passwordAuth": "Disabled",
+          "tenantId": "[variables('tenantId')]"
+        },
+        "network": {
+          "publicNetworkAccess": "[parameters('publicNetworkAccess')]"
+        },
+        "highAvailability": {
+          "mode": "Disabled"
+        },
+        "backup": {
+          "backupRetentionDays": "[parameters('backupRetentionDays')]",
+          "geoRedundantBackup": "Disabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/configurations",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('name'), 'azure.extensions')]",
+      "properties": {
+        "value": "[variables('allowedExtensions')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "entraAdmins",
+        "count": "[length(parameters('administrators'))]"
+      },
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('name'), parameters('administrators')[copyIndex()].objectId)]",
+      "properties": {
+        "principalName": "[parameters('administrators')[copyIndex()].principalName]",
+        "principalType": "[parameters('administrators')[copyIndex()].principalType]",
+        "tenantId": "[variables('tenantId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
+      ]
+    },
+    {
+      "copy": {
+        "name": "databases",
+        "count": "[length(parameters('databaseNames'))]"
+      },
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', parameters('name'), parameters('databaseNames')[copyIndex()])]",
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.utf8"
+      },
+      "dependsOn": [
+        "entraAdmins",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "id": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
+    },
+    "name": {
+      "type": "string",
+      "value": "[parameters('name')]"
+    },
+    "fqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name')), '2024-08-01').fullyQualifiedDomainName]"
+    }
+  }
+}

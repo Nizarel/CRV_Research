@@ -1,0 +1,489 @@
+# Durable ingestion pipeline (v2): coordinator + KEDA-scaled pool workers.
+# Contains dollar-brace placeholders: render with render-pipeline.ps1, never apply raw. Lines
+# tagged external-accounts are kept only when external billing accounts are rendered.
+# KEDA reuses the existing `azure-servicebus-auth` TriggerAuthentication (needs Manage rights
+# to read queue metrics); the runtime identities only send or receive.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv-pipeline-coordinator
+  namespace: crv
+  annotations:
+    azure.workload.identity/client-id: ${COORDINATOR_CLIENT_ID}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv-pipeline-worker
+  namespace: crv
+  annotations:
+    azure.workload.identity/client-id: ${WORKER_CLIENT_ID}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crv-pipeline
+  namespace: crv
+data:
+  TIZ_DB__HOST: "${PG_HOST}"
+  TIZ_DB__DATABASE: ingestion-catalog
+  TIZ_DB__MAX_POOL_SIZE: "4"
+  TIZ_BLOB__ACCOUNT_URL: "${STORAGE_ACCOUNT_URL}"
+  TIZ_BLOB__SOURCE_CONTAINER: content
+  TIZ_BLOB__ARTIFACT_CONTAINER: ingest-artifacts
+  TIZ_BUS__NAMESPACE: "${SERVICE_BUS_FQDN}"
+  # Phase 2 providers. An empty endpoint disables that provider; the DI page budget defaults to 0
+  # (no paid analysis) until an approved cap is rendered in.
+  TIZ_DI__ENDPOINT: "${DI_ENDPOINT}"
+  TIZ_DI__PAGE_BUDGET: "${DI_PAGE_BUDGET}"
+  TIZ_DI__MAX_INFLIGHT: "${DI_MAX_INFLIGHT}"
+  TIZ_EMBEDDINGS__ENDPOINT: "${OPENAI_ENDPOINT}"
+  TIZ_EMBEDDINGS__DEPLOYMENT: "${EMBEDDING_DEPLOYMENT}"
+  TIZ_SEARCH__ENDPOINT: "${SEARCH_ENDPOINT}"
+  TIZ_SEARCH__INDEX_NAME: "${SEARCH_INDEX_NAME}"
+  # Above the io queue's delay during bulk bursts; at 900 s projections gave up mid-retry (2026-10-13).
+  TIZ_SEARCH__VERIFY_DEADLINE_SECONDS: "7200"
+  # Phase 3 Content Understanding pilot. An empty endpoint disables CU; budgets of 0 hold every
+  # CU job back (no paid analysis) until approved caps are rendered in. Workers only read the
+  # analyzers listed in the mounted registry and verify them at startup; they never create them.
+  TIZ_CU__ENDPOINT: "${CU_ENDPOINT}"
+  TIZ_CU__PAGE_BUDGET: "${CU_PAGE_BUDGET}"
+  TIZ_CU__TOKEN_BUDGET: "${CU_TOKEN_BUDGET}"
+  TIZ_CU__MAX_INFLIGHT: "${CU_MAX_INFLIGHT}"
+  TIZ_CU__EST_TOKENS_PER_PAGE: "${CU_EST_TOKENS_PER_PAGE}"
+  TIZ_CU__PROCESSING_LOCATION: dataZone
+  TIZ_CU__REGISTRY_PATH: /etc/crv/cu/ingestion-pilot.json
+  # Named routing policies, each projected under its own search release. TIZ_ROUTING_POLICY
+  # picks the one that plans new snapshots; empty keeps the built-in routing-v1.
+  TIZ_POLICIES_PATH: /etc/crv/cu/policies.json
+  TIZ_ROUTING_POLICY: "${ROUTING_POLICY}"
+  # USD budgets per billing account: this subscription first, then external accounts whose API
+  # keys are mounted from Key Vault into the IO workers (the only pool that calls DI and CU).
+  TIZ_BILLING_PATH: /etc/crv/cu/billing.json
+  TIZ_PARSERS__WORK_DIR: /tmp/work
+  TIZ_TELEMETRY__LOG_LEVEL: INFO
+  APPLICATIONINSIGHTS_CONNECTION_STRING: "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  PYTHONDONTWRITEBYTECODE: "1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crv-pipeline-coordinator
+  namespace: crv
+  labels:
+    app.kubernetes.io/name: crv-pipeline-coordinator
+    app.kubernetes.io/part-of: crv-pipeline
+spec:
+  # One replica is enough; claims use SKIP LOCKED, so a second replica would also be safe.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crv-pipeline-coordinator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crv-pipeline-coordinator
+        app.kubernetes.io/part-of: crv-pipeline
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: crv-pipeline-coordinator
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: coordinator
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline:${IMAGE_TAG}
+          args: [coordinator]
+          envFrom:
+            - configMapRef:
+                name: crv-pipeline
+          env:
+            - name: TIZ_DB__USER
+              value: id-crv-pipeline-coordinator
+            - name: TIZ_RUNTIME__WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: scratch, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: 64Mi}
+        - name: cu-config
+          configMap: {name: crv-pipeline-cu}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crv-pipeline-worker-io
+  namespace: crv
+  labels:
+    app.kubernetes.io/name: crv-pipeline-worker-io
+    app.kubernetes.io/part-of: crv-pipeline
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crv-pipeline-worker-io
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crv-pipeline-worker-io
+        app.kubernetes.io/part-of: crv-pipeline
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: crv-pipeline-worker
+      # Long enough to drain one bounded action; unfinished leases are recovered by the ledger.
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline:${IMAGE_TAG}
+          args: [worker, --pool, io]
+          envFrom:
+            - configMapRef:
+                name: crv-pipeline
+          env:
+            - name: TIZ_DB__USER
+              value: id-crv-pipeline-worker
+            - name: TIZ_RUNTIME__CONCURRENCY
+              value: "4"
+            - name: TIZ_RUNTIME__WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          # DI submit stages the source (and a sub-PDF) on disk; results stream to disk too.
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {cpu: "1", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: scratch, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+            - {name: account-keys, mountPath: /var/run/secrets/crv/accounts, readOnly: true}  # external-accounts
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: 4Gi}
+        - name: cu-config
+          configMap: {name: crv-pipeline-cu}
+        - name: account-keys  # external-accounts
+          csi: {driver: secrets-store.csi.k8s.io, readOnly: true, volumeAttributes: {secretProviderClass: crv-pipeline-accounts}}  # external-accounts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crv-pipeline-worker-cpu
+  namespace: crv
+  labels:
+    app.kubernetes.io/name: crv-pipeline-worker-cpu
+    app.kubernetes.io/part-of: crv-pipeline
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crv-pipeline-worker-cpu
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crv-pipeline-worker-cpu
+        app.kubernetes.io/part-of: crv-pipeline
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: crv-pipeline-worker
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline:${IMAGE_TAG}
+          args: [worker, --pool, cpu]
+          envFrom:
+            - configMapRef:
+                name: crv-pipeline
+          env:
+            - name: TIZ_DB__USER
+              value: id-crv-pipeline-worker
+            - name: TIZ_RUNTIME__CONCURRENCY
+              value: "2"
+            - name: TIZ_RUNTIME__WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          # Preflight/native parse/normalize/chunk: one source copy and one parsed unit per slot.
+          # 3Gi was OOMKilled chunking one 3.4 MB spreadsheet (2026-10-13); source size does not
+          # predict it, and the other slot's job died with the pod.
+          resources:
+            requests: {cpu: 500m, memory: 2Gi}
+            limits: {cpu: "2", memory: 4Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: scratch, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: 4Gi}
+        - name: cu-config
+          configMap: {name: crv-pipeline-cu}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: crv-pipeline-worker-io
+  namespace: crv
+spec:
+  scaleTargetRef:
+    name: crv-pipeline-worker-io
+  minReplicaCount: 0
+  # 8 needs PostgreSQL max_connections above 50 (200 during the bulk rollout, 2026-10-13).
+  maxReplicaCount: 8
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        queueName: ingest-io
+        namespace: ${SERVICE_BUS_NAMESPACE_NAME}
+        messageCount: "8"
+      authenticationRef:
+        name: azure-servicebus-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: crv-pipeline-worker-cpu
+  namespace: crv
+spec:
+  scaleTargetRef:
+    name: crv-pipeline-worker-cpu
+  minReplicaCount: 0
+  maxReplicaCount: 4
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        queueName: ingest-cpu
+        namespace: ${SERVICE_BUS_NAMESPACE_NAME}
+        messageCount: "4"
+      authenticationRef:
+        name: azure-servicebus-auth
+---
+# One bounded unit per pod for rendering/conversion; the ledger owns retries (backoffLimit 0).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: crv-pipeline-worker-heavy
+  namespace: crv
+spec:
+  jobTargetRef:
+    backoffLimit: 0
+    activeDeadlineSeconds: 3600
+    ttlSecondsAfterFinished: 3600
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: crv-pipeline-worker-heavy
+          app.kubernetes.io/part-of: crv-pipeline
+          azure.workload.identity/use: "true"
+      spec:
+        restartPolicy: Never
+        serviceAccountName: crv-pipeline-worker
+        terminationGracePeriodSeconds: 120
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          runAsGroup: 10001
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: worker
+            image: ${ACR_LOGIN_SERVER}/crv-pipeline:${IMAGE_TAG}
+            args: [worker, --pool, heavy, --max-messages, "1", --exit-when-idle]
+            envFrom:
+              - configMapRef:
+                  name: crv-pipeline
+            env:
+              - name: TIZ_DB__USER
+                value: id-crv-pipeline-worker
+              - name: TIZ_BUS__MAX_WAIT_SECONDS
+                value: "10"
+              - name: TIZ_RUNTIME__WORKER_ID
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.name
+            resources:
+              requests: {cpu: "1", memory: 2Gi}
+              limits: {cpu: "2", memory: 4Gi}
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+              - {name: scratch, mountPath: /tmp}
+              - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+        volumes:
+          - name: scratch
+            emptyDir: {sizeLimit: 4Gi}
+          - name: cu-config
+            configMap: {name: crv-pipeline-cu}
+  pollingInterval: 15
+  maxReplicaCount: 4
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        queueName: ingest-heavy
+        namespace: ${SERVICE_BUS_NAMESPACE_NAME}
+        messageCount: "1"
+      authenticationRef:
+        name: azure-servicebus-auth
+---
+# CU and DI polls hold provider slots until they finish, so they get their own queue and pods.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crv-pipeline-worker-poll
+  namespace: crv
+  labels:
+    app.kubernetes.io/name: crv-pipeline-worker-poll
+    app.kubernetes.io/part-of: crv-pipeline
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crv-pipeline-worker-poll
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crv-pipeline-worker-poll
+        app.kubernetes.io/part-of: crv-pipeline
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: crv-pipeline-worker
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline:${IMAGE_TAG}
+          args: [worker, --pool, poll]
+          envFrom:
+            - configMapRef:
+                name: crv-pipeline
+          env:
+            - name: TIZ_DB__USER
+              value: id-crv-pipeline-worker
+            - name: TIZ_RUNTIME__CONCURRENCY
+              value: "8"
+            - name: TIZ_RUNTIME__WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          # A finished poll streams the result to disk and reads its usage block.
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {cpu: "1", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: scratch, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+            - {name: account-keys, mountPath: /var/run/secrets/crv/accounts, readOnly: true}  # external-accounts
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: 4Gi}
+        - name: cu-config
+          configMap: {name: crv-pipeline-cu}
+        - name: account-keys  # external-accounts
+          csi: {driver: secrets-store.csi.k8s.io, readOnly: true, volumeAttributes: {secretProviderClass: crv-pipeline-accounts}}  # external-accounts
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: crv-pipeline-worker-poll
+  namespace: crv
+spec:
+  scaleTargetRef:
+    name: crv-pipeline-worker-poll
+  # One warm pod: a poll due now must not wait for a scale-from-zero.
+  minReplicaCount: 1
+  maxReplicaCount: 2
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        queueName: ingest-poll
+        namespace: ${SERVICE_BUS_NAMESPACE_NAME}
+        messageCount: "8"
+      authenticationRef:
+        name: azure-servicebus-auth
+---
+# Workers serve nothing; they only reach DNS, Azure endpoints (HTTPS, AMQP) and PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crv-pipeline
+  namespace: crv
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: crv-pipeline
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 5671}
+        - {protocol: TCP, port: 5432}
