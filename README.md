@@ -37,6 +37,39 @@ certification for the full corpus.
 
 ## Local setup
 
+### Direct Nextcloud raw backup
+
+[The AKS transfer job](infra/kubernetes/corpus-transfer/job.yaml) copies only
+`DATAROOM CRV` to `stawmc6icu2kueq/crv-raw/DATAROOM CRV`, independently of the
+ingestion pipeline. Its [runner](infra/kubernetes/corpus-transfer/transfer.py)
+uses Nextcloud browser approval: log in only on the Managem website using the
+`AUTHORIZE_IN_BROWSER` link in the pod log. No credentials belong in manifests,
+chat, or local files. The generated app password remains in pod memory and is
+revoked on normal completion or failure. If the pod is killed or its node is lost,
+revoke **CRV-Corpus-Transfer** manually in Nextcloud's security settings.
+
+Prerequisites are the private `crv-raw` container, the dedicated
+`id-crv-corpus-transfer` identity with Blob Data Contributor scoped to that
+container, and its federation to `system:serviceaccount:crv-transfer:corpus-transfer`.
+Both pinned runtime images must exist in the private ACR. The server currently
+omits a required GlobalSign intermediate: populate ConfigMap `corpus-transfer-ca`
+with `nextcloud-ca.pem` containing the CA chain exported from a successfully
+validated TLS connection. The job adds it to the system CA bundle; it never
+disables certificate verification. Render `${TRANSFER_JOB}`
+to a unique job name, apply the namespace/service account, create the
+`corpus-transfer` ConfigMap from the runner, then apply the rendered job.
+Use the `aks-crv-southcentralus` cluster explicitly, not a stale kubeconfig context.
+
+Files stream directly between services. Copying never deletes blobs and refuses
+to overwrite different existing files. A new job resumes by skipping matching
+files, but requires browser approval again. Conflicting files require explicit
+operator review; they are not silently replaced. Verification rereads all source
+and destination bytes (`rclone check --download --one-way`) and checks the source
+path/size/modification-time inventory has not changed. It does not reject extra
+destination files or provide a transactional Nextcloud snapshot. This second
+pass approximately doubles source traffic. A verified inventory is retained at
+`crv-raw/_transfer-reports/<job-name>.json`. No OCR or indexing is triggered.
+
 Python 3.11 or 3.12 is supported. From the repository root:
 
 ```powershell
