@@ -43,12 +43,13 @@ Python 3.11 or 3.12 is supported. From the repository root:
 Set-Location .\src\ingestion
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[azure,parsers,tokenizer,dev]"
-.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli --help
+.\.venv\Scripts\python.exe -m ingest_pipeline.cli --help
 ```
 
 `crv-pipeline` and the compatibility name `tizagent-pipeline` are installed entry
-points. The Python package name and `TIZ_*` environment variables are retained
-to avoid breaking deployed jobs and operational integrations. Optional `tools`
+points. The Python package is `ingest_pipeline` (distribution: `ingest-pipeline`).
+The `TIZ_*` environment variables and compatibility CLI name are retained
+for existing operational integrations. Optional `tools`
 dependencies are only needed for the standalone discovery utility.
 
 ## 1. Prepare locally, without Azure calls
@@ -58,7 +59,7 @@ of free storage for staging and conversion overhead; actual usage depends on
 duplicate bytes and converted files.
 
 ```powershell
-.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli prepare-corpus `
+.\.venv\Scripts\python.exe -m ingest_pipeline.cli prepare-corpus `
   --root "C:\Github\CRV_Research\Data\DATAROOM CRV" `
   --output "C:\CRV-intake" --max-total-gib 64
 ```
@@ -91,7 +92,7 @@ Install/start Docker with Linux containers, then build the converter locally:
 ```powershell
 docker build -t crv-office:local .\office-converter
 $image = docker image inspect crv-office:local --format '{{.Id}}'
-.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli prepare-corpus `
+.\.venv\Scripts\python.exe -m ingest_pipeline.cli prepare-corpus `
   --root "C:\Github\CRV_Research\Data\DATAROOM CRV" `
   --output "C:\CRV-intake" --office-image $image
 ```
@@ -136,7 +137,7 @@ from headers. No chemical meaning or cross-row relationship is invented.
 ## 3. Configure infrastructure before publication
 
 Existing Azure/PostgreSQL resources and permissions are prerequisites. Configuration
-is defined in [config.py](src/ingestion/tizertmaint_pipeline/config.py).
+is defined in [config.py](src/ingestion/ingest_pipeline/config.py).
 Typical settings include:
 
 ```powershell
@@ -159,8 +160,8 @@ Use managed/workload identity or `DefaultAzureCredential`; do not commit secrets
 Apply migrations **before** running the new workers:
 
 ```powershell
-.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli migrate --dry-run
-.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli migrate
+.\.venv\Scripts\python.exe -m ingest_pipeline.cli migrate --dry-run
+.\.venv\Scripts\python.exe -m ingest_pipeline.cli migrate
 ```
 
 Migration `0014_ingest_source_provenance.sql` adds nullable JSON lineage to source
@@ -194,7 +195,7 @@ This command uploads originals, manifests and logical source blobs to Azure,
 then enqueues source snapshots:
 
 ```powershell
-.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli ingest-corpus `
+.\.venv\Scripts\python.exe -m ingest_pipeline.cli ingest-corpus `
   --manifest "C:\CRV-intake\manifest.json" --prefix crv
 ```
 
@@ -237,7 +238,7 @@ From `src\ingestion`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\ruff.exe check tizertmaint_pipeline tests office-converter
+.\.venv\Scripts\ruff.exe check ingest_pipeline tests office-converter
 .\.venv\Scripts\python.exe -m mypy
 .\.venv\Scripts\lint-imports.exe
 ```
