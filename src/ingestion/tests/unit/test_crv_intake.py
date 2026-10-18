@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from fixture_builders import PdfPage, Sheet, pdf_bytes, xlsx_bytes
 
-from tizertmaint_pipeline.adapters.local_intake import CorpusIntake, long_path, verify_object
-from tizertmaint_pipeline.adapters.parsers.office import OfficeConverter
-from tizertmaint_pipeline.domain.errors import ConfigurationError, UnsupportedContentError
-from tizertmaint_pipeline.domain.intake import IntakeLimits, IntakeManifest
+from ingest_pipeline.adapters.local_intake import CorpusIntake, long_path, verify_object
+from ingest_pipeline.adapters.parsers.office import OfficeConverter
+from ingest_pipeline.domain.errors import ConfigurationError, UnsupportedContentError
+from ingest_pipeline.domain.intake import IntakeLimits, IntakeManifest
 
 
 def archive_bytes(entries: dict[str, bytes]) -> bytes:
@@ -175,12 +175,12 @@ def test_invalid_converted_output_is_not_accepted(tmp_path: Path, monkeypatch) -
 
 
 def test_prepare_cli_stays_offline_even_with_telemetry_configured(tmp_path: Path, monkeypatch):
-    from tizertmaint_pipeline.cli import main
+    from ingest_pipeline.cli import main
 
     def forbidden(*args, **kwargs):
         pytest.fail("Offline intake must not configure cloud telemetry")
 
-    monkeypatch.setattr("tizertmaint_pipeline.cli.configure_telemetry", forbidden)
+    monkeypatch.setattr("ingest_pipeline.cli.configure_telemetry", forbidden)
     monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "must-not-be-used")
     source = tmp_path / "corpus"
     source.mkdir()

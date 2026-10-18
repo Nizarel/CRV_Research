@@ -5,10 +5,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from tizertmaint_pipeline.domain.envelope import MAX_ENVELOPE_BYTES, WorkEnvelope
-from tizertmaint_pipeline.domain.errors import InvalidInputError
-from tizertmaint_pipeline.domain.models import JobSpec, StageOutcome
-from tizertmaint_pipeline.domain.states import (
+from ingest_pipeline.domain.envelope import MAX_ENVELOPE_BYTES, WorkEnvelope
+from ingest_pipeline.domain.errors import InvalidInputError
+from ingest_pipeline.domain.models import JobSpec, StageOutcome
+from ingest_pipeline.domain.states import (
     ACTIVE_STATUSES,
     ALLOWED_TRANSITIONS,
     CLAIMABLE_STATUSES,

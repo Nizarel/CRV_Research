@@ -7,10 +7,10 @@ from typing import Any
 import pytest
 from pipeline_harness import START
 
-from tizertmaint_pipeline.adapters.postgres.ledger import PostgresLedger
-from tizertmaint_pipeline.adapters.postgres.report import pipeline_status
-from tizertmaint_pipeline.domain.models import JobSpec, StageOutcome
-from tizertmaint_pipeline.domain.states import JobStatus, StageName, WorkerPool
+from ingest_pipeline.adapters.postgres.ledger import PostgresLedger
+from ingest_pipeline.adapters.postgres.report import pipeline_status
+from ingest_pipeline.domain.models import JobSpec, StageOutcome
+from ingest_pipeline.domain.states import JobStatus, StageName, WorkerPool
 
 pytestmark = pytest.mark.integration
 

@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from evidence_fakes import cu_content, cu_document, cu_source
 
-from tizertmaint_pipeline.adapters.parsers.tokenizers import ApproximateCounter
-from tizertmaint_pipeline.domain.chunks import ChunkKind
-from tizertmaint_pipeline.domain.evidence import (
+from ingest_pipeline.adapters.parsers.tokenizers import ApproximateCounter
+from ingest_pipeline.domain.chunks import ChunkKind
+from ingest_pipeline.domain.evidence import (
     BlockKind,
     EvidenceBlock,
     EvidenceKind,
     EvidenceUnit,
     LocatorKind,
 )
-from tizertmaint_pipeline.domain.models import ArtifactRef, UnitRecord
-from tizertmaint_pipeline.domain.routing import Route
-from tizertmaint_pipeline.stages.chunkers import DocumentChunker
-from tizertmaint_pipeline.stages.normalizers.cu import normalize_analysis
+from ingest_pipeline.domain.models import ArtifactRef, UnitRecord
+from ingest_pipeline.domain.routing import Route
+from ingest_pipeline.stages.chunkers import DocumentChunker
+from ingest_pipeline.stages.normalizers.cu import normalize_analysis
 
 HASH = "c" * 64
 RAW = ArtifactRef(sha256="e" * 64, uri="artifacts/cu.json", size_bytes=10, media_type="json")

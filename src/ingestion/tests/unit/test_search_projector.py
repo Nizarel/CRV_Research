@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from azure.core.exceptions import HttpResponseError
 
-from tizertmaint_pipeline.adapters.search.projector import AzureSearchProjector
-from tizertmaint_pipeline.domain.errors import AuthError, InvalidInputError
+from ingest_pipeline.adapters.search.projector import AzureSearchProjector
+from ingest_pipeline.domain.errors import AuthError, InvalidInputError
 
 
 def _http_error(status: int) -> HttpResponseError:

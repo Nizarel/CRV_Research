@@ -7,8 +7,8 @@ import json
 import pytest
 from fixture_builders import repo_file
 
-from tizertmaint_pipeline.config import load_policies
-from tizertmaint_pipeline.domain.evidence import (
+from ingest_pipeline.config import load_policies
+from ingest_pipeline.domain.evidence import (
     BlockKind,
     EvidenceBlock,
     EvidenceKind,
@@ -16,16 +16,16 @@ from tizertmaint_pipeline.domain.evidence import (
     EvidenceUnit,
     FieldObservation,
 )
-from tizertmaint_pipeline.tools.bakeoff.__main__ import (
+from ingest_pipeline.tools.bakeoff.__main__ import (
     REPORT_BEGIN,
     REPORT_END,
     extract_report,
     load_gold,
 )
-from tizertmaint_pipeline.tools.bakeoff.model import DocumentEvidence, GoldItem, Report
-from tizertmaint_pipeline.tools.bakeoff.report import render_markdown
-from tizertmaint_pipeline.tools.bakeoff.sample import PILOT_PREFIX, build_sample
-from tizertmaint_pipeline.tools.bakeoff.score import contains, page_evidence, score_arm
+from ingest_pipeline.tools.bakeoff.model import DocumentEvidence, GoldItem, Report
+from ingest_pipeline.tools.bakeoff.report import render_markdown
+from ingest_pipeline.tools.bakeoff.sample import PILOT_PREFIX, build_sample
+from ingest_pipeline.tools.bakeoff.score import contains, page_evidence, score_arm
 
 HASH = "c" * 64
 CAPS = {"cu_pages": 600, "tokens": 6_000_000}

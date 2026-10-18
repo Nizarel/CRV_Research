@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from tizertmaint_pipeline.domain.errors import UnsupportedContentError
-from tizertmaint_pipeline.domain.evidence import (
+from ingest_pipeline.domain.errors import UnsupportedContentError
+from ingest_pipeline.domain.evidence import (
     BlockKind,
     CellKind,
     EvidenceBlock,
@@ -17,8 +17,8 @@ from tizertmaint_pipeline.domain.evidence import (
     detect_language,
     normalize_text,
 )
-from tizertmaint_pipeline.domain.models import UnitDisposition
-from tizertmaint_pipeline.domain.routing import (
+from ingest_pipeline.domain.models import UnitDisposition
+from ingest_pipeline.domain.routing import (
     Family,
     PageSignals,
     PreflightReport,
@@ -30,8 +30,8 @@ from tizertmaint_pipeline.domain.routing import (
     plan_id_for,
     plan_units,
 )
-from tizertmaint_pipeline.domain.sniff import FileKind, ZipLimits, check_zip_safety, sniff
-from tizertmaint_pipeline.stages.common import page_ranges
+from ingest_pipeline.domain.sniff import FileKind, ZipLimits, check_zip_safety, sniff
+from ingest_pipeline.stages.common import page_ranges
 
 HASH = "a" * 64
 OOXML = ["[Content_Types].xml", "_rels/.rels"]
@@ -243,7 +243,7 @@ def test_projection_keys_never_start_with_underscore() -> None:
     import base64
     import hashlib
 
-    from tizertmaint_pipeline.domain.chunks import projection_key
+    from ingest_pipeline.domain.chunks import projection_key
 
     def raw(chunk: str) -> str:
         digest = hashlib.sha256(f"r|{chunk}".encode()).digest()

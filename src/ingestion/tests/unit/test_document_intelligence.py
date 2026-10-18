@@ -13,20 +13,20 @@ from typing import Any
 import pytest
 from aiohttp import web
 
-from tizertmaint_pipeline.adapters.azure_ai.document_intelligence import (
+from ingest_pipeline.adapters.azure_ai.document_intelligence import (
     DocumentIntelligenceLayout,
     base64_json_body,
     base64_json_length,
 )
-from tizertmaint_pipeline.adapters.azure_ai.remote_operation import ApiKeyFile
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.adapters.azure_ai.remote_operation import ApiKeyFile
+from ingest_pipeline.domain.errors import (
     ConfigurationError,
     RemoteResultMissingError,
     ResourceExhaustedError,
     SubmissionUnknownError,
     ThrottledError,
 )
-from tizertmaint_pipeline.ports.providers import LayoutRequest, LayoutStatus
+from ingest_pipeline.ports.providers import LayoutRequest, LayoutStatus
 
 RESULT_PATH = "/documentintelligence/documentModels/prebuilt-layout/analyzeResults/abcdef12"
 

@@ -9,15 +9,15 @@ from evidence_fakes import FakeLayout, permanent, transient
 from evidence_harness import EvidenceKit, build_evidence_harness
 from fixture_builders import A3_LANDSCAPE, PdfPage, Sheet, pdf_bytes, xlsx_bytes
 
-from tizertmaint_pipeline.domain.evidence import EvidenceDocument, PageStatus
-from tizertmaint_pipeline.domain.models import SourceSnapshot, UnitDisposition
-from tizertmaint_pipeline.domain.projection import ProjectionState
-from tizertmaint_pipeline.domain.routing import Route, RoutingPolicy
-from tizertmaint_pipeline.domain.states import JobStatus, StageName
-from tizertmaint_pipeline.ports.evidence import EvidenceStatus, FigureState
-from tizertmaint_pipeline.stages.chunkers import ChunkingSettings
-from tizertmaint_pipeline.stages.di import DiSettings
-from tizertmaint_pipeline.stages.plan import LayoutOptions
+from ingest_pipeline.domain.evidence import EvidenceDocument, PageStatus
+from ingest_pipeline.domain.models import SourceSnapshot, UnitDisposition
+from ingest_pipeline.domain.projection import ProjectionState
+from ingest_pipeline.domain.routing import Route, RoutingPolicy
+from ingest_pipeline.domain.states import JobStatus, StageName
+from ingest_pipeline.ports.evidence import EvidenceStatus, FigureState
+from ingest_pipeline.stages.chunkers import ChunkingSettings
+from ingest_pipeline.stages.di import DiSettings
+from ingest_pipeline.stages.plan import LayoutOptions
 
 PROSE = [
     "Le broyeur primaire BR-101 est alimente par le convoyeur CV-12.",
@@ -247,7 +247,7 @@ async def test_spreadsheet_keeps_original_cells_and_hidden_sheets(kit: EvidenceK
 
 
 async def test_failed_unit_makes_document_partial_and_needs_review(tmp_path: Path) -> None:
-    from tizertmaint_pipeline.ports.providers import LayoutStatus
+    from ingest_pipeline.ports.providers import LayoutStatus
 
     layout = FakeLayout(fail_status=LayoutStatus.FAILED)
     kit = build_evidence_harness(tmp_path, layout=layout)
@@ -267,7 +267,7 @@ async def test_failed_unit_makes_document_partial_and_needs_review(tmp_path: Pat
 
 
 async def test_partial_projection_when_allowed(tmp_path: Path) -> None:
-    from tizertmaint_pipeline.ports.providers import LayoutStatus
+    from ingest_pipeline.ports.providers import LayoutStatus
 
     kit = build_evidence_harness(
         tmp_path,
@@ -431,7 +431,7 @@ def _dwg_kit(tmp_path: Path, mode: str) -> EvidenceKit:
 
     from fixture_builders import FAKE_DWG2DXF
 
-    from tizertmaint_pipeline.adapters.parsers.libredwg import LibreDwgReader
+    from ingest_pipeline.adapters.parsers.libredwg import LibreDwgReader
 
     reader = LibreDwgReader(
         command=(sys.executable, str(FAKE_DWG2DXF), mode), resource_limits=False

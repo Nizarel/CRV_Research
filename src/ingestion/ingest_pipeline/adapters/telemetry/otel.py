@@ -15,7 +15,7 @@ from .json_logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
-INSTRUMENTATION_NAME = "tizertmaint_pipeline"
+INSTRUMENTATION_NAME = "ingest_pipeline"
 CONNECTION_STRING_ENV = "APPLICATIONINSIGHTS_CONNECTION_STRING"
 
 

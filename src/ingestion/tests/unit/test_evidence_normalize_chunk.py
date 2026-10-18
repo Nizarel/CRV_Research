@@ -10,12 +10,12 @@ from fixture_builders import PdfPage, Sheet, pdf_bytes, xlsx_bytes
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from tizertmaint_pipeline.adapters.parsers.calamine import CalamineSpreadsheetReader
-from tizertmaint_pipeline.adapters.parsers.pdfium import PdfiumToolkit
-from tizertmaint_pipeline.adapters.parsers.tokenizers import ApproximateCounter
-from tizertmaint_pipeline.domain.chunks import ChunkKind, EvidenceChunk
-from tizertmaint_pipeline.domain.errors import IntegrityError
-from tizertmaint_pipeline.domain.evidence import (
+from ingest_pipeline.adapters.parsers.calamine import CalamineSpreadsheetReader
+from ingest_pipeline.adapters.parsers.pdfium import PdfiumToolkit
+from ingest_pipeline.adapters.parsers.tokenizers import ApproximateCounter
+from ingest_pipeline.domain.chunks import ChunkKind, EvidenceChunk
+from ingest_pipeline.domain.errors import IntegrityError
+from ingest_pipeline.domain.evidence import (
     BlockKind,
     CellKind,
     EvidenceBlock,
@@ -30,18 +30,18 @@ from tizertmaint_pipeline.domain.evidence import (
     PageStatus,
     a1,
 )
-from tizertmaint_pipeline.domain.models import ArtifactRef, UnitRecord
-from tizertmaint_pipeline.domain.process_cases import process_case_id
-from tizertmaint_pipeline.domain.routing import Route
-from tizertmaint_pipeline.stages.chunkers import (
+from ingest_pipeline.domain.models import ArtifactRef, UnitRecord
+from ingest_pipeline.domain.process_cases import process_case_id
+from ingest_pipeline.domain.routing import Route
+from ingest_pipeline.stages.chunkers import (
     ChunkingSettings,
     DocumentChunker,
     split_text,
     stream_table_bodies,
     table_bodies,
 )
-from tizertmaint_pipeline.stages.normalizers.di_layout import normalize_layout, resolve_page_map
-from tizertmaint_pipeline.stages.normalizers.native import (
+from ingest_pipeline.stages.normalizers.di_layout import normalize_layout, resolve_page_map
+from ingest_pipeline.stages.normalizers.native import (
     normalize_native_pdf,
     normalize_spreadsheet,
     normalize_text_file,

@@ -1,5 +1,5 @@
 [project]
-name = "tizertmaint-pipeline"
+name = "ingest-pipeline"
 version = "0.2.0"
 description = "CRV research ingestion: durable, evidence-first processing"
 requires-python = ">=3.11,<3.13"
@@ -45,8 +45,8 @@ dev = [
 ]
 
 [project.scripts]
-tizagent-pipeline = "tizertmaint_pipeline.cli:main"
-crv-pipeline = "tizertmaint_pipeline.cli:main"
+tizagent-pipeline = "ingest_pipeline.cli:main"
+crv-pipeline = "ingest_pipeline.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -74,14 +74,14 @@ ignore = ["UP046", "UP047", "S311"]
 
 [tool.ruff.lint.per-file-ignores]
 # Column lists are module constants; every value is a bound parameter.
-"tizertmaint_pipeline/adapters/postgres/*.py" = ["S608"]
+"ingest_pipeline/adapters/postgres/*.py" = ["S608"]
 # v1 tools kept as-is under the base rule set.
-"tizertmaint_pipeline/tools/**" = ["ASYNC", "B", "PT", "RUF", "S", "SIM"]
+"ingest_pipeline/tools/**" = ["ASYNC", "B", "PT", "RUF", "S", "SIM"]
 "tests/**" = ["S101", "S106", "S608"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["tizertmaint_pipeline"]
+files = ["ingest_pipeline"]
 strict = true
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
@@ -100,7 +100,7 @@ ignore_missing_imports = true
 
 # v1 tools predate strict typing; they are checked for consistency, not annotation coverage.
 [[tool.mypy.overrides]]
-module = ["tizertmaint_pipeline.tools.*"]
+module = ["ingest_pipeline.tools.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_untyped_calls = false
@@ -108,28 +108,28 @@ disallow_any_generics = false
 warn_return_any = false
 
 [tool.importlinter]
-root_package = "tizertmaint_pipeline"
+root_package = "ingest_pipeline"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Pipeline layers"
 type = "layers"
 layers = [
-    "tizertmaint_pipeline.cli",
-    "tizertmaint_pipeline.runtime",
-    "tizertmaint_pipeline.adapters",
-    "tizertmaint_pipeline.stages",
-    "tizertmaint_pipeline.ports",
-    "tizertmaint_pipeline.domain",
+    "ingest_pipeline.cli",
+    "ingest_pipeline.runtime",
+    "ingest_pipeline.adapters",
+    "ingest_pipeline.stages",
+    "ingest_pipeline.ports",
+    "ingest_pipeline.domain",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Domain, ports and stages stay free of SDKs and adapters"
 type = "forbidden"
 source_modules = [
-    "tizertmaint_pipeline.domain",
-    "tizertmaint_pipeline.ports",
-    "tizertmaint_pipeline.stages",
+    "ingest_pipeline.domain",
+    "ingest_pipeline.ports",
+    "ingest_pipeline.stages",
 ]
 forbidden_modules = [
     "asyncpg",
@@ -139,29 +139,29 @@ forbidden_modules = [
     "pypdfium2",
     "python_calamine",
     "tiktoken",
-    "tizertmaint_pipeline.adapters",
-    "tizertmaint_pipeline.runtime",
+    "ingest_pipeline.adapters",
+    "ingest_pipeline.runtime",
 ]
 
 [[tool.importlinter.contracts]]
 name = "The pipeline never depends on standalone tools"
 type = "forbidden"
 source_modules = [
-    "tizertmaint_pipeline.cli",
-    "tizertmaint_pipeline.runtime",
-    "tizertmaint_pipeline.adapters",
-    "tizertmaint_pipeline.stages",
-    "tizertmaint_pipeline.ports",
-    "tizertmaint_pipeline.domain",
+    "ingest_pipeline.cli",
+    "ingest_pipeline.runtime",
+    "ingest_pipeline.adapters",
+    "ingest_pipeline.stages",
+    "ingest_pipeline.ports",
+    "ingest_pipeline.domain",
 ]
-forbidden_modules = ["tizertmaint_pipeline.tools"]
+forbidden_modules = ["ingest_pipeline.tools"]
 
 [build-system]
 requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["tizertmaint_pipeline*"]
+include = ["ingest_pipeline*"]
 
 [tool.setuptools.package-data]
-"tizertmaint_pipeline" = ["sql/*.sql"]
+"ingest_pipeline" = ["sql/*.sql"]

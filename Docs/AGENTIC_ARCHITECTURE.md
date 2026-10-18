@@ -68,7 +68,7 @@ There are also 5 empty `Readme.md` placeholders.
 | Observation (verified in `Data\DATAROOM CRV`) | Impact on the agent |
 |---|---|
 | Heavy duplication: `+`-encoded copies, `(2)`, `.doc` + `.pdf` pairs, `V1`/`V2`/`VF`/"corrigée"/"provisoire", the same report in `MAA` and `Autres` | Collapse identical `content_hash` hits into one citation with "also filed at…"; model **version families** with a final-version preference |
-| Folder ≠ content: `MAA` = Tizert (+ Alous, Amane N'Tazart); `SOMIFER` holds Bleida / Jbel Laasel / Jbel Nzourk; `CMO` = Oumjrane (+ Rich Merzoug, Boukerzia); `AGM` = Akka, Agoujgal, Tazalakht, Tasrirt, Sidi Ali | Path-derived `site_ids` in [crv.py](../src/ingestion/tizertmaint_pipeline/domain/crv.py) are too coarse → **entity gazetteer** with deposit → site → company aliases and spelling variants (Ouansimi/Ouanssimi, Laasel/Laassel/Laasal) |
+| Folder ≠ content: `MAA` = Tizert (+ Alous, Amane N'Tazart); `SOMIFER` holds Bleida / Jbel Laasel / Jbel Nzourk; `CMO` = Oumjrane (+ Rich Merzoug, Boukerzia); `AGM` = Akka, Agoujgal, Tazalakht, Tasrirt, Sidi Ali | Path-derived `site_ids` in [crv.py](../src/ingestion/ingest_pipeline/domain/crv.py) are too coarse → **entity gazetteer** with deposit → site → company aliases and spelling variants (Ouansimi/Ouanssimi, Laasel/Laassel/Laasal) |
 | 1995 → 2025 time span; dates live in filenames (`-05-2011`, `181215`, `260924`, `2019-11`) and cover pages | Index has **no document date**. Timelines (B) and "date each value" (Q45) need `document_date` + `date_basis` |
 | Cover-only stubs (e.g. `CR-AR-OJ-RP-23-14.doc`, Q56) | `is_stub` flag (word count / page count) |
 | Scanned historical reports, 2-column articles, value-heavy tables | Keep layout/OCR route; enable table observations for comparison questions |
@@ -299,7 +299,7 @@ reducer-backed keys.
 * **Prompt injection:** retrieved documents are data, never instructions. Tool outputs are wrapped and delimited, and external web/literature content passes through a separate summariser before it reaches `compose`.
 * **External egress:** external calls go only to allow-listed connectors. Queries sent to external APIs must not contain internal confidential content (site names and figures are stripped unless a policy allows them).
 * **Safety-critical topics:** for cyanidation, PPE and hazardous reagents, `guard_out` requires an internal procedure citation or refuses. `HumanInTheLoopMiddleware` and interrupts are available for "bloquant" outputs (cost estimates, Sheet1 row 14).
-* **Observability:** OpenTelemetry (the pipeline already has an [otel adapter](../src/ingestion/tizertmaint_pipeline/adapters/telemetry/otel.py)) exports to Application Insights with GenAI semantic conventions. LangSmith tracing is used only if self-hosted or approved for this data (`LANGSMITH_OTEL_ENABLED`). Prompts, retrieved text and user content follow the same data-handling policy as the corpus.
+* **Observability:** OpenTelemetry (the pipeline already has an [otel adapter](../src/ingestion/ingest_pipeline/adapters/telemetry/otel.py)) exports to Application Insights with GenAI semantic conventions. LangSmith tracing is used only if self-hosted or approved for this data (`LANGSMITH_OTEL_ENABLED`). Prompts, retrieved text and user content follow the same data-handling policy as the corpus.
 
 ---
 

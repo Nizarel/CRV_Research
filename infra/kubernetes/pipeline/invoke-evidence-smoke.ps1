@@ -482,7 +482,7 @@ switch ($Step) {
             'gold.jsonl' = (Join-Path $repo $bakeoff.goldPath)
         }
         $output = Invoke-ClusterJob -Kubectl $kubectl -Prefix 'crv-bakeoff-score' -ServiceAccount 'crv-pipeline-worker' -ClientId (Get-ClientId $workerIdentity) `
-            -Command @('python', '-m', 'tizertmaint_pipeline.tools.bakeoff') -Arguments @('score', '--sample', '/smoke/sample.json', '--gold', '/smoke/gold.jsonl') `
+            -Command @('python', '-m', 'ingest_pipeline.tools.bakeoff') -Arguments @('score', '--sample', '/smoke/sample.json', '--gold', '/smoke/gold.jsonl') `
             -ConfigMap 'crv-bakeoff-inputs' -UsePipelineConfig -Env @{ TIZ_DB__USER = $workerIdentity } -TimeoutSeconds 900
         $dir = Join-Path $repo $bakeoff.reportDir
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -492,7 +492,7 @@ switch ($Step) {
         if (-not (Test-Path -LiteralPath $python)) { $python = 'python' }
         Push-Location (Join-Path $repo 'src/ingestion')
         try {
-            & $python -m tizertmaint_pipeline.tools.bakeoff render --report $logs --out (Join-Path $dir 'report.md') --json-out (Join-Path $dir 'report.json')
+            & $python -m ingest_pipeline.tools.bakeoff render --report $logs --out (Join-Path $dir 'report.md') --json-out (Join-Path $dir 'report.json')
             if ($LASTEXITCODE -ne 0) { throw 'Rendering the bake-off report failed.' }
         }
         finally { Pop-Location }

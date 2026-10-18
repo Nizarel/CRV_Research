@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from tizertmaint_pipeline.adapters.postgres.evidence import PostgresEvidenceStore
-from tizertmaint_pipeline.domain.projection import ProjectionItem, ProjectionState
+from ingest_pipeline.adapters.postgres.evidence import PostgresEvidenceStore
+from ingest_pipeline.domain.projection import ProjectionItem, ProjectionState
 
 NOW = datetime(2026, 10, 13, tzinfo=UTC)
 

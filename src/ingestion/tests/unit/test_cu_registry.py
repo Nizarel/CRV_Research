@@ -7,9 +7,9 @@ import pytest
 from evidence_fakes import FakeContentAnalysis
 from fixture_builders import repo_file
 
-from tizertmaint_pipeline.adapters.azure_ai.cu_registry import load_registry, verify_registry
-from tizertmaint_pipeline.domain.cu import AnalyzerRegistry
-from tizertmaint_pipeline.domain.errors import ConfigurationError
+from ingest_pipeline.adapters.azure_ai.cu_registry import load_registry, verify_registry
+from ingest_pipeline.domain.cu import AnalyzerRegistry
+from ingest_pipeline.domain.errors import ConfigurationError
 
 REGISTRY = "infra/content-understanding/ingestion-pilot.json"
 PREBUILT = {

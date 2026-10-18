@@ -9,13 +9,13 @@ import pytest
 from evidence_harness import build_evidence_harness
 from fixture_builders import PdfPage, Sheet, pdf_bytes, repo_file, xlsx_bytes
 
-from tizertmaint_pipeline.adapters.parsers.calamine import CalamineSpreadsheetReader
-from tizertmaint_pipeline.adapters.parsers.pdfium import PdfiumToolkit
-from tizertmaint_pipeline.adapters.parsers.tokenizers import ApproximateCounter
-from tizertmaint_pipeline.config import PipelineSettings, load_policies
-from tizertmaint_pipeline.domain.chunks import ChunkKind, EvidenceChunk
-from tizertmaint_pipeline.domain.crv import research_context
-from tizertmaint_pipeline.domain.evidence import (
+from ingest_pipeline.adapters.parsers.calamine import CalamineSpreadsheetReader
+from ingest_pipeline.adapters.parsers.pdfium import PdfiumToolkit
+from ingest_pipeline.adapters.parsers.tokenizers import ApproximateCounter
+from ingest_pipeline.config import PipelineSettings, load_policies
+from ingest_pipeline.domain.chunks import ChunkKind, EvidenceChunk
+from ingest_pipeline.domain.crv import research_context
+from ingest_pipeline.domain.evidence import (
     BlockKind,
     EvidenceBlock,
     EvidenceCell,
@@ -24,13 +24,13 @@ from tizertmaint_pipeline.domain.evidence import (
     Locator,
     LocatorKind,
 )
-from tizertmaint_pipeline.domain.models import SourceProvenance, SourceSnapshot, UnitRecord
-from tizertmaint_pipeline.domain.observations import numeric_observations
-from tizertmaint_pipeline.domain.routing import PageSignals, Route, RoutingPolicy, classify_page
-from tizertmaint_pipeline.domain.states import StageName
-from tizertmaint_pipeline.stages.chunkers import ChunkingSettings, table_bodies
-from tizertmaint_pipeline.stages.normalizers.native import normalize_spreadsheet
-from tizertmaint_pipeline.stages.project_search import ProjectionSettings, build_row
+from ingest_pipeline.domain.models import SourceProvenance, SourceSnapshot, UnitRecord
+from ingest_pipeline.domain.observations import numeric_observations
+from ingest_pipeline.domain.routing import PageSignals, Route, RoutingPolicy, classify_page
+from ingest_pipeline.domain.states import StageName
+from ingest_pipeline.stages.chunkers import ChunkingSettings, table_bodies
+from ingest_pipeline.stages.normalizers.native import normalize_spreadsheet
+from ingest_pipeline.stages.project_search import ProjectionSettings, build_row
 
 
 def crv_schema():

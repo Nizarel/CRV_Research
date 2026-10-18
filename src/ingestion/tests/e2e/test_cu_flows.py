@@ -10,21 +10,21 @@ from evidence_fakes import PFD_ANALYZER, FakeContentAnalysis
 from evidence_harness import MAX_SOURCE, EvidenceKit, build_evidence_harness
 from fixture_builders import A3_LANDSCAPE, PdfPage, pdf_bytes
 
-from tizertmaint_pipeline.domain.cu import PROVIDER
-from tizertmaint_pipeline.domain.routing import (
+from ingest_pipeline.domain.cu import PROVIDER
+from ingest_pipeline.domain.routing import (
     CuProfileRule,
     EscalationRule,
     RoutingPolicy,
     UnitKind,
 )
-from tizertmaint_pipeline.domain.states import JobStatus, StageName, WorkerPool
-from tizertmaint_pipeline.ports.providers import (
+from ingest_pipeline.domain.states import JobStatus, StageName, WorkerPool
+from ingest_pipeline.ports.providers import (
     AnalysisPoll,
     AnalysisRequest,
     AnalysisStatus,
     LayoutSubmission,
 )
-from tizertmaint_pipeline.stages.cu import CuSettings
+from ingest_pipeline.stages.cu import CuSettings
 
 DRAWINGS = frozenset({UnitKind.DRAWING_SHEET})
 CU_FIRST = RoutingPolicy(

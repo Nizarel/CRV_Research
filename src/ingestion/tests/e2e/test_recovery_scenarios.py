@@ -8,18 +8,18 @@ import hashlib
 import pytest
 from pipeline_harness import LEASE_SECONDS, FunctionStage, Harness, HarnessFactory
 
-from tizertmaint_pipeline.domain.envelope import WorkEnvelope
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.domain.envelope import WorkEnvelope
+from ingest_pipeline.domain.errors import (
     ErrorCategory,
     InvalidInputError,
     TransientError,
     UnsupportedContentError,
 )
-from tizertmaint_pipeline.domain.models import ArtifactLink, StageJob, StageOutcome
-from tizertmaint_pipeline.domain.states import JobStatus, StageName, WorkerPool
-from tizertmaint_pipeline.faults import FaultPoint, SimulatedCrash
-from tizertmaint_pipeline.runtime.executor import Disposition
-from tizertmaint_pipeline.stages.base import StageContext
+from ingest_pipeline.domain.models import ArtifactLink, StageJob, StageOutcome
+from ingest_pipeline.domain.states import JobStatus, StageName, WorkerPool
+from ingest_pipeline.faults import FaultPoint, SimulatedCrash
+from ingest_pipeline.runtime.executor import Disposition
+from ingest_pipeline.stages.base import StageContext
 
 BLOB = "2-Zone Broyage/1-Grinding 1/6220-PP-2211 Pump/Datasheets/pump.pdf"
 DATA = b"%PDF-1.7 pump datasheet"

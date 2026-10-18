@@ -1,4 +1,4 @@
-"""Tizert maintenance ingestion pipeline: durable, evidence-first (v2).
+"""CRV research ingestion pipeline: durable, evidence-first.
 
 Layering (enforced by import-linter contracts in ``pyproject.toml``):
 
@@ -7,6 +7,6 @@ Layering (enforced by import-linter contracts in ``pyproject.toml``):
 ``adapters`` Azure, PostgreSQL and in-memory implementations of the ports
 ``stages``   business steps, depending only on ports and domain
 ``runtime``  coordinator, worker and wiring
-``cli``      ``tizagent-pipeline`` entry point
-``tools``    standalone v1 tools (discovery, knowledge export, retrieval evaluation)
+``cli``      ``crv-pipeline`` and compatibility ``tizagent-pipeline`` entry points
+``tools``    standalone discovery and extraction-policy bakeoff tools
 """

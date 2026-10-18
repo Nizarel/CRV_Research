@@ -9,17 +9,17 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from tizertmaint_pipeline.adapters.postgres.migrations import (
+from ingest_pipeline.adapters.postgres.migrations import (
     BASELINE_VERSION,
     Migration,
     apply_migrations,
     load_migrations,
 )
-from tizertmaint_pipeline.adapters.telemetry.json_logging import JsonFormatter
-from tizertmaint_pipeline.cli import build_parser
-from tizertmaint_pipeline.config import PipelineSettings, require
-from tizertmaint_pipeline.domain.errors import ConfigurationError, IntegrityError
-from tizertmaint_pipeline.domain.states import WorkerPool
+from ingest_pipeline.adapters.telemetry.json_logging import JsonFormatter
+from ingest_pipeline.cli import build_parser
+from ingest_pipeline.config import PipelineSettings, require
+from ingest_pipeline.domain.errors import ConfigurationError, IntegrityError
+from ingest_pipeline.domain.states import WorkerPool
 
 
 def test_packaged_migrations_load_in_order_with_lf_checksums() -> None:
@@ -134,7 +134,7 @@ def test_settings_validate_heartbeat_and_required_values(monkeypatch: pytest.Mon
 
 def test_json_formatter_adds_context_and_redacts_content() -> None:
     record = logging.LogRecord(
-        "tizertmaint_pipeline", logging.INFO, __file__, 1, "Stage %s", ("done",), None
+        "ingest_pipeline", logging.INFO, __file__, 1, "Stage %s", ("done",), None
     )
     record.job_id = "job-1"
     record.content = "confidential extracted text"
@@ -176,7 +176,7 @@ def test_cli_parser_exposes_operator_commands() -> None:
 
 
 def test_blob_list_keeps_utf8_names_and_drops_blanks(tmp_path: Path) -> None:
-    from tizertmaint_pipeline.cli import read_blob_list
+    from ingest_pipeline.cli import read_blob_list
 
     names = tmp_path / "blobs.txt"
     raw = "\ufeff2-Zone Broyage/7-Schéma élec & instrum/a.pdf\r\n\n# comment\nb.xlsx\nb.xlsx\n"
@@ -218,8 +218,8 @@ def test_evidence_settings_reject_unsafe_values(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_registry_registers_every_evidence_stage() -> None:
-    from tizertmaint_pipeline.domain.states import StageName
-    from tizertmaint_pipeline.runtime.bootstrap import build_registry
+    from ingest_pipeline.domain.states import StageName
+    from ingest_pipeline.runtime.bootstrap import build_registry
 
     registry = build_registry(PipelineSettings())
     for stage in (
@@ -243,8 +243,8 @@ def test_registry_registers_every_evidence_stage() -> None:
 def test_cu_settings_and_arm_policies(monkeypatch: pytest.MonkeyPatch) -> None:
     from fixture_builders import repo_file
 
-    from tizertmaint_pipeline.config import load_policies
-    from tizertmaint_pipeline.domain.routing import Route, UnitKind
+    from ingest_pipeline.config import load_policies
+    from ingest_pipeline.domain.routing import Route, UnitKind
 
     policies_path = repo_file("infra/content-understanding/bakeoff-policies.json")
     monkeypatch.setenv("TIZ_CU__ENDPOINT", "https://cu.example")
@@ -288,7 +288,7 @@ def test_cu_settings_and_arm_policies(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_default_routing_policy_is_selected_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     from fixture_builders import repo_file
 
-    from tizertmaint_pipeline.config import load_policies
+    from ingest_pipeline.config import load_policies
 
     path = repo_file("infra/content-understanding/routing-policies.json")
     monkeypatch.setenv("TIZ_POLICIES_PATH", str(path))
@@ -313,7 +313,7 @@ def test_default_routing_policy_is_selected_by_name(monkeypatch: pytest.MonkeyPa
 
 
 def test_policy_registry_rejects_mismatched_versions_and_shared_releases() -> None:
-    from tizertmaint_pipeline.config import PolicyRegistry
+    from ingest_pipeline.config import PolicyRegistry
 
     with pytest.raises(ValidationError, match="declares version"):
         PolicyRegistry.model_validate(
@@ -342,7 +342,7 @@ def test_cli_parser_exposes_enqueue_arm() -> None:
 
 
 def test_legacy_classification() -> None:
-    from tizertmaint_pipeline.domain.legacy import LegacyItem, LegacyState
+    from ingest_pipeline.domain.legacy import LegacyItem, LegacyState
 
     def item(chunks: int, evidence: str | None) -> LegacyItem:
         return LegacyItem("a" * 64, "indexed", chunks, 3, 0, evidence)

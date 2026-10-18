@@ -63,7 +63,7 @@ def _baseline_sql() -> str:
 async def _bootstrap(dsn: str) -> None:
     import asyncpg
 
-    from tizertmaint_pipeline.adapters.postgres.migrations import (
+    from ingest_pipeline.adapters.postgres.migrations import (
         BASELINE_VERSION,
         Migration,
         apply_migrations,
@@ -115,8 +115,8 @@ def pg_dsn() -> Iterator[str]:
 async def pg_pool(pg_dsn: str) -> AsyncIterator[Any]:
     from pydantic import SecretStr
 
-    from tizertmaint_pipeline.adapters.postgres.pool import create_pool
-    from tizertmaint_pipeline.config import DatabaseSettings
+    from ingest_pipeline.adapters.postgres.pool import create_pool
+    from ingest_pipeline.config import DatabaseSettings
 
     pool = await create_pool(DatabaseSettings(dsn=SecretStr(pg_dsn), max_pool_size=8))
     async with pool.acquire() as connection:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tizertmaint_pipeline.domain.cu import (
+from ingest_pipeline.domain.cu import (
     AnalyzerRegistry,
     flatten_fields,
     parse_source,
@@ -10,9 +10,9 @@ from tizertmaint_pipeline.domain.cu import (
     subset_mismatches,
     usage_from,
 )
-from tizertmaint_pipeline.domain.errors import ConfigurationError
-from tizertmaint_pipeline.domain.quality import UnitQuality, failed_rule, measure_layout
-from tizertmaint_pipeline.domain.routing import (
+from ingest_pipeline.domain.errors import ConfigurationError
+from ingest_pipeline.domain.quality import UnitQuality, failed_rule, measure_layout
+from ingest_pipeline.domain.routing import (
     CuProfileRule,
     EscalationRule,
     Family,
@@ -24,7 +24,7 @@ from tizertmaint_pipeline.domain.routing import (
     plan_id_for,
     plan_units,
 )
-from tizertmaint_pipeline.domain.sniff import FileKind
+from ingest_pipeline.domain.sniff import FileKind
 
 HASH = "a" * 64
 REGISTRY = {

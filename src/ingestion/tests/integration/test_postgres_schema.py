@@ -6,13 +6,13 @@ from typing import Any
 
 import pytest
 
-from tizertmaint_pipeline.adapters.postgres.migrations import (
+from ingest_pipeline.adapters.postgres.migrations import (
     BASELINE_VERSION,
     Migration,
     apply_migrations,
     load_migrations,
 )
-from tizertmaint_pipeline.domain.errors import IntegrityError
+from ingest_pipeline.domain.errors import IntegrityError
 
 pytestmark = pytest.mark.integration
 

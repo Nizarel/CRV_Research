@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tizertmaint_pipeline.domain.evidence import BlockKind, LocatorKind
-from tizertmaint_pipeline.domain.models import UnitRecord
-from tizertmaint_pipeline.domain.routing import Route, UnitKind
-from tizertmaint_pipeline.stages.normalizers.ifc import (
+from ingest_pipeline.domain.evidence import BlockKind, LocatorKind
+from ingest_pipeline.domain.models import UnitRecord
+from ingest_pipeline.domain.routing import Route, UnitKind
+from ingest_pipeline.stages.normalizers.ifc import (
     decode_string,
     normalize_ifc,
     read_ifc,
@@ -67,7 +67,7 @@ def test_step_strings_and_arguments() -> None:
 
 
 def test_document_numbers_need_a_full_code() -> None:
-    from tizertmaint_pipeline.stages.normalizers.ifc import DOCUMENT
+    from ingest_pipeline.stages.normalizers.ifc import DOCUMENT
 
     text = "SP0904-6028-S-MODL-25137_001 ref SP0904-6100-S and SP0904-0000-1805-002."
     assert DOCUMENT.findall(text) == ["SP0904-6028-S-MODL-25137", "SP0904-0000-1805-002"]

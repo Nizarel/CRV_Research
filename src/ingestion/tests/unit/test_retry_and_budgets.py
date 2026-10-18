@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from tizertmaint_pipeline.domain.budgets import (
+from ingest_pipeline.domain.budgets import (
     BudgetLimits,
     admit,
     freed_submit_stage,
@@ -16,16 +16,16 @@ from tizertmaint_pipeline.domain.budgets import (
     on_throttle,
     release,
 )
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.domain.errors import (
     ErrorCategory,
     InvalidInputError,
     ThrottledError,
     TransientError,
     classify,
 )
-from tizertmaint_pipeline.domain.models import StageOutcome
-from tizertmaint_pipeline.domain.retry import RetryPolicy, failure_outcome
-from tizertmaint_pipeline.domain.states import JobStatus, StageName
+from ingest_pipeline.domain.models import StageOutcome
+from ingest_pipeline.domain.retry import RetryPolicy, failure_outcome
+from ingest_pipeline.domain.states import JobStatus, StageName
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 POLICY = RetryPolicy(base_delay_seconds=2, max_delay_seconds=60, pause_delay_seconds=900)

@@ -6,14 +6,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from tizertmaint_pipeline.domain.batching import pack
-from tizertmaint_pipeline.domain.errors import IntegrityError
-from tizertmaint_pipeline.domain.projection import (
+from ingest_pipeline.domain.batching import pack
+from ingest_pipeline.domain.errors import IntegrityError
+from ingest_pipeline.domain.projection import (
     ItemDisposition,
     ProjectionReport,
     classify_item,
 )
-from tizertmaint_pipeline.domain.vectors import reconcile_embeddings
+from ingest_pipeline.domain.vectors import reconcile_embeddings
 
 
 @given(

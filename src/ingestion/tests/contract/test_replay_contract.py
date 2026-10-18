@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 from pipeline_harness import START
 
-from tizertmaint_pipeline.adapters.memory.ledger import InMemoryLedger
-from tizertmaint_pipeline.domain.errors import InvalidInputError
-from tizertmaint_pipeline.domain.models import JobSpec, PlanRecord, StageOutcome, UnitRecord
-from tizertmaint_pipeline.domain.states import JobStatus, StageName, WorkerPool
+from ingest_pipeline.adapters.memory.ledger import InMemoryLedger
+from ingest_pipeline.domain.errors import InvalidInputError
+from ingest_pipeline.domain.models import JobSpec, PlanRecord, StageOutcome, UnitRecord
+from ingest_pipeline.domain.states import JobStatus, StageName, WorkerPool
 
 pytestmark = pytest.mark.contract
 
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.contract
 def ledger(request: pytest.FixtureRequest) -> Any:
     if request.param == "memory":
         return InMemoryLedger()
-    from tizertmaint_pipeline.adapters.postgres.ledger import PostgresLedger
+    from ingest_pipeline.adapters.postgres.ledger import PostgresLedger
 
     return PostgresLedger(request.getfixturevalue("pg_pool"))
 

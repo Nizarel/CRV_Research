@@ -16,30 +16,30 @@ from evidence_fakes import (
 from fixture_builders import index_fields
 from pipeline_harness import Harness, build_harness
 
-from tizertmaint_pipeline.adapters.memory.evidence import InMemoryEvidenceStore
-from tizertmaint_pipeline.adapters.parsers.calamine import CalamineSpreadsheetReader
-from tizertmaint_pipeline.adapters.parsers.pdfium import PdfiumToolkit
-from tizertmaint_pipeline.adapters.parsers.tokenizers import ApproximateCounter
-from tizertmaint_pipeline.domain.models import StageJob
-from tizertmaint_pipeline.domain.routing import RoutingPolicy
-from tizertmaint_pipeline.domain.states import JobStatus, StageName
-from tizertmaint_pipeline.ports.parsing import DrawingReader
-from tizertmaint_pipeline.stages.base import AccountClients
-from tizertmaint_pipeline.stages.chunk import ChunkStage
-from tizertmaint_pipeline.stages.chunkers import ChunkingSettings
-from tizertmaint_pipeline.stages.cu import CuPollStage, CuSettings, CuSubmitStage
-from tizertmaint_pipeline.stages.di import (
+from ingest_pipeline.adapters.memory.evidence import InMemoryEvidenceStore
+from ingest_pipeline.adapters.parsers.calamine import CalamineSpreadsheetReader
+from ingest_pipeline.adapters.parsers.pdfium import PdfiumToolkit
+from ingest_pipeline.adapters.parsers.tokenizers import ApproximateCounter
+from ingest_pipeline.domain.models import StageJob
+from ingest_pipeline.domain.routing import RoutingPolicy
+from ingest_pipeline.domain.states import JobStatus, StageName
+from ingest_pipeline.ports.parsing import DrawingReader
+from ingest_pipeline.stages.base import AccountClients
+from ingest_pipeline.stages.chunk import ChunkStage
+from ingest_pipeline.stages.chunkers import ChunkingSettings
+from ingest_pipeline.stages.cu import CuPollStage, CuSettings, CuSubmitStage
+from ingest_pipeline.stages.di import (
     DiPollStage,
     DiSettings,
     DiSubmitStage,
     FigureAssetsStage,
 )
-from tizertmaint_pipeline.stages.embed import EmbedStage
-from tizertmaint_pipeline.stages.extract import NativeParseStage, NormalizeStage
-from tizertmaint_pipeline.stages.links import PlacementRouter, preflight_job, project_job
-from tizertmaint_pipeline.stages.plan import LayoutOptions, PlanStage
-from tizertmaint_pipeline.stages.preflight import PreflightStage
-from tizertmaint_pipeline.stages.project_search import ProjectionSettings, ProjectSearchStage
+from ingest_pipeline.stages.embed import EmbedStage
+from ingest_pipeline.stages.extract import NativeParseStage, NormalizeStage
+from ingest_pipeline.stages.links import PlacementRouter, preflight_job, project_job
+from ingest_pipeline.stages.plan import LayoutOptions, PlanStage
+from ingest_pipeline.stages.preflight import PreflightStage
+from ingest_pipeline.stages.project_search import ProjectionSettings, ProjectSearchStage
 
 INDEX = "maint-evidence-test"
 MAX_SOURCE = 8 * 1024 * 1024

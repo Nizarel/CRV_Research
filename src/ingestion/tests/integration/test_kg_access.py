@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from tizertmaint_pipeline.adapters.postgres.kg_access import ensure_entra_login, grant_reader
-from tizertmaint_pipeline.domain.errors import InvalidInputError
+from ingest_pipeline.adapters.postgres.kg_access import ensure_entra_login, grant_reader
+from ingest_pipeline.domain.errors import InvalidInputError
 
 pytestmark = pytest.mark.integration
 

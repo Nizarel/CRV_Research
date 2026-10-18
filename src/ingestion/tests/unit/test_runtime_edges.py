@@ -6,16 +6,16 @@ from datetime import timedelta
 import pytest
 from pipeline_harness import Harness, build_harness
 
-from tizertmaint_pipeline.adapters.memory.ledger import InMemoryLedger
-from tizertmaint_pipeline.domain.errors import ConfigurationError, ErrorCategory
-from tizertmaint_pipeline.domain.models import JobSpec
-from tizertmaint_pipeline.domain.planning import JobPlanner
-from tizertmaint_pipeline.domain.states import JobStatus, StageName, WorkerPool
-from tizertmaint_pipeline.runtime.coordinator import Coordinator, OutboxDispatcher
-from tizertmaint_pipeline.runtime.executor import StageExecutor
-from tizertmaint_pipeline.runtime.registry import StageRegistry
-from tizertmaint_pipeline.runtime.worker import Worker
-from tizertmaint_pipeline.stages.base import StageServices
+from ingest_pipeline.adapters.memory.ledger import InMemoryLedger
+from ingest_pipeline.domain.errors import ConfigurationError, ErrorCategory
+from ingest_pipeline.domain.models import JobSpec
+from ingest_pipeline.domain.planning import JobPlanner
+from ingest_pipeline.domain.states import JobStatus, StageName, WorkerPool
+from ingest_pipeline.runtime.coordinator import Coordinator, OutboxDispatcher
+from ingest_pipeline.runtime.executor import StageExecutor
+from ingest_pipeline.runtime.registry import StageRegistry
+from ingest_pipeline.runtime.worker import Worker
+from ingest_pipeline.stages.base import StageServices
 
 BLOB = "zone/a.pdf"
 

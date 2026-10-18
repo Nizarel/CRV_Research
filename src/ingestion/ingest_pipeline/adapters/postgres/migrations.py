@@ -48,7 +48,7 @@ def normalize_sql(text: str) -> str:
 
 
 def load_migrations(directory: Traversable | None = None) -> list[Migration]:
-    root = directory or resources.files("tizertmaint_pipeline").joinpath("sql")
+    root = directory or resources.files("ingest_pipeline").joinpath("sql")
     migrations: list[Migration] = []
     for entry in root.iterdir():
         match = _NAME.match(entry.name)

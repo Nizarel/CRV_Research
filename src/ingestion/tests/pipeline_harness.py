@@ -9,24 +9,24 @@ from datetime import UTC, datetime
 from random import Random
 from typing import Any
 
-from tizertmaint_pipeline.adapters.memory.bus import InMemoryBus
-from tizertmaint_pipeline.adapters.memory.clock import ManualClock
-from tizertmaint_pipeline.adapters.memory.ledger import InMemoryLedger, InMemorySnapshots
-from tizertmaint_pipeline.adapters.memory.storage import (
+from ingest_pipeline.adapters.memory.bus import InMemoryBus
+from ingest_pipeline.adapters.memory.clock import ManualClock
+from ingest_pipeline.adapters.memory.ledger import InMemoryLedger, InMemorySnapshots
+from ingest_pipeline.adapters.memory.storage import (
     InMemoryArtifactStore,
     InMemorySourceReader,
 )
-from tizertmaint_pipeline.adapters.memory.telemetry_recorder import RecordingTelemetry
-from tizertmaint_pipeline.domain.models import JobSpec, StageJob, StageOutcome
-from tizertmaint_pipeline.domain.retry import RetryPolicy
-from tizertmaint_pipeline.domain.states import StageName, WorkerPool
-from tizertmaint_pipeline.faults import FaultInjector, FaultPoint
-from tizertmaint_pipeline.runtime.coordinator import LeaseReconciler, OutboxDispatcher
-from tizertmaint_pipeline.runtime.executor import ExecutorSettings, StageExecutor
-from tizertmaint_pipeline.runtime.registry import StageRegistry
-from tizertmaint_pipeline.runtime.worker import Worker
-from tizertmaint_pipeline.stages.base import StageContext, StageHandler, StageServices
-from tizertmaint_pipeline.stages.snapshot import SnapshotStage, snapshot_job
+from ingest_pipeline.adapters.memory.telemetry_recorder import RecordingTelemetry
+from ingest_pipeline.domain.models import JobSpec, StageJob, StageOutcome
+from ingest_pipeline.domain.retry import RetryPolicy
+from ingest_pipeline.domain.states import StageName, WorkerPool
+from ingest_pipeline.faults import FaultInjector, FaultPoint
+from ingest_pipeline.runtime.coordinator import LeaseReconciler, OutboxDispatcher
+from ingest_pipeline.runtime.executor import ExecutorSettings, StageExecutor
+from ingest_pipeline.runtime.registry import StageRegistry
+from ingest_pipeline.runtime.worker import Worker
+from ingest_pipeline.stages.base import StageContext, StageHandler, StageServices
+from ingest_pipeline.stages.snapshot import SnapshotStage, snapshot_job
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 LEASE_SECONDS = 60.0

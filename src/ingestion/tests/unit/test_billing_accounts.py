@@ -11,22 +11,22 @@ from evidence_fakes import FakeContentAnalysis
 from fixture_builders import repo_file
 from pydantic import ValidationError
 
-from tizertmaint_pipeline.adapters.azure_ai.cu_registry import load_registry, verify_registry
-from tizertmaint_pipeline.config import (
+from ingest_pipeline.adapters.azure_ai.cu_registry import load_registry, verify_registry
+from ingest_pipeline.config import (
     BillingSettings,
     ExternalAccount,
     PipelineSettings,
     load_billing,
 )
-from tizertmaint_pipeline.domain.cu import PROVIDER as CU
-from tizertmaint_pipeline.domain.cu import usage_from
-from tizertmaint_pipeline.domain.errors import ConfigurationError
-from tizertmaint_pipeline.domain.models import ProviderUsage
-from tizertmaint_pipeline.domain.spend import Prices
-from tizertmaint_pipeline.domain.states import StageName
-from tizertmaint_pipeline.ports.ledger import ActiveWork
-from tizertmaint_pipeline.runtime.bootstrap import _matching_analyzers, spend_policy
-from tizertmaint_pipeline.stages.spend import BillingAccount, SpendPolicy
+from ingest_pipeline.domain.cu import PROVIDER as CU
+from ingest_pipeline.domain.cu import usage_from
+from ingest_pipeline.domain.errors import ConfigurationError
+from ingest_pipeline.domain.models import ProviderUsage
+from ingest_pipeline.domain.spend import Prices
+from ingest_pipeline.domain.states import StageName
+from ingest_pipeline.ports.ledger import ActiveWork
+from ingest_pipeline.runtime.bootstrap import _matching_analyzers, spend_policy
+from ingest_pipeline.stages.spend import BillingAccount, SpendPolicy
 
 PRICES = Prices(
     di_page_usd=0.01,

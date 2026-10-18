@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tizertmaint_pipeline.tools.discovery import discover, disposition, inventory, path_context
+from ingest_pipeline.tools.discovery import discover, disposition, inventory, path_context
 
 
 def test_duplicates_keep_placements_and_portable_ids(tmp_path: Path) -> None:

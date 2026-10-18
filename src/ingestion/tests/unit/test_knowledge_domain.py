@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from tizertmaint_pipeline.domain.errors import InvalidInputError
-from tizertmaint_pipeline.domain.knowledge import (
+from ingest_pipeline.domain.errors import InvalidInputError
+from ingest_pipeline.domain.knowledge import (
     ProjectedAssertion,
     ProjectedEntity,
     build_projection,

@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from tizertmaint_pipeline.domain.ids import (
+from ingest_pipeline.domain.ids import (
     artifact_key,
     canonical_json,
     fingerprint,

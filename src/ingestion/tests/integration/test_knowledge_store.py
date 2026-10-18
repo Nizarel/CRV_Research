@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from tizertmaint_pipeline.adapters.postgres.knowledge import PostgresKnowledgeStore
-from tizertmaint_pipeline.domain.errors import IntegrityError
-from tizertmaint_pipeline.domain.knowledge import parse_registry
+from ingest_pipeline.adapters.postgres.knowledge import PostgresKnowledgeStore
+from ingest_pipeline.domain.errors import IntegrityError
+from ingest_pipeline.domain.knowledge import parse_registry
 
 pytestmark = pytest.mark.integration
 

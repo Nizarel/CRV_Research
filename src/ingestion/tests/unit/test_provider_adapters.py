@@ -12,21 +12,21 @@ from azure.core.exceptions import (
     ServiceRequestError,
 )
 
-from tizertmaint_pipeline.adapters.azure_ai.embeddings import (
+from ingest_pipeline.adapters.azure_ai.embeddings import (
     AzureOpenAIEmbeddings,
     translate_openai_error,
     utf8_token_upper_bound,
 )
-from tizertmaint_pipeline.adapters.azure_errors import parse_retry_after, translate_azure_error
-from tizertmaint_pipeline.adapters.parsers.tokenizers import ApproximateCounter, TiktokenCounter
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.adapters.azure_errors import parse_retry_after, translate_azure_error
+from ingest_pipeline.adapters.parsers.tokenizers import ApproximateCounter, TiktokenCounter
+from ingest_pipeline.domain.errors import (
     AuthError,
     IntegrityError,
     InvalidInputError,
     ThrottledError,
     TransientError,
 )
-from tizertmaint_pipeline.runtime.bootstrap import embedding_token_counter
+from ingest_pipeline.runtime.bootstrap import embedding_token_counter
 
 
 @pytest.mark.parametrize(

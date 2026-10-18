@@ -10,24 +10,24 @@ import pytest
 from azure.core.exceptions import ResourceExistsError, ResourceModifiedError, ResourceNotFoundError
 from azure.servicebus.exceptions import MessageSizeExceededError
 
-from tizertmaint_pipeline.adapters.blob.artifact_store import BlobArtifactStore
-from tizertmaint_pipeline.adapters.blob.intake import publish_intake
-from tizertmaint_pipeline.adapters.blob.source_reader import BlobSourceReader
-from tizertmaint_pipeline.adapters.local_intake import CorpusIntake
-from tizertmaint_pipeline.adapters.memory.storage import InMemoryArtifactStore
-from tizertmaint_pipeline.adapters.servicebus.transport import (
+from ingest_pipeline.adapters.blob.artifact_store import BlobArtifactStore
+from ingest_pipeline.adapters.blob.intake import publish_intake
+from ingest_pipeline.adapters.blob.source_reader import BlobSourceReader
+from ingest_pipeline.adapters.local_intake import CorpusIntake
+from ingest_pipeline.adapters.memory.storage import InMemoryArtifactStore
+from ingest_pipeline.adapters.servicebus.transport import (
     ServiceBusMessageReceiver,
     ServiceBusReceived,
     ServiceBusSender,
 )
-from tizertmaint_pipeline.domain.envelope import WorkEnvelope
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.domain.envelope import WorkEnvelope
+from ingest_pipeline.domain.errors import (
     IntegrityError,
     InvalidInputError,
     StaleSourceError,
 )
-from tizertmaint_pipeline.domain.intake import IntakeLimits
-from tizertmaint_pipeline.domain.states import StageName, WorkerPool
+from ingest_pipeline.domain.intake import IntakeLimits
+from ingest_pipeline.domain.states import StageName, WorkerPool
 
 
 class _Downloader:

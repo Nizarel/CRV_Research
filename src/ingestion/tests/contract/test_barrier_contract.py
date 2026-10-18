@@ -10,9 +10,9 @@ from typing import Any
 import pytest
 from pipeline_harness import START
 
-from tizertmaint_pipeline.adapters.memory.ledger import InMemoryLedger
-from tizertmaint_pipeline.domain.errors import ErrorCategory, IntegrityError
-from tizertmaint_pipeline.domain.models import (
+from ingest_pipeline.adapters.memory.ledger import InMemoryLedger
+from ingest_pipeline.domain.errors import ErrorCategory, IntegrityError
+from ingest_pipeline.domain.models import (
     ArtifactRef,
     JobSpec,
     PlanRecord,
@@ -21,7 +21,7 @@ from tizertmaint_pipeline.domain.models import (
     UnitRecord,
     UnitResult,
 )
-from tizertmaint_pipeline.domain.states import JobStatus, StageName, WorkerPool
+from ingest_pipeline.domain.states import JobStatus, StageName, WorkerPool
 
 pytestmark = pytest.mark.contract
 
@@ -37,7 +37,7 @@ class Backend:
 def backend(request: pytest.FixtureRequest) -> Backend:
     if request.param == "memory":
         return Backend(InMemoryLedger())
-    from tizertmaint_pipeline.adapters.postgres.ledger import PostgresLedger
+    from ingest_pipeline.adapters.postgres.ledger import PostgresLedger
 
     return Backend(PostgresLedger(request.getfixturevalue("pg_pool")))
 

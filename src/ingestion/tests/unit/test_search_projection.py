@@ -11,23 +11,23 @@ from typing import Any
 import pytest
 from fixture_builders import index_schema, repo_file
 
-from tizertmaint_pipeline.config import EmbeddingSettings
-from tizertmaint_pipeline.domain.chunks import ChunkKind, EvidenceChunk
-from tizertmaint_pipeline.domain.document_classes import (
+from ingest_pipeline.config import EmbeddingSettings
+from ingest_pipeline.domain.chunks import ChunkKind, EvidenceChunk
+from ingest_pipeline.domain.document_classes import (
     DOCUMENT_CLASSES,
     classify_document_category,
     classify_engineering_number,
     classify_file_name,
 )
-from tizertmaint_pipeline.domain.evidence import EvidenceKind, FieldObservation
-from tizertmaint_pipeline.domain.models import SourceSnapshot
-from tizertmaint_pipeline.domain.process_cases import process_case_id
-from tizertmaint_pipeline.stages.project_search import (
+from ingest_pipeline.domain.evidence import EvidenceKind, FieldObservation
+from ingest_pipeline.domain.models import SourceSnapshot
+from ingest_pipeline.domain.process_cases import process_case_id
+from ingest_pipeline.stages.project_search import (
     ProjectionSettings,
     build_row,
     canonical_order,
 )
-from tizertmaint_pipeline.stages.projection_fields import (
+from ingest_pipeline.stages.projection_fields import (
     MAX_TITLE_CHARS,
     UnitMetadata,
     placement_metadata,

@@ -6,11 +6,11 @@ from dataclasses import replace
 import pytest
 from pipeline_harness import Harness, HarnessFactory
 
-from tizertmaint_pipeline.domain.errors import ConfigurationError, UnsupportedContentError
-from tizertmaint_pipeline.domain.ids import legacy_placement_id, legacy_source_object_id
-from tizertmaint_pipeline.domain.models import Lease, SourceProvenance
-from tizertmaint_pipeline.domain.states import JobStatus, StageName
-from tizertmaint_pipeline.stages.base import StageContext
+from ingest_pipeline.domain.errors import ConfigurationError, UnsupportedContentError
+from ingest_pipeline.domain.ids import legacy_placement_id, legacy_source_object_id
+from ingest_pipeline.domain.models import Lease, SourceProvenance
+from ingest_pipeline.domain.states import JobStatus, StageName
+from ingest_pipeline.stages.base import StageContext
 
 BLOB = "2-Zone Broyage/1-Grinding 1/6220-PP-2211 Pump/Manuals/manual.pdf"
 DATA = b"%PDF-1.7 pump manual"

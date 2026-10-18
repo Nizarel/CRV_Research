@@ -10,17 +10,17 @@ from typing import Any
 import pytest
 from aiohttp import web
 
-from tizertmaint_pipeline.adapters.azure_ai.content_understanding import (
+from ingest_pipeline.adapters.azure_ai.content_understanding import (
     ContentUnderstandingClient,
 )
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.domain.errors import (
     ConfigurationError,
     IntegrityError,
     RemoteResultMissingError,
     ResourceExhaustedError,
     SubmissionUnknownError,
 )
-from tizertmaint_pipeline.ports.providers import AnalysisRequest, AnalysisStatus
+from ingest_pipeline.ports.providers import AnalysisRequest, AnalysisStatus
 
 RESULT_PATH = "/contentunderstanding/analyzerResults/3b31320d-8bab-4f88"
 ANALYZE = "/contentunderstanding/analyzers/tizert_pfd_sheet_v1:analyzeBinary"

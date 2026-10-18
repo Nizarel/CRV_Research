@@ -12,15 +12,15 @@ from typing import Any
 
 import pypdfium2 as pdfium
 
-from tizertmaint_pipeline.domain.cu import AnalyzerRegistry
-from tizertmaint_pipeline.domain.errors import (
+from ingest_pipeline.domain.cu import AnalyzerRegistry
+from ingest_pipeline.domain.errors import (
     InvalidInputError,
     RemoteResultMissingError,
     TransientError,
 )
-from tizertmaint_pipeline.domain.projection import ProjectionReport
-from tizertmaint_pipeline.domain.vectors import Vector
-from tizertmaint_pipeline.ports.providers import (
+from ingest_pipeline.domain.projection import ProjectionReport
+from ingest_pipeline.domain.vectors import Vector
+from ingest_pipeline.ports.providers import (
     AnalysisPoll,
     AnalysisRequest,
     AnalysisStatus,

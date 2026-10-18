@@ -9,11 +9,11 @@ from typing import Any
 import pytest
 from pipeline_harness import START
 
-from tizertmaint_pipeline.adapters.memory.evidence import InMemoryEvidenceStore
-from tizertmaint_pipeline.domain.errors import IntegrityError
-from tizertmaint_pipeline.domain.models import ArtifactRef
-from tizertmaint_pipeline.domain.projection import ProjectionItem, ProjectionState
-from tizertmaint_pipeline.ports.evidence import (
+from ingest_pipeline.adapters.memory.evidence import InMemoryEvidenceStore
+from ingest_pipeline.domain.errors import IntegrityError
+from ingest_pipeline.domain.models import ArtifactRef
+from ingest_pipeline.domain.projection import ProjectionItem, ProjectionState
+from ingest_pipeline.ports.evidence import (
     CachedExtraction,
     ChunkRecord,
     EvidenceRecord,
@@ -63,7 +63,7 @@ async def _seed(pool: Any) -> None:
 def backend(request: pytest.FixtureRequest) -> Backend:
     if request.param == "memory":
         return Backend(InMemoryEvidenceStore())
-    from tizertmaint_pipeline.adapters.postgres.evidence import PostgresEvidenceStore
+    from ingest_pipeline.adapters.postgres.evidence import PostgresEvidenceStore
 
     pool = request.getfixturevalue("pg_pool")
     return Backend(PostgresEvidenceStore(pool), pool)

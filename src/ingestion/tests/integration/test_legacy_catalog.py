@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from pipeline_harness import START
 
-from tizertmaint_pipeline.adapters.postgres.legacy import LegacyCatalog
-from tizertmaint_pipeline.domain.legacy import LegacyState
+from ingest_pipeline.adapters.postgres.legacy import LegacyCatalog
+from ingest_pipeline.domain.legacy import LegacyState
 
 pytestmark = pytest.mark.integration
 

@@ -19,8 +19,8 @@ from typing import Any
 
 import pytest
 
-from tizertmaint_pipeline.adapters.postgres.knowledge import PostgresKnowledgeStore
-from tizertmaint_pipeline.domain.knowledge import EDGE_LABELS, parse_aliases, parse_registry
+from ingest_pipeline.adapters.postgres.knowledge import PostgresKnowledgeStore
+from ingest_pipeline.domain.knowledge import EDGE_LABELS, parse_aliases, parse_registry
 
 pytestmark = pytest.mark.integration
 
