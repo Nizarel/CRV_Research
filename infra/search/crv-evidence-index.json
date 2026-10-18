@@ -1,0 +1,70 @@
+{
+  "name": "crv-evidence-v1",
+  "description": "Cited CRV research evidence: scientific and experimental reports, geometallurgy, environmental studies, procedures, reference literature and LIMS commercial documents. Collections and site_ids are reported filing context, not approved scientific assertions. Cite source_uri and original_page_numbers or source_locators. For converted Office sources pages refer to the retained derived PDF; original_source_uris retains the original. Templates and commercial documents are not experimental results. Generated descriptions are explicitly marked. Access remains deny-all until authorized ACL enforcement is implemented.",
+  "fields": [
+    {"name":"projection_id","type":"Edm.String","key":true,"filterable":true},
+    {"name":"release_id","type":"Edm.String","filterable":true,"facetable":true},
+    {"name":"chunk_id","type":"Edm.String","filterable":true},
+    {"name":"placement_id","type":"Edm.String","filterable":true},
+    {"name":"placement_ids","type":"Collection(Edm.String)","filterable":true},
+    {"name":"source_snapshot_id","type":"Edm.String","filterable":true},
+    {"name":"source_object_id","type":"Edm.String","filterable":true},
+    {"name":"content_hash","type":"Edm.String","filterable":true},
+    {"name":"evidence_ids","type":"Collection(Edm.String)","filterable":true},
+    {"name":"title","type":"Edm.String","searchable":true,"analyzer":"standard.lucene"},
+    {"name":"content","type":"Edm.String","searchable":true,"analyzer":"standard.lucene"},
+    {"name":"content_fr","type":"Edm.String","searchable":true,"analyzer":"fr.microsoft","retrievable":false},
+    {"name":"content_en","type":"Edm.String","searchable":true,"analyzer":"en.microsoft","retrievable":false},
+    {"name":"source_path","type":"Edm.String","searchable":true,"analyzer":"standard.lucene"},
+    {"name":"source_paths","type":"Collection(Edm.String)","searchable":true},
+    {"name":"collection","type":"Edm.String","filterable":true,"facetable":true},
+    {"name":"collections","type":"Collection(Edm.String)","filterable":true,"facetable":true},
+    {"name":"site_ids","type":"Collection(Edm.String)","filterable":true,"facetable":true},
+    {"name":"document_type","type":"Edm.String","filterable":true,"facetable":true},
+    {"name":"document_class","type":"Edm.String","filterable":true,"facetable":true},
+    {"name":"document_classes","type":"Collection(Edm.String)","filterable":true},
+    {"name":"metadata_basis","type":"Edm.String","filterable":true},
+    {"name":"identifiers","type":"Collection(Edm.String)","searchable":true,"filterable":true,"indexAnalyzer":"identifier_index","searchAnalyzer":"identifier_query"},
+    {"name":"document_code","type":"Edm.String","searchable":true,"filterable":true,"indexAnalyzer":"identifier_index","searchAnalyzer":"identifier_query"},
+    {"name":"document_code_basis","type":"Edm.String","filterable":true},
+    {"name":"family","type":"Edm.String","filterable":true,"facetable":true},
+    {"name":"file_extension","type":"Edm.String","filterable":true},
+    {"name":"unit_kind","type":"Edm.String","filterable":true},
+    {"name":"chunk_kind","type":"Edm.String","filterable":true},
+    {"name":"extraction_route","type":"Edm.String","filterable":true},
+    {"name":"language","type":"Edm.String","filterable":true},
+    {"name":"revision","type":"Edm.String","filterable":true},
+    {"name":"issue_status","type":"Edm.String","filterable":true},
+    {"name":"original_page_numbers","type":"Collection(Edm.Int32)","filterable":true},
+    {"name":"evidence_kind","type":"Edm.String","filterable":true},
+    {"name":"is_generated","type":"Edm.Boolean","filterable":true},
+    {"name":"source_locators","type":"Collection(Edm.String)"},
+    {"name":"source_uri","type":"Edm.String"},
+    {"name":"page_image_uri","type":"Edm.String"},
+    {"name":"original_source_uris","type":"Collection(Edm.String)"},
+    {"name":"original_content_hashes","type":"Collection(Edm.String)","filterable":true},
+    {"name":"citation_basis","type":"Edm.String","filterable":true},
+    {"name":"access_scope_id","type":"Edm.String","filterable":true},
+    {"name":"acl_groups","type":"Collection(Edm.String)","filterable":true},
+    {"name":"acl_users","type":"Collection(Edm.String)","filterable":true},
+    {"name":"policy_version","type":"Edm.String","filterable":true},
+    {"name":"payload_sha256","type":"Edm.String","filterable":true},
+    {"name":"content_vector","type":"Collection(Edm.Single)","searchable":true,"retrievable":false,"stored":false,"dimensions":3072,"vectorSearchProfile":"evidence-vector"}
+  ],
+  "tokenizers": [
+    {"@odata.type":"#Microsoft.Azure.Search.PatternTokenizer","name":"identifier_query_tokenizer","pattern":"[\\s,;:!?()\\[\\]{}<>\"'«»]+|\\.(?=\\s|$)"}
+  ],
+  "analyzers": [
+    {"@odata.type":"#Microsoft.Azure.Search.CustomAnalyzer","name":"identifier_index","tokenizer":"keyword_v2","tokenFilters":["lowercase","asciifolding"]},
+    {"@odata.type":"#Microsoft.Azure.Search.CustomAnalyzer","name":"identifier_query","tokenizer":"identifier_query_tokenizer","tokenFilters":["lowercase","asciifolding"]}
+  ],
+  "vectorSearch": {
+    "algorithms":[{"name":"evidence-hnsw","kind":"hnsw","hnswParameters":{"metric":"cosine","m":4,"efConstruction":400,"efSearch":500}}],
+    "vectorizers":[{"name":"evidence-embedding","kind":"azureOpenAI","azureOpenAIParameters":{"resourceUri":"${EMBEDDING_RESOURCE_URI}","deploymentId":"${QUERY_EMBEDDING_DEPLOYMENT}","modelName":"text-embedding-3-large"}}],
+    "profiles":[{"name":"evidence-vector","algorithm":"evidence-hnsw","vectorizer":"evidence-embedding"}]
+  },
+  "semantic": {
+    "defaultConfiguration":"crv-evidence-semantic",
+    "configurations":[{"name":"crv-evidence-semantic","prioritizedFields":{"titleField":{"fieldName":"title"},"prioritizedContentFields":[{"fieldName":"content"}],"prioritizedKeywordsFields":[{"fieldName":"identifiers"},{"fieldName":"source_path"}]}}]
+  }
+}

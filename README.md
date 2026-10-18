@@ -1,1 +1,254 @@
 # CRV_Research
+
+Evidence-first ingestion of the CRV research corpus in `Data\DATAROOM CRV`.
+The durable pipeline is in [src/ingestion](src/ingestion): PostgreSQL owns jobs,
+leases, retries, extraction barriers and the transactional outbox; Service Bus
+wakes workers. Source bytes and normalized evidence are content-addressed.
+Search uploads are verified before a projection is marked complete.
+
+## CRV adaptations
+
+- **Offline intake:** Windows extended-length paths, content sniffing rather than
+  extension-only routing, explicit per-input outcomes, retained originals,
+  bounded ZIP expansion and isolated legacy Word/PowerPoint conversion.
+- **Scientific PDFs:** layout/OCR baseline for nonblank pages, original-page
+  citations, and optional selective native-text routing. Images, vector-rich
+  pages and detected multiple columns keep the layout route.
+- **Large sources:** 1 GiB source ceiling with streaming downloads; 40 MiB default
+  provider submissions. Oversized PDFs are split using the actual serialized
+  subset sizes, not a page-size estimate. An oversized single page is recorded
+  as unsupported, never submitted. Partial evidence is not projected by default.
+- **Tables:** preserved cells, captions, headers and footnotes. The reviewed flora
+  workbook uses independent site columns, not cross-site row relationships.
+- **Research metadata:** collections, sites, document types, report codes and
+  original-file lineage replace equipment/zone metadata in the CRV Search index.
+  Filing context is marked `metadata_basis=path`; report codes found in extracted
+  text are separately marked `document_code_basis=printed`.
+- **Optional observations:** numeric table-cell observations retain raw values,
+  qualifiers, explicit units, headers, footnotes and locators. They are
+  `unreviewed`, not certified measurements or inferred chemistry.
+
+The local corpus inspection found 1,967 files, about 24 GiB, predominantly PDFs
+with 47 legacy DOC/PPT files and one ZIP. Some names disagree with the bytes;
+305 paths were missed by ordinary Windows `is_file()` checks. Historical scanned
+reports, two-column papers, experimental tables and commercial LIMS documents
+require different handling. These are inventory/sample findings, not OCR quality
+certification for the full corpus.
+
+## Local setup
+
+Python 3.11 or 3.12 is supported. From the repository root:
+
+```powershell
+Set-Location .\src\ingestion
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[azure,parsers,tokenizer,dev]"
+.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli --help
+```
+
+`crv-pipeline` and the compatibility name `tizagent-pipeline` are installed entry
+points. The Python package name and `TIZ_*` environment variables are retained
+to avoid breaking deployed jobs and operational integrations. Optional `tools`
+dependencies are only needed for the standalone discovery utility.
+
+## 1. Prepare locally, without Azure calls
+
+Use a short, dedicated output path **outside** the corpus. Allow at least 64 GiB
+of free storage for staging and conversion overhead; actual usage depends on
+duplicate bytes and converted files.
+
+```powershell
+.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli prepare-corpus `
+  --root "C:\Github\CRV_Research\Data\DATAROOM CRV" `
+  --output "C:\CRV-intake" --max-total-gib 64
+```
+
+This command does not configure Azure telemetry or start cloud clients. It writes:
+
+- `objects\<sha256>`: verified immutable originals and derivatives.
+- `manifest.json`: original relative paths, archive members/ancestor hashes,
+  detected formats, content identities, conversion image and outcomes.
+
+Outcomes are `ready`, `converted`, `expanded`, `excluded`, or `failed`. Blank
+placeholders and unsupported formats are explicitly excluded. A failed input
+produces an error log and exit code 2; publication refuses failed or incomplete
+manifests. **Review exclusions too:** zero failures is not proof that every file
+is scientifically usable. Directory enumeration errors and links are not
+silently ignored.
+
+ZIP members are read as streams into content-addressed objects, never extracted
+to member-supplied filesystem paths. Defaults bound expansion to 1 GiB per
+archive, 20,000 members, depth 2 and a 200:1 expansion ratio. Nested members also
+consume the global intake budget. Encrypted, unsafe or corrupt inputs fail
+explicitly. Re-running preparation verifies existing objects and reuses cached
+conversions for identical input bytes and image identity.
+
+### Legacy Office conversion
+
+Legacy `.doc`/`.ppt` inputs fail explicitly unless `--office-image` is supplied.
+Install/start Docker with Linux containers, then build the converter locally:
+
+```powershell
+docker build -t crv-office:local .\office-converter
+$image = docker image inspect crv-office:local --format '{{.Id}}'
+.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli prepare-corpus `
+  --root "C:\Github\CRV_Research\Data\DATAROOM CRV" `
+  --output "C:\CRV-intake" --office-image $image
+```
+
+The image must already exist locally, pinned by `sha256:<image-id>` or
+`repository@sha256:<digest>`. Runtime pulls and network access are disabled;
+the root filesystem is read-only, capabilities are dropped, and time, memory,
+process and output limits apply. LibreOffice macros are disabled. Image building
+requires access to its base image/package repositories; preparation itself does
+not. Conversion preserves the original bytes. Converted page references are
+**derived-PDF pages**, not native Word or PowerPoint pagination.
+
+Actual LibreOffice rendering still requires a representative visual pilot.
+Isolation and byte-signature checks do not prove conversion fidelity.
+
+## 2. Select a policy and review the manifest
+
+[crv-policies.json](infra/content-understanding/crv-policies.json) provides:
+
+| Policy | Intended use |
+|---|---|
+| `crv-layout-v1` | Conservative pilot baseline: layout/OCR on nonblank PDF pages |
+| `crv-selective-v1` | Native text for clean prose; layout for detected structural risks |
+
+Neither policy enables Content Understanding enrichment or escalation.
+Its existing provider integration remains available for a separately reviewed,
+budgeted experiment. The default configuration also uses the layout baseline.
+
+The reviewed `Flore Managem.xlsx` archive member has SHA-256
+`84e42620e08e0bde04a1b34326abc115fc9a74b666c4a238c4a77ac8aaf96e97`.
+Both policies recognize that exact content hash, use row 2 as the final header
+row and keep columns B/C/D separate. Changed workbook bytes require a fresh
+review and an updated allowlist; other workbooks retain ordinary table behavior.
+
+Scientific observation artifacts are opt-in:
+`TIZ_CHUNKING__SCIENTIFIC_OBSERVATIONS=true`. They are JSONL artifacts linked to
+the chunk-stage outcome, not a new result database or Search measurement index.
+Ambiguous grouped/decimal values such as `1,234` and `1.234` are omitted from
+numeric observations; the source table remains intact. Units are not inferred
+from headers. No chemical meaning or cross-row relationship is invented.
+
+## 3. Configure infrastructure before publication
+
+Existing Azure/PostgreSQL resources and permissions are prerequisites. Configuration
+is defined in [config.py](src/ingestion/tizertmaint_pipeline/config.py).
+Typical settings include:
+
+```powershell
+$env:TIZ_DB__HOST = "<postgres-host>"
+$env:TIZ_DB__USER = "<database-principal>"
+$env:TIZ_BLOB__ACCOUNT_URL = "https://<account>.blob.core.windows.net"
+$env:TIZ_BLOB__SOURCE_CONTAINER = "<dedicated-crv-source-container>"
+$env:TIZ_BUS__NAMESPACE = "<namespace>.servicebus.windows.net"
+$env:TIZ_DI__ENDPOINT = "https://<document-intelligence-endpoint>"
+$env:TIZ_EMBEDDINGS__ENDPOINT = "https://<openai-endpoint>"
+$env:TIZ_EMBEDDINGS__DEPLOYMENT = "<text-embedding-3-large-deployment>"
+$env:TIZ_SEARCH__ENDPOINT = "https://<search>.search.windows.net"
+$env:TIZ_SEARCH__INDEX_NAME = "crv-evidence-v1"
+$env:TIZ_SEARCH__CORPUS = "crv"
+$env:TIZ_POLICIES_PATH = "C:\Github\CRV_Research\infra\content-understanding\crv-policies.json"
+$env:TIZ_ROUTING_POLICY = "crv-layout-v1"
+```
+
+Use managed/workload identity or `DefaultAzureCredential`; do not commit secrets.
+Apply migrations **before** running the new workers:
+
+```powershell
+.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli migrate --dry-run
+.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli migrate
+```
+
+Migration `0014_ingest_source_provenance.sql` adds nullable JSON lineage to source
+snapshots. Existing snapshots remain valid. Handler/policy/chunker identities
+version changed outputs; do not mix old and new worker images in one rollout.
+
+Create a **separate** index using
+[crv-evidence-index.json](infra/search/crv-evidence-index.json), replacing
+`${EMBEDDING_RESOURCE_URI}` and `${QUERY_EMBEDDING_DEPLOYMENT}` with your approved
+query-embedding configuration. Vectors must have 3,072 dimensions.
+Do not apply CRV rows to the old maintenance index.
+
+[crv-knowledge-source.json](infra/search/crv-knowledge-source.json) references the
+same index and `crv-evidence-semantic` configuration. Replace `${RELEASE_ID}` with
+the chosen policy's release. It deliberately includes `and false`: **serving is
+disabled until caller-aware authorization is implemented and tested**. Empty
+ACL fields are not automatic Azure Search enforcement. Collection/site filters
+are retrieval constraints, not authorization. Identical content can retain
+multiple placements, so establish access boundaries before exposing citations.
+
+The Kubernetes renderer defaults to the CRV index and layout policy. It supports
+`-RenderPath` for local rendering without cluster access. The IO/CPU worker
+concurrency is one; scratch and memory must still be measured during the pilot,
+because decompressed parser memory is not bounded by source file size.
+Provider budgets in the manifest default to zero: explicitly authorize a small
+DI page allowance before processing. Embedding usage also incurs costs.
+
+## 4. Publish only after approval
+
+This command uploads originals, manifests and logical source blobs to Azure,
+then enqueues source snapshots:
+
+```powershell
+.\.venv\Scripts\python.exe -m tizertmaint_pipeline.cli ingest-corpus `
+  --manifest "C:\CRV-intake\manifest.json" --prefix crv
+```
+
+Use a dedicated source container/prefix. Publication validates every staged
+object before uploading. Source names are stable hashes of logical source paths;
+content updates use conditional ETags. Re-running is idempotent and recovers
+partially completed publication/enqueue operations. It does not delete sources
+removed from a later manifest.
+
+**Do not enqueue the entire source container:** immutable original objects and
+manifests live there too. `ingest-corpus` enqueues only its logical source blobs.
+The coordinator and workers run through the existing CLI or Kubernetes manifests.
+Use `status`, job inspection and replay to investigate failed or review-required
+units rather than assuming enqueue success means ingestion completion.
+
+## Pilot acceptance checks
+
+Start with a copied, small representative subset, not all 24 GiB:
+
+1. Reconcile every source/archive member with its manifest outcome.
+2. Check a historical scan, two-column article, table-heavy report, converted
+   DOC/PPT, mislabeled file and the flora workbook.
+3. Verify reading order, equations/captions, decimal qualifiers, footnotes,
+   original pages/cells and converted-source citations manually.
+4. Verify single-page byte-limit failures and incomplete-evidence handling.
+5. Review collection/site/type labels and confirm LIMS commercial proposals
+   cannot be mistaken for measured laboratory exports.
+6. Compare layout/selective policies on extraction quality, retrieval relevance,
+   cost, latency, memory and scratch usage before choosing the production policy.
+7. Test authorization denial and permitted citation access before enabling serving.
+
+Path-derived labels are heuristic. Titles currently use filenames; authors,
+publication dates, projects and scientific topics are not automatically asserted.
+No real LIMS connector, automatic scientific validation, or OCR accuracy guarantee
+is included.
+
+## Tests and retained compatibility
+
+From `src\ingestion`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\ruff.exe check tizertmaint_pipeline tests office-converter
+.\.venv\Scripts\python.exe -m mypy
+.\.venv\Scripts\lint-imports.exe
+```
+
+The default suite excludes PostgreSQL integration and paid live-provider tests.
+Docker/PostgreSQL integration, actual Office conversion and live Azure quality
+checks must be run separately in an approved environment.
+
+Removed copied standalone PFD/RDF knowledge exporters and the old `maint-content`
+retrieval evaluator, their dedicated tests and unused RDF dependencies. The
+durable engine, migrations, reusable parsers, discovery/bakeoff tools and
+maintenance compatibility contracts remain: those are still used by existing
+runtime or regression paths. The corpus and local virtual environments are not
+deleted; generated Python state is ignored by Git.

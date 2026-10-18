@@ -183,11 +183,11 @@ function Invoke-ClusterJob {
     }
     $job = @{
         apiVersion = 'batch/v1'; kind = 'Job'
-        metadata = @{ generateName = "$Prefix-"; namespace = $ns;         labels = @{ 'app.kubernetes.io/part-of' = 'crv-pipeline' } }
+        metadata = @{ generateName = "$Prefix-"; namespace = $ns; labels = @{ 'app.kubernetes.io/part-of' = 'crv-pipeline' } }
         spec = @{
             backoffLimit = 0; activeDeadlineSeconds = $TimeoutSeconds; ttlSecondsAfterFinished = 3600
             template = @{
-                metadata = @{ labels = @{ 'azure.workload.identity/use' = 'true';                 'app.kubernetes.io/part-of' = 'crv-pipeline' } }
+                metadata = @{ labels = @{ 'azure.workload.identity/use' = 'true'; 'app.kubernetes.io/part-of' = 'crv-pipeline' } }
                 spec = @{
                     restartPolicy = 'Never'; serviceAccountName = $ServiceAccount
                     securityContext = @{ runAsNonRoot = $true; runAsUser = 10001; runAsGroup = 10001; seccompProfile = @{ type = 'RuntimeDefault' } }
@@ -399,8 +399,8 @@ switch ($Step) {
         Assert-Approved 'paidAnalysis'
         $kubectl = Get-KubectlArgs
         Assert-LegacyPaused $kubectl
-        Set-FileConfigMap $kubectl         'crv-smoke-blobs' 'blobs.txt' $list
-                Invoke-ClusterJob -Kubectl $kubectl -Prefix 'crv-smoke-enqueue' -ServiceAccount 'crv-pipeline-worker' -ClientId (Get-ClientId $workerIdentity) `
+        Set-FileConfigMap $kubectl 'crv-smoke-blobs' 'blobs.txt' $list
+        Invoke-ClusterJob -Kubectl $kubectl -Prefix 'crv-smoke-enqueue' -ServiceAccount 'crv-pipeline-worker' -ClientId (Get-ClientId $workerIdentity) `
             -Arguments @('enqueue-snapshots', '--blob-list', '/smoke/blobs.txt') -ConfigMap 'crv-smoke-blobs' -UsePipelineConfig `
             -Env @{ TIZ_DB__USER = $workerIdentity }
     }
@@ -469,7 +469,7 @@ switch ($Step) {
         $kubectl = Get-KubectlArgs
         Assert-LegacyPaused $kubectl
         Set-FileConfigMap $kubectl 'crv-smoke-blobs' 'blobs.txt' $list
-                Invoke-ClusterJob -Kubectl $kubectl -Prefix 'crv-bakeoff-arm' -ServiceAccount 'crv-pipeline-worker' -ClientId (Get-ClientId $workerIdentity) `
+        Invoke-ClusterJob -Kubectl $kubectl -Prefix 'crv-bakeoff-arm' -ServiceAccount 'crv-pipeline-worker' -ClientId (Get-ClientId $workerIdentity) `
             -Arguments $arguments -ConfigMap 'crv-smoke-blobs' -UsePipelineConfig -Env @{ TIZ_DB__USER = $workerIdentity }
     }
     'Bakeoff' {

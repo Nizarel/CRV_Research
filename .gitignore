@@ -1,1 +1,17 @@
 /data/
+
+# Local ingestion environments, generated state and credentials.
+.venv*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+.hypothesis/
+*.egg-info/
+.coverage
+htmlcov/
+.env
+.env.*
+!.env.example

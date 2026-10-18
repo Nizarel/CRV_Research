@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "4959471135421303322"
+      "templateHash": "12865654839625329691"
     }
   },
   "parameters": {
@@ -20726,7 +20726,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "13981173999070420517"
+              "templateHash": "4698843511272691164"
             },
             "description": "Creates an Azure Database for PostgreSQL Flexible Server with Microsoft Entra-only authentication, private-endpoint-ready networking, and one or more databases. Used as the ingestion catalog/state store and the agent memory backend (LangGraph Postgres checkpointer + store with pgvector)."
           },
@@ -20862,7 +20862,8 @@
               "apiVersion": "2024-08-01",
               "name": "[format('{0}/{1}', parameters('name'), 'azure.extensions')]",
               "properties": {
-                "value": "[variables('allowedExtensions')]"
+                "value": "[variables('allowedExtensions')]",
+                "source": "user-override"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
@@ -22927,7 +22928,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "15104901303355755928"
+              "templateHash": "9116881137517210604"
             },
             "description": "Creates the private AKS network, private endpoint DNS dependencies, and a dedicated Application Gateway subnet."
           },
@@ -26054,13 +26055,13 @@
                     "value": "[reference(resourceId('Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.resourceId.value]"
                   },
                   "vpnGatewayGeneration": {
-                    "value": "Generation2"
+                    "value": "Generation1"
                   },
                   "vpnClientAddressPoolPrefix": {
                     "value": "172.16.201.0/24"
                   },
                   "skuName": {
-                    "value": "VpnGw2AZ"
+                    "value": "VpnGw1AZ"
                   },
                   "vpnClientAadConfiguration": {
                     "value": {
@@ -29179,7 +29180,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "1467959000417414921"
+              "templateHash": "14114873034443085168"
             }
           },
           "parameters": {
@@ -29318,6 +29319,11 @@
                 },
                 "securityProfile": {
                   "workloadIdentity": {
+                    "enabled": true
+                  }
+                },
+                "workloadAutoScalerProfile": {
+                  "keda": {
                     "enabled": true
                   }
                 },

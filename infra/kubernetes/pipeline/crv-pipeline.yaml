@@ -31,6 +31,7 @@ data:
   TIZ_BLOB__ACCOUNT_URL: "${STORAGE_ACCOUNT_URL}"
   TIZ_BLOB__SOURCE_CONTAINER: content
   TIZ_BLOB__ARTIFACT_CONTAINER: ingest-artifacts
+  TIZ_BLOB__MAX_SOURCE_BYTES: "1073741824"
   TIZ_BUS__NAMESPACE: "${SERVICE_BUS_FQDN}"
   # Phase 2 providers. An empty endpoint disables that provider; the DI page budget defaults to 0
   # (no paid analysis) until an approved cap is rendered in.
@@ -41,6 +42,8 @@ data:
   TIZ_EMBEDDINGS__DEPLOYMENT: "${EMBEDDING_DEPLOYMENT}"
   TIZ_SEARCH__ENDPOINT: "${SEARCH_ENDPOINT}"
   TIZ_SEARCH__INDEX_NAME: "${SEARCH_INDEX_NAME}"
+  TIZ_SEARCH__CORPUS: crv
+  TIZ_SEARCH__RELEASE_ID: crv-pilot-v1
   # Above the io queue's delay during bulk bursts; at 900 s projections gave up mid-retry (2026-10-13).
   TIZ_SEARCH__VERIFY_DEADLINE_SECONDS: "7200"
   # Phase 3 Content Understanding pilot. An empty endpoint disables CU; budgets of 0 hold every
@@ -54,7 +57,7 @@ data:
   TIZ_CU__PROCESSING_LOCATION: dataZone
   TIZ_CU__REGISTRY_PATH: /etc/crv/cu/ingestion-pilot.json
   # Named routing policies, each projected under its own search release. TIZ_ROUTING_POLICY
-  # picks the one that plans new snapshots; empty keeps the built-in routing-v1.
+  # picks the one that plans new snapshots; empty keeps built-in CRV selective routing.
   TIZ_POLICIES_PATH: /etc/crv/cu/policies.json
   TIZ_ROUTING_POLICY: "${ROUTING_POLICY}"
   # USD budgets per billing account: this subscription first, then external accounts whose API
@@ -167,7 +170,7 @@ spec:
             - name: TIZ_DB__USER
               value: id-crv-pipeline-worker
             - name: TIZ_RUNTIME__CONCURRENCY
-              value: "4"
+              value: "1"
             - name: TIZ_RUNTIME__WORKER_ID
               valueFrom:
                 fieldRef:
@@ -232,14 +235,12 @@ spec:
             - name: TIZ_DB__USER
               value: id-crv-pipeline-worker
             - name: TIZ_RUNTIME__CONCURRENCY
-              value: "2"
+              value: "1"
             - name: TIZ_RUNTIME__WORKER_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-          # Preflight/native parse/normalize/chunk: one source copy and one parsed unit per slot.
-          # 3Gi was OOMKilled chunking one 3.4 MB spreadsheet (2026-10-13); source size does not
-          # predict it, and the other slot's job died with the pod.
+          # A single slot bounds concurrent 1 GiB sources; parser expansion needs pilot monitoring.
           resources:
             requests: {cpu: 500m, memory: 2Gi}
             limits: {cpu: "2", memory: 4Gi}

@@ -77,6 +77,7 @@ resource extensionAllowlist 'Microsoft.DBforPostgreSQL/flexibleServers/configura
   name: 'azure.extensions'
   properties: {
     value: allowedExtensions
+    source: 'user-override'
   }
 }
 

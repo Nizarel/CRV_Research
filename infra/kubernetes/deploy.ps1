@@ -5,8 +5,8 @@
 .DESCRIPTION
     Resolves infrastructure values from the Bicep deployment outputs (or accepts them
     as parameters), builds both container images for linux/amd64, pushes to the private
-    ACR,     substitutes template variables in crv.yaml, and applies the manifest to
-        the crv namespace.
+    ACR, substitutes template variables in crv.yaml, and applies the manifest to
+    the crv namespace.
 
 .PARAMETER ResourceGroup
     Azure resource group containing the deployment.  Defaults to

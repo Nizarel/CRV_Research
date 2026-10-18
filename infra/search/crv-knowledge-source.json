@@ -1,0 +1,39 @@
+{
+  "name": "crv-evidence",
+  "kind": "searchIndex",
+  "description": "CRV scientific evidence with original-page and cell citations. Collection/site metadata is filing context, not scientific validation. Templates, commercial LIMS documents and research results are distinct document types. Converted Office page numbers refer to the derived PDF. No actual LIMS result connector is provided.",
+  "searchIndexParameters": {
+    "searchIndexName": "crv-evidence-v1",
+    "semanticConfigurationName": "crv-evidence-semantic",
+    "baseFilter": "release_id eq '${RELEASE_ID}' and access_scope_id ne 'unassigned' and false",
+    "searchFields": [
+      {"name": "content"}, {"name": "content_fr"}, {"name": "content_en"},
+      {"name": "title"}, {"name": "identifiers"}, {"name": "document_code"},
+      {"name": "source_paths"}
+    ],
+    "sourceDataFields": [
+      {"name": "title"}, {"name": "content"}, {"name": "collection"},
+      {"name": "site_ids"}, {"name": "document_type"}, {"name": "metadata_basis"},
+      {"name": "document_code"}, {"name": "document_code_basis"},
+      {"name": "original_page_numbers"}, {"name": "source_locators"},
+      {"name": "source_uri"}, {"name": "original_source_uris"},
+      {"name": "original_content_hashes"}, {"name": "citation_basis"},
+      {"name": "evidence_kind"}, {"name": "is_generated"},
+      {"name": "release_id"}, {"name": "chunk_id"}, {"name": "content_hash"}
+    ],
+    "queryHints": {
+      "filters": [
+        {
+          "field": "collection",
+          "fieldValues": ["research", "reference", "environment", "geometallurgy", "lims-commercial"],
+          "filterInstructions": "Filter only when the user explicitly requests a collection. LIMS commercial records are proposals and contracts, not measured sample results."
+        },
+        {
+          "field": "document_type",
+          "fieldValues": ["template", "regulation", "procedure", "software_manual", "commercial", "scientific_reference", "environmental_study", "test_report", "research_report", "research_reference", "unclassified"],
+          "filterInstructions": "Filter only when the user explicitly requests a document type. Filing labels are not reviewed scientific facts."
+        }
+      ]
+    }
+  }
+}

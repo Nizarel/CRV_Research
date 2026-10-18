@@ -1,0 +1,29 @@
+{
+  "policies": {
+    "crv-layout-v1": {
+      "release_id": "crv-pilot-v1",
+      "policy": {
+        "version": "crv-layout-v1",
+        "preserve_layout": true,
+        "prefer_native_text": false,
+        "max_submit_bytes": 41943040,
+        "max_layout_pages_per_unit": 20,
+        "independent_column_workbooks": ["84e42620e08e0bde04a1b34326abc115fc9a74b666c4a238c4a77ac8aaf96e97"],
+        "cu_profiles": [],
+        "escalation": []
+      }
+    },
+    "crv-selective-v1": {
+      "release_id": "crv-selective-v1",
+      "policy": {
+        "version": "crv-selective-v1",
+        "preserve_layout": true,
+        "prefer_native_text": true,
+        "max_submit_bytes": 41943040,
+        "independent_column_workbooks": ["84e42620e08e0bde04a1b34326abc115fc9a74b666c4a238c4a77ac8aaf96e97"],
+        "cu_profiles": [],
+        "escalation": []
+      }
+    }
+  }
+}

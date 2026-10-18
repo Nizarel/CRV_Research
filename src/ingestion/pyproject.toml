@@ -1,0 +1,167 @@
+[project]
+name = "tizertmaint-pipeline"
+version = "0.2.0"
+description = "CRV research ingestion: durable, evidence-first processing"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+]
+
+[project.optional-dependencies]
+azure = [
+    "aiohttp>=3.12,<4",
+    "asyncpg==0.31.0",
+    "azure-core==1.41.0",
+    "cryptography>=46.0.3,<49",
+    "azure-identity==1.25.3",
+    "azure-monitor-opentelemetry==1.8.11",
+    "azure-search-documents==12.0.0",
+    "azure-servicebus==7.14.3",
+    "azure-storage-blob==12.30.0",
+    "openai==2.7.1",
+]
+parsers = [
+    "ezdxf==1.4.2",
+    "pypdfium2==5.12.1",
+    "python-calamine==0.8.2",
+]
+# No win_arm64 wheel; the pipeline falls back to an approximate counter where it is missing.
+tokenizer = [
+    "tiktoken>=0.9,<1; platform_machine != 'ARM64'",
+]
+tools = [
+    "pymupdf>=1.26,<2",
+]
+dev = [
+    "hypothesis==6.168.3",
+    "import-linter==2.15",
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.15.22",
+    "testcontainers[postgres]==4.15.0",
+]
+
+[project.scripts]
+tizagent-pipeline = "tizertmaint_pipeline.cli:main"
+crv-pipeline = "tizertmaint_pipeline.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = "--import-mode=importlib -m 'not integration and not live'"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: needs PostgreSQL with Apache AGE (docker compose or TIZ_TEST_PG_DSN)",
+    "contract: shared behavioural contract run against several adapters",
+    "live: calls real Azure services; run only with explicit approval",
+    "slow: long-running property or load tests",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv312"]
+
+[tool.ruff.lint]
+select = ["ASYNC", "B", "E", "F", "I", "PT", "RUF", "S", "SIM", "UP"]
+# UP046/UP047: PEP 695 generics would break the supported Python 3.11 floor.
+# S311: Random only drives retry jitter, never security decisions.
+ignore = ["UP046", "UP047", "S311"]
+
+[tool.ruff.lint.per-file-ignores]
+# Column lists are module constants; every value is a bound parameter.
+"tizertmaint_pipeline/adapters/postgres/*.py" = ["S608"]
+# v1 tools kept as-is under the base rule set.
+"tizertmaint_pipeline/tools/**" = ["ASYNC", "B", "PT", "RUF", "S", "SIM"]
+"tests/**" = ["S101", "S106", "S608"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["tizertmaint_pipeline"]
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = [
+    "asyncpg.*",
+    "testcontainers.*",
+    "opentelemetry.*",
+    "azure.monitor.*",
+    "pypdfium2.*",
+    "pypdfium2_raw.*",
+    "tiktoken.*",
+]
+ignore_missing_imports = true
+
+# v1 tools predate strict typing; they are checked for consistency, not annotation coverage.
+[[tool.mypy.overrides]]
+module = ["tizertmaint_pipeline.tools.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
+
+[tool.importlinter]
+root_package = "tizertmaint_pipeline"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Pipeline layers"
+type = "layers"
+layers = [
+    "tizertmaint_pipeline.cli",
+    "tizertmaint_pipeline.runtime",
+    "tizertmaint_pipeline.adapters",
+    "tizertmaint_pipeline.stages",
+    "tizertmaint_pipeline.ports",
+    "tizertmaint_pipeline.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain, ports and stages stay free of SDKs and adapters"
+type = "forbidden"
+source_modules = [
+    "tizertmaint_pipeline.domain",
+    "tizertmaint_pipeline.ports",
+    "tizertmaint_pipeline.stages",
+]
+forbidden_modules = [
+    "asyncpg",
+    "azure",
+    "ezdxf",
+    "openai",
+    "pypdfium2",
+    "python_calamine",
+    "tiktoken",
+    "tizertmaint_pipeline.adapters",
+    "tizertmaint_pipeline.runtime",
+]
+
+[[tool.importlinter.contracts]]
+name = "The pipeline never depends on standalone tools"
+type = "forbidden"
+source_modules = [
+    "tizertmaint_pipeline.cli",
+    "tizertmaint_pipeline.runtime",
+    "tizertmaint_pipeline.adapters",
+    "tizertmaint_pipeline.stages",
+    "tizertmaint_pipeline.ports",
+    "tizertmaint_pipeline.domain",
+]
+forbidden_modules = ["tizertmaint_pipeline.tools"]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tizertmaint_pipeline*"]
+
+[tool.setuptools.package-data]
+"tizertmaint_pipeline" = ["sql/*.sql"]

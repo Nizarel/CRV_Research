@@ -88,6 +88,11 @@ resource cluster 'Microsoft.ContainerService/managedClusters@2024-09-01' = {
         enabled: true
       }
     }
+    workloadAutoScalerProfile: {
+      keda: {
+        enabled: true
+      }
+    }
     autoUpgradeProfile: {
       upgradeChannel: 'patch'
       nodeOSUpgradeChannel: 'NodeImage'

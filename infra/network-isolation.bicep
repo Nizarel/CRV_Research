@@ -233,9 +233,10 @@ module virtualNetworkGateway 'br/public:avm/res/network/virtual-network-gateway:
     }
     gatewayType: 'Vpn'
     virtualNetworkResourceId: vnet.outputs.resourceId
-    vpnGatewayGeneration: 'Generation2'
+    // VpnGw1AZ is Generation1-only; it still supports P2S OpenVPN with Entra auth (250 connections).
+    vpnGatewayGeneration: 'Generation1'
     vpnClientAddressPoolPrefix: '172.16.201.0/24'
-    skuName: 'VpnGw2AZ'
+    skuName: 'VpnGw1AZ'
     vpnClientAadConfiguration: {
       aadAudience: 'c632b3df-fb67-4d84-bdcf-b95ad541b5c8'
       aadIssuer: 'https://sts.windows.net/${tenant().tenantId}/'
