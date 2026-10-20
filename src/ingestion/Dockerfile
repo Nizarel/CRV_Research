@@ -7,9 +7,14 @@ ARG PIP_INDEX_URL=https://pypi.org/simple/
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PIP_INDEX_URL=${PIP_INDEX_URL}
 WORKDIR /src
 COPY pyproject.toml ./
+# Dependencies first (cached across code changes), then the package itself without dependencies.
+RUN mkdir ingest_pipeline && touch ingest_pipeline/__init__.py \
+    && python -m venv /opt/venv \
+    && /opt/venv/bin/pip install ".[azure,parsers,tokenizer]" \
+    && /opt/venv/bin/pip uninstall -y ingest-pipeline \
+    && rm -rf ingest_pipeline build *.egg-info
 COPY ingest_pipeline ./ingest_pipeline
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install ".[azure,parsers,tokenizer]"
+RUN /opt/venv/bin/pip install --no-deps . && rm -rf build *.egg-info
 
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS runtime
 ENV PATH=/opt/venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp

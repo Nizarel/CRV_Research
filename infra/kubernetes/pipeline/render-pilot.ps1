@@ -6,7 +6,8 @@ Render one CRV pilot operations job (crv-pilot-jobs.yaml) and optionally apply i
 .DESCRIPTION
 Shared objects (ops service account, converter service account, work disk, isolation policy and
 pilot list) are always rendered; exactly one job is selected with -Job, so stages run in order:
-stage -> convert -> intake -> (review) -> publish. migrate and index are setup jobs.
+verify-raw, dbsetup, index (setup, dry runs by default) then stage -> convert -> intake ->
+(review) -> publish.
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest.
 
@@ -16,20 +17,29 @@ Images are referenced only by digest.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'migrate', 'index')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index')] [string] $Job,
     [Parameter(Mandatory)] [guid] $OpsClientId,
     [Parameter(Mandatory)] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $ConverterDigest = '',
     [string] $PilotList = '',
     [ValidatePattern('^[a-z0-9]{1,12}$')] [string] $RunId = (Get-Date -Format 'MMddHHmm'),
     [string] $OpsIdentityName = 'id-crv-pipeline-ops',
+    [guid] $AdminClientId = 'f7c37964-eec7-48b2-b741-ab2dc9ba38ee',
+    [string] $AdminIdentityName = 'id-crv-aks-workload',
+    [hashtable] $Principals = [ordered]@{
+        coordinator = 'id-crv-pipeline-coordinator=32bc9898-4b66-4419-b9c8-174930596c33'
+        worker      = 'id-crv-pipeline-worker=7c1962c1-4f63-451f-9ace-bb5fbecd1eda'
+        ops         = 'id-crv-pipeline-ops=22570fca-b1a6-48b2-afe4-949a09b3fca1'
+    },
+    [string] $PgHost = 'psql-crv-awmc6icu2kueq-ncus.postgres.database.azure.com',
+    [string] $SearchEndpoint = 'https://gptkb-awmc6icu2kueq.search.windows.net',
     [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
     [string] $StorageAccountUrl = 'https://stawmc6icu2kueq.blob.core.windows.net',
     [string] $OpenAiEndpoint = 'https://cog-awmc6icu2kueq.cognitiveservices.azure.com/',
     [string] $EmbeddingDeployment = 'text-embedding-3-large',
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,62}$')] [string] $SourcePrefix = 'crv-pilot',
     [ValidateRange(8, 512)] [int] $WorkGib = 64,
-    [switch] $MigrateApply,
+    [switch] $DbApply,
     [switch] $IndexApply,
     [string] $IndexSchema = (Join-Path $PSScriptRoot '../../search/crv-evidence-index.json'),
     [string] $ResourceGroup = 'rg-CRV-southcentralus',
@@ -53,19 +63,31 @@ if ($PilotList) {
 $listBlock = if ($entries.Count) { ($entries | ForEach-Object { "    $_" }) -join "`n" } else { '    # empty' }
 
 $values = [ordered]@{
-    OPS_CLIENT_ID        = $OpsClientId.ToString()
-    OPS_IDENTITY_NAME    = $OpsIdentityName
-    ACR_LOGIN_SERVER     = $AcrLoginServer
-    PIPELINE_DIGEST      = $PipelineDigest
-    CONVERTER_DIGEST     = if ($ConverterDigest) { $ConverterDigest } else { 'sha256:' + ('0' * 64) }
-    STORAGE_ACCOUNT_URL  = $StorageAccountUrl
-    OPENAI_ENDPOINT      = $OpenAiEndpoint
-    EMBEDDING_DEPLOYMENT = $EmbeddingDeployment
-    SOURCE_PREFIX        = $SourcePrefix
-    WORK_GIB             = $WorkGib.ToString()
-    RUN_ID               = $RunId
-    MIGRATE_ARGS         = if ($MigrateApply) { '' } else { ', --dry-run' }
-    INDEX_ARGS           = if ($IndexApply) { ', --apply' } else { '' }
+    OPS_CLIENT_ID         = $OpsClientId.ToString()
+    OPS_IDENTITY_NAME     = $OpsIdentityName
+    ADMIN_CLIENT_ID       = $AdminClientId.ToString()
+    ADMIN_IDENTITY_NAME   = $AdminIdentityName
+    PRINCIPAL_COORDINATOR = $Principals['coordinator']
+    PRINCIPAL_WORKER      = $Principals['worker']
+    PRINCIPAL_OPS         = $Principals['ops']
+    PG_HOST               = $PgHost
+    SEARCH_ENDPOINT       = $SearchEndpoint
+    ACR_LOGIN_SERVER      = $AcrLoginServer
+    PIPELINE_DIGEST       = $PipelineDigest
+    CONVERTER_DIGEST      = if ($ConverterDigest) { $ConverterDigest } else { 'sha256:' + ('0' * 64) }
+    STORAGE_ACCOUNT_URL   = $StorageAccountUrl
+    OPENAI_ENDPOINT       = $OpenAiEndpoint
+    EMBEDDING_DEPLOYMENT  = $EmbeddingDeployment
+    SOURCE_PREFIX         = $SourcePrefix
+    WORK_GIB              = $WorkGib.ToString()
+    RUN_ID                = $RunId
+    DB_ARGS               = if ($DbApply) { ', --apply' } else { '' }
+    INDEX_ARGS            = if ($IndexApply) { ', --apply' } else { '' }
+}
+foreach ($name in 'PRINCIPAL_COORDINATOR', 'PRINCIPAL_WORKER', 'PRINCIPAL_OPS') {
+    if ($values[$name] -notmatch '^[a-z][a-z0-9-]{2,62}=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+        throw "$name must be LOGIN=ENTRA_OBJECT_ID"
+    }
 }
 $text = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'crv-pilot-jobs.yaml') -Raw
 foreach ($key in $values.Keys) {

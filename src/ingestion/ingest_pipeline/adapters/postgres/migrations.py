@@ -17,8 +17,35 @@ from ...domain.errors import ConfigurationError, IntegrityError
 from .pool import PgConnection
 
 BASELINE_VERSION = "0002_knowledge_prerequisites"
+CRV_BASELINE_VERSION = "0002_crv_baseline"
+BASELINE_VERSIONS = (BASELINE_VERSION, CRV_BASELINE_VERSION)
+"""Either baseline satisfies the pipeline migrations: they need the schemas and registry only."""
 LOCK_KEY = "tizert-ingest-migrations"
 _NAME = re.compile(r"^(?P<version>\d{4}_[a-z0-9_]+)\.sql$")
+
+CRV_BASELINE_SQL = """\
+DO $baseline$
+BEGIN
+    IF current_database() <> 'ingestion-catalog' THEN
+        RAISE EXCEPTION 'The CRV baseline requires the ingestion-catalog database';
+    END IF;
+END
+$baseline$;
+
+CREATE SCHEMA IF NOT EXISTS ingest;
+CREATE SCHEMA IF NOT EXISTS kg;
+CREATE SCHEMA IF NOT EXISTS acl;
+
+REVOKE ALL ON SCHEMA ingest, kg, acl FROM PUBLIC;
+
+CREATE TABLE IF NOT EXISTS ingest.schema_migration (
+    version TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    applied_by TEXT NOT NULL DEFAULT current_user
+);
+"""
+"""The knowledge prerequisites without Apache AGE, which this server does not allow-list."""
 
 
 def _number(version: str) -> int:
@@ -85,7 +112,7 @@ async def apply_migrations(
                 raise ConfigurationError(f"Apply {BASELINE_VERSION} before pipeline migrations")
             rows = await connection.fetch("SELECT version, sha256 FROM ingest.schema_migration")
             applied = {row["version"]: row["sha256"] for row in rows}
-            if BASELINE_VERSION not in applied:
+            if not any(version in applied for version in BASELINE_VERSIONS):
                 raise ConfigurationError(f"Baseline {BASELINE_VERSION} is not registered")
 
             known = {migration.version for migration in migrations}
@@ -117,3 +144,23 @@ async def apply_migrations(
     except _DryRunRollback:
         pass
     return report
+
+
+async def apply_crv_baseline(connection: PgConnection) -> bool:
+    """Create the schemas and migration registry when absent; return whether it was applied.
+
+    An existing registry (either baseline) is left untouched.
+    """
+
+    async with connection.transaction():
+        await connection.execute("SELECT pg_advisory_xact_lock(hashtext($1))", LOCK_KEY)
+        if await connection.fetchval("SELECT to_regclass('ingest.schema_migration')") is not None:
+            return False
+        sql = normalize_sql(CRV_BASELINE_SQL)
+        await connection.execute(sql)
+        await connection.execute(
+            "INSERT INTO ingest.schema_migration (version, sha256) VALUES ($1, $2)",
+            CRV_BASELINE_VERSION,
+            hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+        )
+    return True

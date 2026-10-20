@@ -44,13 +44,15 @@ async def verify_registry(
             f"CU client API {client.api_version} differs from registry {registry.api_version}"
         )
     problems: dict[str, list[str]] = {}
-    defaults = await client.defaults()
-    mismatched = subset_mismatches(
-        registry.deployments, defaults.get("modelDeployments") or {}, "$.modelDeployments"
-    )
-    if mismatched:
-        problems["defaults"] = mismatched
-        return RegistryCheck(replace(registry, profiles={}), problems)
+    # Extraction-only registries map no models; resources without model defaults reject the read.
+    if registry.deployments:
+        defaults = await client.defaults()
+        mismatched = subset_mismatches(
+            registry.deployments, defaults.get("modelDeployments") or {}, "$.modelDeployments"
+        )
+        if mismatched:
+            problems["defaults"] = mismatched
+            return RegistryCheck(replace(registry, profiles={}), problems)
     verified = {}
     for name, expected in registry.definitions.items():
         try:

@@ -12,6 +12,15 @@ metadata:
   annotations:
     azure.workload.identity/client-id: ${OPS_CLIENT_ID}
 ---
+# PostgreSQL Entra administrator (id-crv-aks-workload, federated to crv/crv); used by dbsetup only.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv
+  namespace: crv
+  annotations:
+    azure.workload.identity/client-id: ${ADMIN_CLIENT_ID}
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -209,13 +218,49 @@ spec:
         - {name: work, persistentVolumeClaim: {claimName: crv-pilot-work}}
         - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
 ---
-# JOB migrate: apply (or with MIGRATE_ARGS=--dry-run, check) the packaged ledger migrations.
+# JOB dbsetup: as the Entra admin, CRV baseline + migrations + pipeline principals + grants.
+# DB_ARGS is empty for a dry run, ", --apply" to apply.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: crv-pilot-migrate-${RUN_ID}
+  name: crv-pilot-dbsetup-${RUN_ID}
   namespace: crv
-  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: migrate}
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: dbsetup}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: dbsetup
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [db-bootstrap, --principal, "${PRINCIPAL_COORDINATOR}", --principal, "${PRINCIPAL_WORKER}",
+                 --principal, "${PRINCIPAL_OPS}"${DB_ARGS}]
+          env:
+            - {name: TIZ_DB__HOST, value: "${PG_HOST}"}
+            - {name: TIZ_DB__DATABASE, value: ingestion-catalog}
+            - {name: TIZ_DB__USER, value: "${ADMIN_IDENTITY_NAME}"}
+            - {name: TIZ_DB__MAX_POOL_SIZE, value: "1"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB verify-raw: read the transfer job's verified inventory from the raw copy (read-only).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-verify-raw-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: verify-raw}
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: 900
@@ -228,13 +273,28 @@ spec:
       serviceAccountName: crv-pipeline-ops
       securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
-        - name: migrate
+        - name: verify
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
-          args: [migrate${MIGRATE_ARGS}]
-          envFrom:
-            - configMapRef: {name: crv-pipeline}
-          env:
-            - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+          command: [python, -c]
+          args:
+            - |
+              import asyncio, json
+              from azure.identity.aio import DefaultAzureCredential
+              from azure.storage.blob.aio import BlobServiceClient
+              async def main():
+                  async with DefaultAzureCredential() as credential, BlobServiceClient("${STORAGE_ACCOUNT_URL}", credential) as service:
+                      container = service.get_container_client("crv-raw")
+                      names = [b.name async for b in container.list_blobs(name_starts_with="_transfer-reports/")]
+                      print(json.dumps({"reports": names}))
+                      for name in names:
+                          report = json.loads(await (await container.download_blob(name)).readall())
+                          print(json.dumps({key: value for key, value in report.items() if not isinstance(value, (list, dict))}))
+                      count = total = 0
+                      async for blob in container.list_blobs(name_starts_with="DATAROOM CRV/"):
+                          count += 1
+                          total += blob.size
+                      print(json.dumps({"listed_files": count, "listed_bytes": total}))
+              asyncio.run(main())
           resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
@@ -266,8 +326,9 @@ spec:
           args: [ensure-search-index, --schema, /schema/crv-evidence-index.json,
                  --value, "EMBEDDING_RESOURCE_URI=${OPENAI_ENDPOINT}",
                  --value, "QUERY_EMBEDDING_DEPLOYMENT=${EMBEDDING_DEPLOYMENT}"${INDEX_ARGS}]
-          envFrom:
-            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_SEARCH__ENDPOINT, value: "${SEARCH_ENDPOINT}"}
+            - {name: TIZ_SEARCH__INDEX_NAME, value: crv-evidence-v1}
           resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:

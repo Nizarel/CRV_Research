@@ -25,10 +25,10 @@ from .adapters.blob.staging import stage_blobs
 from .adapters.local_intake import CorpusIntake, collect_legacy_office
 from .adapters.parsers.office import DocumentConverter, OfficeConverter, PrecomputedOfficeConverter
 from .adapters.pilot import profile_corpus, select, selection_report
-from .adapters.postgres.kg_access import ensure_entra_login, grant_reader
+from .adapters.postgres.kg_access import ensure_entra_login, grant_reader, grant_role
 from .adapters.postgres.knowledge import PostgresKnowledgeStore
 from .adapters.postgres.legacy import LegacyCatalog
-from .adapters.postgres.migrations import apply_migrations, load_migrations
+from .adapters.postgres.migrations import apply_crv_baseline, apply_migrations, load_migrations
 from .adapters.postgres.pool import create_pool
 from .adapters.postgres.report import pipeline_status
 from .adapters.postgres.snapshots import PostgresSnapshots
@@ -331,6 +331,60 @@ async def _kg_release(settings: PipelineSettings, _: Telemetry, args: argparse.N
                 release.release_id, environment=args.activate, now=datetime.now(UTC)
             )
     _print({**asdict(release), "age_graph": graph, "activated": args.activate})
+    return 0
+
+
+async def _db_bootstrap(
+    settings: PipelineSettings, _: Telemetry, args: argparse.Namespace
+) -> int:
+    """As the server's Entra admin: baseline, migrations, principals and runtime grants."""
+
+    principals: dict[str, str] = {}
+    for item in args.principal or ():
+        login, _sep, object_id = item.partition("=")
+        principals[login] = object_id
+    admin = settings.model_copy(
+        update={"db": settings.db.model_copy(update={"database": "postgres"})}
+    )
+    report: dict[str, Any] = {"apply": args.apply, "created": [], "granted": []}
+    async with _database(admin) as pool, pool.acquire() as connection:
+        existing = {
+            row["rolname"] for row in await connection.fetch(
+                "SELECT rolname FROM pg_roles WHERE rolname = ANY($1::text[])", list(principals)
+            )
+        }
+        report["missing_principals"] = sorted(set(principals) - existing)
+        if args.apply:
+            for login, object_id in principals.items():
+                if await ensure_entra_login(connection, login, object_id):
+                    report["created"].append(login)
+    async with _database(settings) as pool, pool.acquire() as connection:
+        registered = await connection.fetchval(
+            "SELECT to_regclass('ingest.schema_migration')"
+        ) is not None
+        report["baseline_present"] = registered
+        if not registered and not args.apply:
+            report["pending_migrations"] = [m.version for m in load_migrations()]
+            _print(report)
+            return 0
+        if args.apply:
+            report["baseline_applied"] = await apply_crv_baseline(connection)
+        migrations = await apply_migrations(
+            connection, load_migrations(), dry_run=not args.apply
+        )
+        report["migrations"] = asdict(migrations)
+        if args.apply:
+            for login in principals:
+                if await grant_role(connection, login, args.role):
+                    report["granted"].append(login)
+        else:
+            report["pending_grants"] = [
+                login for login in principals
+                if login not in existing or not await connection.fetchval(
+                    "SELECT pg_has_role($1, $2, 'MEMBER')", login, args.role
+                )
+            ]
+    _print(report)
     return 0
 
 
@@ -716,6 +770,17 @@ def build_parser() -> argparse.ArgumentParser:
     migrate = commands.add_parser("migrate", help="Apply packaged ledger migrations")
     migrate.add_argument("--dry-run", action="store_true", help="Apply then roll back")
     migrate.set_defaults(handler=_migrate)
+
+    bootstrap = commands.add_parser(
+        "db-bootstrap",
+        help="Entra admin: CRV baseline, migrations, pipeline principals and runtime grants",
+    )
+    bootstrap.add_argument(
+        "--principal", action="append", help="LOGIN=ENTRA_OBJECT_ID of a pipeline identity"
+    )
+    bootstrap.add_argument("--role", default="tizert_ingest_worker")
+    bootstrap.add_argument("--apply", action="store_true", help="Default is a dry run")
+    bootstrap.set_defaults(handler=_db_bootstrap)
 
     enqueue = commands.add_parser(
         "enqueue-snapshots", help="Plan snapshot jobs for blobs, pinned to their current ETag"

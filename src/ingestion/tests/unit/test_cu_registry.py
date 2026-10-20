@@ -81,3 +81,24 @@ async def test_model_default_drift_disables_every_analyzer() -> None:
     check = await verify_registry(live, AnalyzerRegistry.load(document))
     assert check.verified == []
     assert check.problems == {"defaults": ["$.modelDeployments.gpt-5.4-mini"]}
+
+
+class _NoDefaults(FakeContentAnalysis):
+    async def defaults(self) -> dict:
+        from ingest_pipeline.domain.errors import InvalidInputError
+
+        raise InvalidInputError("CU defaults read failed with HTTP 400: DefaultsNotSet")
+
+
+async def test_extraction_only_registry_needs_no_model_defaults() -> None:
+    registry = await load_registry(repo_file("infra/content-understanding/crv-cu-registry.json"))
+    live = _NoDefaults(analyzers={"prebuilt-layout": {
+        "analyzerId": "prebuilt-layout", "status": "ready", "config": {"enableLayout": True},
+    }})
+    check = await verify_registry(live, registry)
+    assert check.problems == {}
+    profile = check.catalog.profile("prebuilt-layout")
+    assert profile.prebuilt
+    assert profile.completion_model is None
+    with pytest.raises(Exception, match="DefaultsNotSet"):
+        await verify_registry(_NoDefaults(), await load_registry(repo_file(REGISTRY)))

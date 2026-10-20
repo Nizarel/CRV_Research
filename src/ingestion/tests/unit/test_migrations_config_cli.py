@@ -9,16 +9,19 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from ingest_pipeline.adapters.postgres.kg_access import grant_role
 from ingest_pipeline.adapters.postgres.migrations import (
     BASELINE_VERSION,
+    CRV_BASELINE_VERSION,
     Migration,
+    apply_crv_baseline,
     apply_migrations,
     load_migrations,
 )
 from ingest_pipeline.adapters.telemetry.json_logging import JsonFormatter
 from ingest_pipeline.cli import build_parser
 from ingest_pipeline.config import PipelineSettings, require
-from ingest_pipeline.domain.errors import ConfigurationError, IntegrityError
+from ingest_pipeline.domain.errors import ConfigurationError, IntegrityError, InvalidInputError
 from ingest_pipeline.domain.states import WorkerPool
 
 
@@ -107,6 +110,71 @@ async def test_dry_run_rolls_back_and_reports_unknown_versions() -> None:
     assert report.unknown_applied == ["0099_future"]
     assert connection.executed == []
     assert "0003_a" not in (connection.registry or {})
+
+
+async def test_crv_baseline_is_applied_once_and_satisfies_migrations() -> None:
+    connection = _Connection({}, has_table=False)
+    assert await apply_crv_baseline(connection)
+    assert CRV_BASELINE_VERSION in (connection.registry or {})
+    assert "CREATE EXTENSION" not in connection.executed[0]
+    assert "CREATE SCHEMA IF NOT EXISTS ingest" in connection.executed[0]
+    connection.has_table = True
+    assert not await apply_crv_baseline(connection)
+    report = await apply_migrations(connection, MIGRATIONS, dry_run=False)
+    assert report.applied == ["0003_a", "0004_b"]
+
+
+class _GrantConnection(_Connection):
+    def __init__(self, *, member: bool, role_exists: bool = True) -> None:
+        super().__init__({})
+        self.member, self.role_exists = member, role_exists
+
+    async def fetchval(self, query: str, *args: Any) -> Any:
+        if "to_regrole" in query:
+            return "tizert_ingest_worker" if self.role_exists else None
+        if "pg_has_role" in query:
+            return self.member
+        if "current_database" in query:
+            return "ingestion-catalog"
+        template, login, database, role = args
+        return template.replace("%1$I", f'"{login}"').replace("%2$I", f'"{database}"').replace(
+            "%3$I", role
+        )
+
+
+async def test_grant_role_is_idempotent_and_validates_names() -> None:
+    fresh = _GrantConnection(member=False)
+    assert await grant_role(fresh, "id-crv-pipeline-worker", "tizert_ingest_worker")
+    assert fresh.executed == [
+        'GRANT CONNECT ON DATABASE "ingestion-catalog" TO "id-crv-pipeline-worker"',
+        'GRANT tizert_ingest_worker TO "id-crv-pipeline-worker"',
+    ]
+    member = _GrantConnection(member=True)
+    assert not await grant_role(member, "id-crv-pipeline-worker", "tizert_ingest_worker")
+    assert member.executed == []
+    with pytest.raises(IntegrityError, match="does not exist"):
+        await grant_role(_GrantConnection(member=False, role_exists=False), "id-x-y", "tizert_x")
+    with pytest.raises(InvalidInputError):
+        await grant_role(fresh, 'x"; DROP', "tizert_ingest_worker")
+    with pytest.raises(InvalidInputError):
+        await grant_role(fresh, "id-crv-pipeline-worker", "Role;")
+
+
+def test_new_pilot_commands_parse() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        "db-bootstrap", "--principal", "id-crv-pipeline-worker=" + "0" * 8 + "-0000-0000-0000-"
+        + "0" * 12,
+    ])
+    assert not args.apply
+    for argv in (
+        ["select-pilot", "--root", "r", "--list", "l", "--report", "o"],
+        ["stage-blobs", "--container", "crv-raw", "--list", "l", "--output", "o", "--report", "r"],
+        ["collect-office", "--root", "r", "--output", "o"],
+        ["ensure-search-index", "--schema", "s.json", "--value", "A=b"],
+        ["compare-arms", "--prefix", "crv-pilot/", "--report", "r.json"],
+    ):
+        assert parser.parse_args(argv).handler is not None
 
 
 def test_settings_read_nested_environment(monkeypatch: pytest.MonkeyPatch) -> None:

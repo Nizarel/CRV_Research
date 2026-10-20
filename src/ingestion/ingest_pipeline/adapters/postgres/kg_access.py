@@ -50,6 +50,27 @@ async def ensure_entra_login(connection: PgConnection, login: str, object_id: st
     return True
 
 
+async def grant_role(connection: PgConnection, login: str, role: str) -> bool:
+    """Grant CONNECT on the current database and ``role`` to ``login``; return whether granted."""
+
+    _check_login(login)
+    if not re.match(r"^[a-z][a-z0-9_]{2,62}$", role):
+        raise InvalidInputError(f"Refusing role name {role!r}")
+    if await connection.fetchval("SELECT to_regrole($1)", role) is None:
+        raise IntegrityError(f"Role {role} does not exist; apply the migrations first")
+    if await connection.fetchval("SELECT pg_has_role($1, $2, 'MEMBER')", login, role):
+        return False
+    database = await connection.fetchval("SELECT current_database()")
+    async with connection.transaction():
+        for template in ("GRANT CONNECT ON DATABASE %2$I TO %1$I", "GRANT %3$I TO %1$I"):
+            statement = await connection.fetchval(
+                "SELECT format($1::text, $2::text, $3::text, $4::text)",
+                template, login, database, role,
+            )
+            await connection.execute(statement)
+    return True
+
+
 async def grant_reader(
     connection: PgConnection, login: str, *, statement_timeout_ms: int
 ) -> dict[str, Any]:
