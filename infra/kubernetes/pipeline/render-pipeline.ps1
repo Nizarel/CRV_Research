@@ -21,25 +21,27 @@ external accounts the lines tagged external-accounts are dropped.
 param(
     [Parameter(Mandatory)] [guid] $CoordinatorClientId,
     [Parameter(Mandatory)] [guid] $WorkerClientId,
+    [Parameter(Mandatory)] [guid] $KedaClientId,
     [Parameter(Mandatory)] [ValidatePattern('^[A-Za-z0-9_.-]{1,128}$')] [string] $ImageTag,
     [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
-    [string] $PgHost = 'psql-nyuwyhzhjriuu-ncus-085512.postgres.database.azure.com',
-    [string] $StorageAccountUrl = 'https://stnyuwyhzhjriuu.blob.core.windows.net',
-    [string] $ServiceBusNamespaceName = 'sb-nyuwyhzhjriuu',
+    [string] $PgHost = 'psql-crv-awmc6icu2kueq-ncus.postgres.database.azure.com',
+    [string] $StorageAccountUrl = 'https://stawmc6icu2kueq.blob.core.windows.net',
+    [ValidatePattern('^[a-z0-9][a-z0-9-]{2,62}$')] [string] $SourceContainer = 'crv-sources',
+    [string] $ServiceBusNamespaceName = 'sb-awmc6icu2kueq',
     [string] $ApplicationInsightsConnectionString = '',
-    [string] $DiEndpoint = '',
+    [string] $DiEndpoint = 'https://cog-di-awmc6icu2kueq.cognitiveservices.azure.com/',
     [ValidateRange(0, 1000000)] [int] $DiPageBudget = 0,
     [ValidateRange(1, 64)] [int] $DiMaxInflight = 4,
-    [string] $OpenAiEndpoint = '',
-    [string] $EmbeddingDeployment = 'crv-embedding-3-large',
-    [string] $SearchEndpoint = '',
+    [string] $OpenAiEndpoint = 'https://cog-awmc6icu2kueq.cognitiveservices.azure.com/',
+    [string] $EmbeddingDeployment = 'text-embedding-3-large',
+    [string] $SearchEndpoint = 'https://gptkb-awmc6icu2kueq.search.windows.net',
     [string] $SearchIndexName = 'crv-evidence-v1',
-    [string] $CuEndpoint = '',
+    [string] $CuEndpoint = 'https://cu-awmc6icu2kueq.cognitiveservices.azure.com/',
     [ValidateRange(0, 1000000)] [int] $CuPageBudget = 0,
     [ValidateRange(0, 2000000000)] [long] $CuTokenBudget = 0,
     [ValidateRange(1, 32)] [int] $CuMaxInflight = 2,
     [ValidateRange(1000, 200000)] [int] $CuEstTokensPerPage = 12000,
-    [string] $CuRegistryPath = (Join-Path $PSScriptRoot '../../content-understanding/ingestion-pilot.json'),
+    [string] $CuRegistryPath = (Join-Path $PSScriptRoot '../../content-understanding/crv-cu-registry.json'),
     [string] $PoliciesPath = (Join-Path $PSScriptRoot '../../content-understanding/crv-policies.json'),
     [ValidatePattern('^$|^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $RoutingPolicy = 'crv-layout-v1',
     [string] $BillingPath = '',
@@ -57,10 +59,12 @@ $template = Join-Path $PSScriptRoot 'crv-pipeline.yaml'
 $values = @{
     COORDINATOR_CLIENT_ID                 = $CoordinatorClientId.ToString()
     WORKER_CLIENT_ID                      = $WorkerClientId.ToString()
+    KEDA_CLIENT_ID                        = $KedaClientId.ToString()
     IMAGE_TAG                             = $ImageTag
     ACR_LOGIN_SERVER                      = $AcrLoginServer
     PG_HOST                               = $PgHost
     STORAGE_ACCOUNT_URL                   = $StorageAccountUrl
+    SOURCE_CONTAINER                      = $SourceContainer
     SERVICE_BUS_NAMESPACE_NAME            = $ServiceBusNamespaceName
     SERVICE_BUS_FQDN                      = "$ServiceBusNamespaceName.servicebus.windows.net"
     APPLICATIONINSIGHTS_CONNECTION_STRING = $ApplicationInsightsConnectionString

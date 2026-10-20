@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evidence_fakes import PFD_ANALYZER, FakeContentAnalysis
+from evidence_fakes import LAYOUT_ANALYZER, PFD_ANALYZER, FakeContentAnalysis, plain_analysis
 from evidence_harness import MAX_SOURCE, EvidenceKit, build_evidence_harness
 from fixture_builders import A3_LANDSCAPE, PdfPage, pdf_bytes
 
@@ -212,6 +212,33 @@ async def test_token_budget_reserves_in_flight_work_then_uses_real_usage(tmp_pat
     assert kit.statuses(StageName.CHUNK) == [JobStatus.SUCCEEDED]
     usage = await kit.harness.ledger.provider_usage(PROVIDER)
     assert usage.input_tokens + usage.output_tokens == 2200
+
+
+async def test_zero_token_budget_admits_extraction_only_and_blocks_generative(
+    tmp_path: Path,
+) -> None:
+    settings = CuSettings(max_source_bytes=MAX_SOURCE, page_budget=10, token_budget=0)
+    layout_first = RoutingPolicy(
+        version="crv-cu-layout",
+        cu_profiles=(CuProfileRule(unit_kinds=DRAWINGS, analyzer_id=LAYOUT_ANALYZER),),
+    )
+    extraction = build_evidence_harness(
+        tmp_path / "extract", policy=layout_first, cu=settings,
+        analysis=FakeContentAnalysis(responder=plain_analysis),
+    )
+    await extraction.ingest("Plans/a.pdf", pdf_bytes([_drawing(), _drawing()]))
+    await extraction.drain()
+    assert [request.analyzer_id for request, _ in extraction.analysis.submissions] == [
+        LAYOUT_ANALYZER, LAYOUT_ANALYZER,
+    ]
+    assert extraction.statuses(StageName.CHUNK) == [JobStatus.SUCCEEDED]
+
+    generative = build_evidence_harness(tmp_path / "generate", policy=CU_FIRST, cu=settings)
+    await generative.ingest("PFD/pfd.pdf", pdf_bytes([_drawing()]))
+    await generative.drain(strict=False)
+    assert not generative.analysis.submissions
+    [waiting] = generative.jobs(StageName.CU_SUBMIT)
+    assert "CU token budget 0 reached" in (waiting.last_error or "")
 
 
 async def test_throttled_analyses_are_resubmitted_then_fail_the_unit(tmp_path: Path) -> None:

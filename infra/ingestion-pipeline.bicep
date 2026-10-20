@@ -1,10 +1,11 @@
-// Durable ingestion pipeline (v2), Phase 1 prerequisites. Additive; nothing existing is modified.
+// Durable ingestion pipeline (v2) prerequisites. Additive; nothing existing is modified.
 //
-// - Four pool queues on the EXISTING Service Bus namespace (wake-ups only; the ledger is authoritative).
-// - Write-once artifact container on the EXISTING storage account.
-// - Two least-privilege workload identities:
+// - Five pool queues on the EXISTING Service Bus namespace (wake-ups only; the ledger is authoritative).
+// - Write-once artifact container and the published-source container on the EXISTING storage account.
+// - Least-privilege workload identities:
 //     coordinator: sends outbox events to the pool queues;
-//     worker:      receives from the pool queues, reads sources, writes artifacts.
+//     worker:      receives from the pool queues, reads published sources, writes artifacts;
+//     ops:         short jobs that stage from the raw copy, publish sources and create the index.
 // - Phase 2 (only when the account/service names are set): the worker calls Document
 //   Intelligence and Azure OpenAI embeddings on their accounts and writes the shadow
 //   evidence index. Search RBAC cannot target a single index from ARM, so the assignment is on
@@ -19,13 +20,16 @@
 targetScope = 'resourceGroup'
 
 @description('Existing Service Bus namespace')
-param serviceBusNamespaceName string = 'sb-nyuwyhzhjriuu'
+param serviceBusNamespaceName string = 'sb-awmc6icu2kueq'
 
 @description('Existing storage account holding sources')
-param storageAccountName string = 'stnyuwyhzhjriuu'
+param storageAccountName string = 'stawmc6icu2kueq'
 
-@description('Existing source container (read-only for the pipeline)')
-param sourceContainerName string = 'content'
+@description('Published source container, created here (read-only for workers, written by ops jobs)')
+param sourceContainerName string = 'crv-sources'
+
+@description('Existing verified raw-corpus copy (read-only for ops staging jobs)')
+param rawContainerName string = 'crv-raw'
 
 @description('New write-once artifact container')
 param artifactContainerName string = 'ingest-artifacts'
@@ -43,6 +47,16 @@ param coordinatorIdentityName string = 'id-crv-pipeline-coordinator'
 param workerIdentityName string = 'id-crv-pipeline-worker'
 param coordinatorServiceAccountName string = 'crv-pipeline-coordinator'
 param workerServiceAccountName string = 'crv-pipeline-worker'
+
+@description('Operations identity for staging, intake/publication, migrations and index setup; empty skips it')
+param opsIdentityName string = 'id-crv-pipeline-ops'
+param opsServiceAccountName string = 'crv-pipeline-ops'
+
+@description('KEDA identity reading queue lengths (needs Manage, so Data Owner on this namespace only); empty skips it')
+param kedaIdentityName string = 'id-crv-pipeline-keda'
+
+@description('Service account of the KEDA operator (AKS add-on default)')
+param kedaOperatorSubject string = 'system:serviceaccount:kube-system:keda-operator'
 
 @description('Worker pools; each gets queue ingest-<pool>')
 param pools array = [
@@ -83,6 +97,10 @@ var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
 var cognitiveServicesOpenAiUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
+var serviceBusDataOwnerRoleId = '090c5cfd-751d-490a-894a-3ce6f1109419'
+var useOps = !empty(opsIdentityName)
+var useKeda = !empty(kedaIdentityName)
 var useDocumentIntelligence = !empty(documentIntelligenceAccountName)
 var useContentUnderstanding = !empty(contentUnderstandingAccountName)
 var useEmbeddings = !empty(embeddingAccountName)
@@ -119,9 +137,17 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
   resource blobService 'blobServices' existing = {
     name: 'default'
 
-    resource sourceContainer 'containers' existing = {
-      name: sourceContainerName
+    resource rawContainer 'containers' existing = {
+      name: rawContainerName
     }
+  }
+}
+
+resource sourceContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: storage::blobService
+  name: sourceContainerName
+  properties: {
+    publicAccess: 'None'
   }
 }
 
@@ -189,8 +215,8 @@ resource workerReceive 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
 
 // Sources are evidence: the pipeline can read them but never modify them.
 resource workerSourceReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: storage::blobService::sourceContainer
-  name: guid(storage::blobService::sourceContainer.id, worker.id, storageBlobDataReaderRoleId)
+  scope: sourceContainer
+  name: guid(sourceContainer.id, worker.id, storageBlobDataReaderRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataReaderRoleId)
     principalId: worker.properties.principalId
@@ -204,6 +230,78 @@ resource workerArtifactWriter 'Microsoft.Authorization/roleAssignments@2022-04-0
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
     principalId: worker.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Short-lived operations jobs: read the raw copy, publish sources, create the evidence index.
+// PostgreSQL admin rights for migrations are granted separately by an Entra administrator.
+resource ops 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (useOps) {
+  name: useOps ? opsIdentityName : 'unused-ops'
+  location: location
+}
+
+resource opsFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = if (useOps) {
+  parent: ops
+  name: 'crv-pipeline-ops-aks'
+  properties: {
+    audiences: ['api://AzureADTokenExchange']
+    issuer: oidcIssuerUrl
+    subject: 'system:serviceaccount:${kubernetesNamespace}:${opsServiceAccountName}'
+  }
+}
+
+resource opsRawReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useOps) {
+  scope: storage::blobService::rawContainer
+  name: guid(storage::blobService::rawContainer.id, ops.id, storageBlobDataReaderRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataReaderRoleId)
+    principalId: ops.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource opsSourceWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useOps) {
+  scope: sourceContainer
+  name: guid(sourceContainer.id, ops.id, storageBlobDataContributorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    principalId: ops.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource opsSearchAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useOps && useSearch) {
+  scope: search
+  name: guid(search.id, ops.id, searchServiceContributorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchServiceContributorRoleId)
+    principalId: ops.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource kedaIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (useKeda) {
+  name: useKeda ? kedaIdentityName : 'unused-keda'
+  location: location
+}
+
+resource kedaFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = if (useKeda) {
+  parent: kedaIdentity
+  name: 'crv-pipeline-keda-operator'
+  properties: {
+    audiences: ['api://AzureADTokenExchange']
+    issuer: oidcIssuerUrl
+    subject: kedaOperatorSubject
+  }
+}
+
+resource kedaQueueMetrics 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useKeda) {
+  scope: bus
+  name: guid(bus.id, kedaIdentity.id, serviceBusDataOwnerRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusDataOwnerRoleId)
+    principalId: kedaIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
@@ -303,4 +401,15 @@ output ingestionPipeline object = {
   }
   queues: queueNames
   artifactContainer: artifactContainer.name
+  sourceContainer: sourceContainer.name
+  opsIdentity: useOps ? {
+    name: ops.name
+    clientId: ops.properties.clientId
+    principalId: ops.properties.principalId
+    serviceAccountName: opsServiceAccountName
+  } : {}
+  kedaIdentity: useKeda ? {
+    name: kedaIdentity.name
+    clientId: kedaIdentity.properties.clientId
+  } : {}
 }

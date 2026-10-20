@@ -1,0 +1,7 @@
+{
+  "apiVersion": "2025-11-01",
+  "modelDeployments": {},
+  "modelVersions": {},
+  "prebuiltAnalyzers": ["prebuilt-layout"],
+  "analyzers": {}
+}

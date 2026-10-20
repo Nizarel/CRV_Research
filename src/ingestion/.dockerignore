@@ -1,0 +1,4 @@
+**
+!pyproject.toml
+!ingest_pipeline/**
+ingest_pipeline/**/__pycache__

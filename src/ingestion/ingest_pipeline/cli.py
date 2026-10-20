@@ -21,18 +21,24 @@ from typing import Any
 from .adapters.azure_ai.content_understanding import ContentUnderstandingClient
 from .adapters.azure_ai.cu_registry import load_registry, verify_registry
 from .adapters.blob.intake import publish_intake
-from .adapters.local_intake import CorpusIntake
-from .adapters.parsers.office import OfficeConverter
+from .adapters.blob.staging import stage_blobs
+from .adapters.local_intake import CorpusIntake, collect_legacy_office
+from .adapters.parsers.office import DocumentConverter, OfficeConverter, PrecomputedOfficeConverter
+from .adapters.pilot import profile_corpus, select, selection_report
 from .adapters.postgres.kg_access import ensure_entra_login, grant_reader
 from .adapters.postgres.knowledge import PostgresKnowledgeStore
 from .adapters.postgres.legacy import LegacyCatalog
 from .adapters.postgres.migrations import apply_migrations, load_migrations
 from .adapters.postgres.pool import create_pool
 from .adapters.postgres.report import pipeline_status
+from .adapters.postgres.snapshots import PostgresSnapshots
+from .adapters.search.index_admin import ensure_index, render_schema
 from .adapters.servicebus.transport import ServiceBusMessageReceiver, open_receiver
 from .adapters.telemetry.json_logging import configure_logging
 from .adapters.telemetry.otel import NoopTelemetry, configure_telemetry
 from .config import PipelineSettings, load_billing, load_policies, require
+from .domain import comparison
+from .domain.evidence import EvidenceDocument, EvidenceUnit
 from .domain.ids import legacy_placement_id, legacy_source_object_id
 from .domain.intake import IntakeLimits
 from .domain.knowledge import (
@@ -64,10 +70,15 @@ async def _prepare_corpus(
         max_source_bytes=settings.blob.max_source_bytes,
         max_total_bytes=args.max_total_gib * 1024**3,
     )
-    converter = (
-        OfficeConverter(args.office_image, max_output_bytes=limits.max_source_bytes)
-        if args.office_image else None
-    )
+    if args.office_image and args.office_converted:
+        converter: DocumentConverter | None = PrecomputedOfficeConverter(
+            args.office_image, Path(args.office_converted),
+            max_output_bytes=limits.max_source_bytes,
+        )
+    elif args.office_image:
+        converter = OfficeConverter(args.office_image, max_output_bytes=limits.max_source_bytes)
+    else:
+        converter = None
     report = await asyncio.to_thread(
         CorpusIntake(Path(args.output), limits, converter).prepare, Path(args.root)
     )
@@ -100,6 +111,148 @@ async def _ingest_corpus(
 
 def _print(payload: Any) -> None:
     print(json.dumps(payload, default=str, sort_keys=True))
+
+
+def _write_json(path: str, payload: Any) -> None:
+    Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), "utf-8")
+
+
+async def _collect_office(_: PipelineSettings, __: Telemetry, args: argparse.Namespace) -> int:
+    counts = await asyncio.to_thread(collect_legacy_office, Path(args.root), Path(args.output))
+    _print(counts)
+    return 0
+
+
+async def _stage_blobs(
+    settings: PipelineSettings, _: Telemetry, args: argparse.Namespace
+) -> int:
+    from azure.identity.aio import DefaultAzureCredential
+    from azure.storage.blob.aio import BlobServiceClient
+
+    text = await asyncio.to_thread(Path(args.list).read_text, "utf-8")
+    entries = [
+        line.rstrip("\r\n") for line in text.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    prefix = args.prefix.strip("/") + "/" if args.prefix.strip("/") else ""
+    async with (
+        DefaultAzureCredential() as credential,
+        BlobServiceClient(
+            require(settings.blob.account_url, "TIZ_BLOB__ACCOUNT_URL"), credential
+        ) as service,
+    ):
+        report = await stage_blobs(
+            service.get_container_client(args.container), entries, Path(args.output),
+            prefix=prefix, max_bytes=settings.blob.max_source_bytes,
+        )
+    _write_json(args.report, report)
+    _print({"staged": len(report["staged"]), "failed": len(report["failed"]),
+            "bytes": report["bytes"]})
+    return 2 if report["failed"] else 0
+
+
+async def _select_pilot(
+    settings: PipelineSettings, _: Telemetry, args: argparse.Namespace
+) -> int:
+    policy = (
+        load_policies(Path(args.policies)).get(args.policy).policy
+        if args.policies else settings.default_routing()
+    )
+    candidates = await profile_corpus(Path(args.root), policy)
+    selection = select(
+        candidates, target_pages=args.pages, seed=args.seed,
+        must_include=args.include or (), max_document_pages=args.max_document_pages,
+    )
+    report = selection_report(
+        selection, di_page_usd=args.di_usd_per_1000 / 1000, cu_page_usd=args.cu_usd_per_1000 / 1000
+    )
+    report["policy"] = policy.version
+    report["seed"] = args.seed
+    _write_json(args.report, report)
+    await asyncio.to_thread(
+        Path(args.list).write_text,
+        "".join(item.entry + "\n" for item in selection.entries),
+        "utf-8",
+    )
+    _print({key: report[key] for key in ("files", "predicted_di_pages", "predicted_usd")}
+           | {"unknown_pages": len(report["unknown_pages"])})
+    return 0
+
+
+async def _ensure_search_index(
+    settings: PipelineSettings, _: Telemetry, args: argparse.Namespace
+) -> int:
+    from azure.identity.aio import DefaultAzureCredential
+
+    values = dict(item.split("=", 1) for item in args.value or ())
+    schema = render_schema(
+        Path(args.schema), values, index_name=settings.search.index_name
+    )
+    async with DefaultAzureCredential() as credential:
+        report = await ensure_index(
+            require(settings.search.endpoint, "TIZ_SEARCH__ENDPOINT"), schema, credential,
+            apply=args.apply,
+        )
+    _print(report)
+    return 0 if report["exists"] and not report["drift"] else 1
+
+
+async def _compare_arms(
+    settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
+) -> int:
+    from .domain.cu import PROVIDER as CU_PROVIDER
+    from .ports.evidence import EvidenceStatus
+    from .stages.di import PROVIDER as DI_PROVIDER
+
+    policies = load_policies(require(settings.policies_path, "TIZ_POLICIES_PATH"))
+    arms = [policies.get(args.policy_a).policy.version, policies.get(args.policy_b).policy.version]
+    stats = [comparison.ArmStats(), comparison.ArmStats()]
+    labels: dict[str, str] = {}
+    async with azure_runtime(settings, telemetry, bus=False) as runtime:
+        services = runtime.services
+        evidence = services.require_evidence()
+        artifacts = services.require_artifacts()
+        contents = await PostgresSnapshots(runtime.pool).contents_with_prefix(args.prefix)
+        for content_hash, blob_name in contents:
+            labels[content_hash] = blob_name
+            for arm, stat in zip(arms, stats, strict=True):
+                record = await evidence.latest_document(
+                    content_hash, arm, status=EvidenceStatus.EMBEDDED
+                )
+                if record is None:
+                    comparison.collect(stat, content_hash, None, [])
+                    continue
+                document = EvidenceDocument.model_validate_json(
+                    await artifacts.get(record.manifest)
+                )
+                units = [
+                    EvidenceUnit.model_validate_json(await artifacts.get(unit.evidence))
+                    for unit in document.units if unit.evidence is not None
+                ]
+                comparison.collect(stat, content_hash, document, units)
+        usage = {
+            provider: await runtime.ledger.provider_usage(provider)
+            for provider in (DI_PROVIDER, CU_PROVIDER)
+        }
+    di_rate, cu_rate = args.di_usd_per_1000 / 1000, args.cu_usd_per_1000 / 1000
+    report = {
+        "prefix": args.prefix,
+        "arms": {
+            args.policy_a: comparison.summary(
+                stats[0], pages_billed=usage[DI_PROVIDER].pages, page_usd=di_rate
+            ),
+            args.policy_b: comparison.summary(
+                stats[1], pages_billed=usage[CU_PROVIDER].pages, page_usd=cu_rate
+            ),
+        },
+        "divergent_pages": len(comparison.divergent_pages(stats[0], stats[1])),
+        "review_sample": comparison.review_sample(
+            stats[0], stats[1], labels, size=args.review_pages, seed=args.seed
+        ),
+    }
+    _write_json(args.report, report)
+    _print({key: report[key] for key in ("arms", "divergent_pages")})
+    return 0
 
 
 def _read_bytes(path: str) -> bytes:
@@ -492,8 +645,66 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument(
         "--office-image", help="Local image ID sha256:... or registry image pinned by @sha256"
     )
+    prepare.add_argument(
+        "--office-converted",
+        help="Isolated converter output: <input-sha256>.pdf files (needs --office-image)",
+    )
     prepare.add_argument("--max-total-gib", type=int, default=64)
     prepare.set_defaults(handler=_prepare_corpus)
+
+    collect = commands.add_parser(
+        "collect-office", help="Copy legacy DOC/PPT as <sha256>.<ext> for the isolated converter"
+    )
+    collect.add_argument("--root", required=True)
+    collect.add_argument("--output", required=True)
+    collect.set_defaults(handler=_collect_office)
+
+    stage = commands.add_parser(
+        "stage-blobs", help="Copy listed raw-corpus blobs (or a.zip!/member) to a local volume"
+    )
+    stage.add_argument("--container", required=True, help="Read-only raw corpus container")
+    stage.add_argument("--prefix", default="", help="Blob prefix of the corpus root")
+    stage.add_argument("--list", required=True, help="UTF-8 file, one corpus path per line")
+    stage.add_argument("--output", required=True)
+    stage.add_argument("--report", required=True)
+    stage.set_defaults(handler=_stage_blobs)
+
+    pilot = commands.add_parser(
+        "select-pilot", help="Stratified pilot sample with predicted DI pages and cost (offline)"
+    )
+    pilot.add_argument("--root", required=True)
+    pilot.add_argument("--pages", type=int, default=1000, help="Target predicted DI pages")
+    pilot.add_argument("--seed", type=int, default=20261019)
+    pilot.add_argument("--include", action="append", help="Corpus path that must be included")
+    pilot.add_argument("--max-document-pages", type=int, default=120)
+    pilot.add_argument("--policies", help="Policy registry JSON (default: configured routing)")
+    pilot.add_argument("--policy", default="crv-layout-v1")
+    pilot.add_argument("--di-usd-per-1000", type=float, default=10.0)
+    pilot.add_argument("--cu-usd-per-1000", type=float, default=5.0)
+    pilot.add_argument("--list", required=True, help="Output: one selected corpus path per line")
+    pilot.add_argument("--report", required=True, help="Output: JSON selection report")
+    pilot.set_defaults(handler=_select_pilot)
+
+    index = commands.add_parser(
+        "ensure-search-index", help="Check (or with --apply create/update) the evidence index"
+    )
+    index.add_argument("--schema", required=True, help="Reviewed index JSON definition")
+    index.add_argument("--value", action="append", help="KEY=VALUE for a ${KEY} placeholder")
+    index.add_argument("--apply", action="store_true")
+    index.set_defaults(handler=_ensure_search_index)
+
+    compare = commands.add_parser(
+        "compare-arms", help="Compare two policies' evidence over one source prefix (read-only)"
+    )
+    compare.add_argument("--prefix", required=True, help="Blob-name prefix of the pilot sources")
+    compare.add_argument("--policy-a", default="crv-layout-v1")
+    compare.add_argument("--policy-b", default="crv-cu-layout-v1")
+    compare.add_argument("--review-pages", type=int, default=30)
+    compare.add_argument("--seed", type=int, default=20261019)
+    compare.add_argument("--di-usd-per-1000", type=float, default=10.0)
+    compare.add_argument("--cu-usd-per-1000", type=float, default=5.0)
+    compare.add_argument("--report", required=True)
+    compare.set_defaults(handler=_compare_arms)
 
     ingest = commands.add_parser(
         "ingest-corpus", help="Upload verified intake originals/derivatives and enqueue snapshots"
@@ -605,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = PipelineSettings()
     telemetry: Telemetry
-    if args.handler is _prepare_corpus:
+    if args.handler in (_prepare_corpus, _collect_office, _select_pilot):
         configure_logging()
         telemetry = NoopTelemetry()
     else:

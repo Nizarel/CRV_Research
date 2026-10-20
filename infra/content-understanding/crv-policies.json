@@ -24,6 +24,21 @@
         "cu_profiles": [],
         "escalation": []
       }
+    },
+    "crv-cu-layout-v1": {
+      "release_id": "crv-cu-compare-v1",
+      "policy": {
+        "version": "crv-cu-layout-v1",
+        "preserve_layout": true,
+        "prefer_native_text": false,
+        "max_submit_bytes": 41943040,
+        "max_layout_pages_per_unit": 20,
+        "independent_column_workbooks": ["84e42620e08e0bde04a1b34326abc115fc9a74b666c4a238c4a77ac8aaf96e97"],
+        "cu_profiles": [
+          {"unit_kinds": ["pdf_pages", "drawing_sheet", "office_document", "image"], "analyzer_id": "prebuilt-layout"}
+        ],
+        "escalation": []
+      }
     }
   }
 }

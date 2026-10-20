@@ -1,0 +1,278 @@
+# CRV pilot operations: staging, isolated Office conversion, intake + publication, migration and
+# index setup. Render with render-pilot.ps1, which substitutes every dollar-brace placeholder and
+# selects ONE job (-Job) so the stages run strictly in order. Apply through `az aks command invoke`.
+#
+# Shared state is one ReadWriteOnce disk: the jobs run one at a time on the same node pool.
+# Converter pods get no service-account token, no identity and no network (Cilium deny-all).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv-pipeline-ops
+  namespace: crv
+  annotations:
+    azure.workload.identity/client-id: ${OPS_CLIENT_ID}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv-office-converter
+  namespace: crv
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: crv-pilot-work
+  namespace: crv
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: managed-csi
+  resources:
+    requests:
+      storage: ${WORK_GIB}Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crv-office-converter-isolated
+  namespace: crv
+spec:
+  # Selected pods with no allow rules: all ingress and egress, including DNS, is denied.
+  podSelector:
+    matchLabels:
+      crv.pilot/isolated: "true"
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crv-pilot-list
+  namespace: crv
+data:
+  pilot.txt: |
+${PILOT_LIST}
+---
+# JOB stage: copy the selected corpus paths from the raw copy to /work/corpus.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-stage-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: stage}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: stage
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [stage-blobs, --container, crv-raw, --prefix, "DATAROOM CRV", --list, /config/pilot.txt,
+                 --output, /work/corpus, --report, /work/stage-report.json]
+          env:
+            - {name: TIZ_BLOB__ACCOUNT_URL, value: "${STORAGE_ACCOUNT_URL}"}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: work, mountPath: /work}
+            - {name: list, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: work, persistentVolumeClaim: {claimName: crv-pilot-work}}
+        - {name: list, configMap: {name: crv-pilot-list}}
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+---
+# JOB convert: collect legacy DOC/PPT, then convert them with no network and no identity.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-convert-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: convert}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-office-converter, crv.pilot/isolated: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-office-converter
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      initContainers:
+        - name: collect
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [collect-office, --root, /work/corpus, --output, /work/office/in]
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: work, mountPath: /work}
+            - {name: tmp, mountPath: /tmp}
+        - name: prepare-output
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          command: [python, -c, "import pathlib; pathlib.Path('/work/office/out').mkdir(parents=True, exist_ok=True)"]
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: work, mountPath: /work}
+      containers:
+        - name: convert
+          image: ${ACR_LOGIN_SERVER}/crv-office-converter@${CONVERTER_DIGEST}
+          args: [--batch, /work/office/in, /work/office/out]
+          env:
+            - {name: HOME, value: /tmp}
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "1", memory: 1536Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: work, mountPath: /work}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: work, persistentVolumeClaim: {claimName: crv-pilot-work}}
+        - {name: tmp, emptyDir: {sizeLimit: 4Gi}}
+---
+# JOB intake: offline intake of the staged corpus with the converter outputs (no cloud calls).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-intake-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: intake}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-intake, crv.pilot/isolated: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-office-converter
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: intake
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [prepare-corpus, --root, /work/corpus, --output, /work/intake,
+                 --office-image, "${CONVERTER_DIGEST}", --office-converted, /work/office/out,
+                 --max-total-gib, "${WORK_GIB}"]
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: work, mountPath: /work}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: work, persistentVolumeClaim: {claimName: crv-pilot-work}}
+        - {name: tmp, emptyDir: {sizeLimit: 2Gi}}
+---
+# JOB publish: upload verified originals and sources, then enqueue snapshot jobs.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-publish-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: publish}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: publish
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [ingest-corpus, --manifest, /work/intake/manifest.json, --prefix, "${SOURCE_PREFIX}"]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: work, mountPath: /work, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: work, persistentVolumeClaim: {claimName: crv-pilot-work}}
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+---
+# JOB migrate: apply (or with MIGRATE_ARGS=--dry-run, check) the packaged ledger migrations.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-migrate-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: migrate}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: migrate
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [migrate${MIGRATE_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB index: check (INDEX_ARGS empty) or create/update (INDEX_ARGS=--apply) the evidence index.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-index-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: index}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: index
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [ensure-search-index, --schema, /schema/crv-evidence-index.json,
+                 --value, "EMBEDDING_RESOURCE_URI=${OPENAI_ENDPOINT}",
+                 --value, "QUERY_EMBEDDING_DEPLOYMENT=${EMBEDDING_DEPLOYMENT}"${INDEX_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: schema, mountPath: /schema, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: schema, configMap: {name: crv-search-schema}}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}

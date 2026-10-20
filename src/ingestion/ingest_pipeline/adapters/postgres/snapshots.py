@@ -72,3 +72,15 @@ class PostgresSnapshots:
                 placement_id,
             )
         return [row["content_hash"] for row in rows]
+
+    async def contents_with_prefix(self, prefix: str) -> list[tuple[str, str]]:
+        """Distinct contents last observed under a blob-name prefix, with one name each."""
+
+        pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                "SELECT content_hash, min(blob_name) AS blob_name FROM ingest.source_snapshot"
+                " WHERE blob_name LIKE $1 GROUP BY content_hash ORDER BY content_hash",
+                pattern,
+            )
+        return [(row["content_hash"], row["blob_name"]) for row in rows]

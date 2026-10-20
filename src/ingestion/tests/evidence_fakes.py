@@ -321,10 +321,11 @@ def cu_document(
 AnalysisResponder = Callable[[AnalysisRequest, bytes], dict[str, Any]]
 
 PFD_ANALYZER = "tizert_pfd_sheet_v1"
+LAYOUT_ANALYZER = "crv_layout_extract_v1"
 
 
 def fake_catalog() -> AnalyzerRegistry:
-    """A verified catalog with one custom analyzer (extract + generate fields)."""
+    """A verified catalog: one generative analyzer and one extraction-only analyzer."""
 
     return AnalyzerRegistry.load(
         {
@@ -332,6 +333,10 @@ def fake_catalog() -> AnalyzerRegistry:
             "modelDeployments": {"gpt-5.4-mini": "dep-mini", "text-embedding-3-large": "dep-emb"},
             "modelVersions": {"dep-mini": "2026-03-17"},
             "analyzers": {
+                LAYOUT_ANALYZER: {
+                    "baseAnalyzerId": "prebuilt-layout",
+                    "config": {"returnDetails": True, "enableLayout": True},
+                },
                 PFD_ANALYZER: {
                     "baseAnalyzerId": "prebuilt-document",
                     "models": {"completion": "gpt-5.4-mini", "embedding": "text-embedding-3-large"},
@@ -370,6 +375,17 @@ def default_analysis(request: AnalysisRequest, data: bytes) -> dict[str, Any]:
         "Summary": {"type": "string", "valueString": "Schema du circuit de broyage."},
     }
     return cu_document([content], analyzer_id=request.analyzer_id, pages=len(numbers))
+
+
+def plain_analysis(request: AnalysisRequest, data: bytes) -> dict[str, Any]:
+    """Extraction-only result: content and layout, no fields and no model token usage."""
+
+    total = pdf_page_count(data) if data.startswith(b"%PDF") else 1
+    numbers = expand_pages(request.content_range, total)
+    return cu_document(
+        [cu_content(numbers, descriptions=False)],
+        analyzer_id=request.analyzer_id, pages=len(numbers), input_tokens=0, output_tokens=0,
+    )
 
 
 @dataclass

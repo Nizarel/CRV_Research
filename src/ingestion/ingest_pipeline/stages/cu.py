@@ -50,7 +50,7 @@ from .di import FigureInputs, NormalizeInputs, parked, throttled
 from .links import UnitInputs, unit_job
 from .spend import SpendPolicy, start_on_account
 
-STAGE_VERSION = "1"
+STAGE_VERSION = "2"
 
 
 class CuInputs(UnitInputs):
@@ -268,7 +268,10 @@ class CuSubmitStage:
                 _jittered(self.settings.park_seconds, job.job_id),
                 "CU in-flight limit reached",
             )
-        blocked = await self._caps(context, job.job_id, billable=billable)
+        generative = AnalyzerProfile.model_validate(inputs.profile).completion_model is not None
+        blocked = await self._caps(
+            context, job.job_id, billable=billable, generative=generative
+        )
         if blocked is not None:
             return blocked
         provider = services.require_content_analysis(account)
@@ -318,7 +321,7 @@ class CuSubmitStage:
         )
 
     async def _caps(
-        self, context: StageContext, job_id: str, *, billable: int
+        self, context: StageContext, job_id: str, *, billable: int, generative: bool
     ) -> StageOutcome | None:
         settings = self.settings
         workload = context.services.require_workload()
@@ -338,6 +341,9 @@ class CuSubmitStage:
                 f"CU page budget {settings.page_budget} reached "
                 f"({used.pages} used, {in_flight} in flight)",
             )
+        # Extraction-only analyzers call no completion model, so they cannot spend tokens.
+        if not generative:
+            return None
         tokens = used.input_tokens + used.output_tokens
         estimate = reserved * settings.est_tokens_per_page
         if settings.token_budget is not None and tokens + estimate > settings.token_budget:

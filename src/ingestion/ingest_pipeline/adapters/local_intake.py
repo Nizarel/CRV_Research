@@ -16,7 +16,7 @@ from typing import IO
 from ..domain.errors import PipelineError, UnsupportedContentError
 from ..domain.intake import IntakeItem, IntakeLimits, IntakeManifest
 from ..domain.sniff import FileKind, ZipLimits, check_zip_safety, sniff
-from .parsers.office import OfficeConverter
+from .parsers.office import DocumentConverter
 
 logger = logging.getLogger(__name__)
 _READY = {
@@ -66,7 +66,7 @@ def safe_member(info: zipfile.ZipInfo) -> str:
 
 class CorpusIntake:
     def __init__(
-        self, output: Path, limits: IntakeLimits, converter: OfficeConverter | None = None
+        self, output: Path, limits: IntakeLimits, converter: DocumentConverter | None = None
     ) -> None:
         self.output = long_path(output)
         self.limits = limits
@@ -241,3 +241,40 @@ class CorpusIntake:
                     self._failed(str(directory), ValueError("Directory links are not ingested"))
             for name in sorted(files):
                 yield Path(folder) / name
+
+
+def collect_legacy_office(root: Path, output: Path) -> dict[str, int]:
+    """Copy top-level legacy DOC/PPT inputs to ``output/<sha256>.<ext>`` for the converter job.
+
+    Detection matches intake (OLE signature and extension). Legacy files inside archives are
+    not collected; intake then reports them as explicit conversion failures.
+    """
+
+    root, output = long_path(root), long_path(output)
+    if output == root or root in output.parents:
+        raise ValueError("Office staging output must be outside the corpus")
+    output.mkdir(parents=True, exist_ok=True)
+    counts = {"collected": 0, "duplicates": 0}
+    for folder, directories, files in os.walk(root, followlinks=False):
+        directories[:] = sorted(d for d in directories if not reparse(Path(folder) / d))
+        for name in sorted(files):
+            source = Path(folder) / name
+            extension = source.suffix.lower()
+            if extension not in (".doc", ".ppt") or reparse(source):
+                continue
+            with source.open("rb") as handle:
+                if sniff(handle.read(8192), name=name).kind is not FileKind.CFB_OTHER:
+                    continue
+                handle.seek(0)
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            target = output / f"{digest}{extension}"
+            if target.exists():
+                counts["duplicates"] += 1
+                continue
+            temporary = target.with_suffix(".tmp")
+            with source.open("rb") as handle, temporary.open("wb") as copy:
+                while chunk := handle.read(1024 * 1024):
+                    copy.write(chunk)
+            temporary.replace(target)
+            counts["collected"] += 1
+    return counts

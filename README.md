@@ -149,10 +149,14 @@ Isolation and byte-signature checks do not prove conversion fidelity.
 |---|---|
 | `crv-layout-v1` | Conservative pilot baseline: layout/OCR on nonblank PDF pages |
 | `crv-selective-v1` | Native text for clean prose; layout for detected structural risks |
+| `crv-cu-layout-v1` | Comparison arm only: CU `prebuilt-layout` extraction, no generative features |
 
-Neither policy enables Content Understanding enrichment or escalation.
-Its existing provider integration remains available for a separately reviewed,
-budgeted experiment. The default configuration also uses the layout baseline.
+Only `crv-cu-layout-v1` routes to Content Understanding. It uses CU's prebuilt
+layout analyzer, which calls no completion model. Extraction-only analyzers
+therefore run under a token budget of zero, and only the page budget limits them.
+Analyzers with completion models still reserve their estimated tokens.
+The reviewed CU registry is [crv-cu-registry.json](infra/content-understanding/crv-cu-registry.json).
+The default configuration uses the layout baseline.
 
 The reviewed `Flore Managem.xlsx` archive member has SHA-256
 `84e42620e08e0bde04a1b34326abc115fc9a74b666c4a238c4a77ac8aaf96e97`.
@@ -243,6 +247,57 @@ manifests live there too. `ingest-corpus` enqueues only its logical source blobs
 The coordinator and workers run through the existing CLI or Kubernetes manifests.
 Use `status`, job inspection and replay to investigate failed or review-required
 units rather than assuming enqueue success means ingestion completion.
+
+## Pilot runbook (AKS, private network)
+
+All CRV data services and the AKS API server are private. Pilot work therefore
+runs as Kubernetes jobs, applied with `az aks command invoke`. Each job is rendered
+by [render-pilot.ps1](infra/kubernetes/pipeline/render-pilot.ps1) from
+[crv-pilot-jobs.yaml](infra/kubernetes/pipeline/crv-pilot-jobs.yaml), uses images
+pinned by digest, and fails if any placeholder remains.
+
+| Identity | Access |
+|---|---|
+| `id-crv-pipeline-ops` | Read `crv-raw`; write `crv-sources`; Search service contributor; PostgreSQL migration rights granted by an Entra administrator |
+| `id-crv-pipeline-coordinator` | Send to the `ingest-*` queues |
+| `id-crv-pipeline-worker` | Receive from queues; read `crv-sources`; write artifacts; call DI, CU and embeddings; write Search |
+| Office converter / intake pods | No identity, no service-account token, no network (deny-all `NetworkPolicy`) |
+
+Deploy identities, queues and containers with
+[ingestion-pipeline.bicep](infra/ingestion-pipeline.bicep) and
+[its CRV parameters](infra/ingestion-pipeline.crv.parameters.json).
+
+1. **Select** a sample locally. No Azure calls are made.
+   ```powershell
+   python -m ingest_pipeline.cli select-pilot --root "...\DATAROOM CRV" --pages 1000 `
+     --policies ..\..\infra\content-understanding\crv-policies.json --list pilot.txt --report pilot.json
+   ```
+   The sample is deterministic for a seed. It includes every required stratum:
+   scanned reports, two-column papers, legacy Office, mislabeled files, LIMS
+   commercial documents, procedures/templates and spreadsheets. Predicted DI
+   pages use the production routing policy. DOC/PPT pages are listed as
+   unknown until conversion.
+2. **Stage** (`-Job stage`): copy listed paths from `crv-raw` to the work disk,
+   verifying size and Content-MD5. `archive.zip!/member` entries copy a single
+   member, and archive lineage is then not recorded.
+3. **Convert** (`-Job convert`): collect legacy DOC/PPT files as `<sha256>.<ext>`
+   and convert them in an isolated pod. Every outcome is written to `results.json`.
+4. **Intake** (`-Job intake`): `prepare-corpus --office-converted` reads the
+   converted PDFs, records the converter digest, and turns missing conversions
+   into explicit failures. Review the manifest before publishing.
+5. **Migrate** and **index** (`-Job migrate`, `-Job index`): these are dry runs
+   by default. Use `-MigrateApply` or `-IndexApply` only after checking the output.
+6. **Publish** (`-Job publish`): upload sources under `crv-pilot` and enqueue
+   snapshots. Then render `crv-pipeline.yaml` with `-DiPageBudget 1000`.
+7. **Compare arms**: `enqueue-arm --policy crv-cu-layout-v1` with
+   `-CuPageBudget 1000 -CuTokenBudget 0`, then:
+   ```powershell
+   python -m ingest_pipeline.cli compare-arms --prefix crv-pilot/ --report compare.json
+   ```
+   The report shows per-arm page coverage, table and cell counts, failed or
+   unsupported units, billed pages and estimated cost. It also lists pages where
+   the arms diverge, plus a seeded set of 30 pages for manual review. Coverage is
+   only a proxy; the manual review decides.
 
 ## Pilot acceptance checks
 

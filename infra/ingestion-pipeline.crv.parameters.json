@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "serviceBusNamespaceName": { "value": "sb-awmc6icu2kueq" },
+    "storageAccountName": { "value": "stawmc6icu2kueq" },
+    "sourceContainerName": { "value": "crv-sources" },
+    "rawContainerName": { "value": "crv-raw" },
+    "artifactContainerName": { "value": "ingest-artifacts" },
+    "oidcIssuerUrl": { "value": "https://southcentralus.oic.prod-aks.azure.com/16b3c013-d300-468d-ac64-7eda0820b6d3/2f803b46-c536-48b1-ae5f-4b91bcd456a2/" },
+    "kubernetesNamespace": { "value": "crv" },
+    "documentIntelligenceAccountName": { "value": "cog-di-awmc6icu2kueq" },
+    "contentUnderstandingAccountName": { "value": "cu-awmc6icu2kueq" },
+    "embeddingAccountName": { "value": "cog-awmc6icu2kueq" },
+    "searchServiceName": { "value": "gptkb-awmc6icu2kueq" }
+  }
+}

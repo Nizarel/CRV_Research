@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -9,8 +11,62 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from ...domain.errors import ConfigurationError, UnsupportedContentError
+
+_PINNED_IMAGE = re.compile(r"(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}")
+
+
+class DocumentConverter(Protocol):
+    @property
+    def image(self) -> str:
+        """Pinned converter identity, recorded in intake lineage and conversion caches."""
+        ...
+
+    def convert(self, source: Path, destination: Path, extension: str) -> None: ...
+
+
+def _check_pdf(path: Path, max_bytes: int) -> None:
+    if path.stat().st_size > max_bytes:
+        raise UnsupportedContentError("Converted PDF exceeds the source limit")
+    with path.open("rb") as handle:
+        if not handle.read(8).startswith(b"%PDF-"):
+            raise UnsupportedContentError("Office converter did not produce a PDF")
+
+
+@dataclass(frozen=True)
+class PrecomputedOfficeConverter:
+    """Conversions produced earlier by the isolated converter job, keyed by input SHA-256.
+
+    ``directory`` holds ``<input-sha256>.pdf`` and the job's ``results.json``. The image is the
+    exact digest that produced them; a missing or failed result is an explicit failure.
+    """
+
+    image: str
+    directory: Path
+    max_output_bytes: int = 1024**3
+
+    def convert(self, source: Path, destination: Path, extension: str) -> None:
+        if not _PINNED_IMAGE.fullmatch(self.image):
+            raise ConfigurationError("Office image must be pinned by sha256 digest")
+        if extension not in (".doc", ".ppt"):
+            raise UnsupportedContentError("Only legacy Word and PowerPoint use Office conversion")
+        with source.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        converted = self.directory / f"{digest}.pdf"
+        if not converted.is_file():
+            reason = self._reason(digest) or "no converted PDF for this input"
+            raise UnsupportedContentError(f"Office conversion failed: {reason}")
+        _check_pdf(converted, self.max_output_bytes)
+        shutil.copyfile(converted, destination)
+
+    def _reason(self, digest: str) -> str | None:
+        results = self.directory / "results.json"
+        if not results.is_file():
+            return None
+        entry = json.loads(results.read_text(encoding="utf-8")).get(digest) or {}
+        return str(entry["reason"]) if entry.get("reason") else None
 
 
 def _mount_path(path: Path) -> str:
@@ -27,7 +83,7 @@ class OfficeConverter:
     max_output_bytes: int = 1024**3
 
     def convert(self, source: Path, destination: Path, extension: str) -> None:
-        if not re.fullmatch(r"(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}", self.image):
+        if not _PINNED_IMAGE.fullmatch(self.image):
             raise ConfigurationError("Office image must be pinned by sha256 digest")
         if extension not in (".doc", ".ppt"):
             raise UnsupportedContentError("Only legacy Word and PowerPoint use Office conversion")
@@ -69,9 +125,5 @@ class OfficeConverter:
                 raise UnsupportedContentError(
                     f"Office conversion failed (exit {result.returncode}): {detail}"
                 )
-            if converted.stat().st_size > self.max_output_bytes:
-                raise UnsupportedContentError("Converted PDF exceeds the source limit")
-            with converted.open("rb") as handle:
-                if not handle.read(8).startswith(b"%PDF-"):
-                    raise UnsupportedContentError("Office converter did not produce a PDF")
+            _check_pdf(converted, self.max_output_bytes)
             shutil.move(str(converted), destination)

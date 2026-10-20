@@ -1,8 +1,23 @@
 # Durable ingestion pipeline (v2): coordinator + KEDA-scaled pool workers.
 # Contains dollar-brace placeholders: render with render-pipeline.ps1, never apply raw. Lines
 # tagged external-accounts are kept only when external billing accounts are rendered.
-# KEDA reuses the existing `azure-servicebus-auth` TriggerAuthentication (needs Manage rights
-# to read queue metrics); the runtime identities only send or receive.
+# KEDA reads queue lengths through the dedicated KEDA identity (Data Owner on the namespace
+# only); the runtime identities only send or receive.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crv
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: azure-servicebus-auth
+  namespace: crv
+spec:
+  podIdentity:
+    provider: azure-workload
+    identityId: ${KEDA_CLIENT_ID}
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -29,7 +44,7 @@ data:
   TIZ_DB__DATABASE: ingestion-catalog
   TIZ_DB__MAX_POOL_SIZE: "4"
   TIZ_BLOB__ACCOUNT_URL: "${STORAGE_ACCOUNT_URL}"
-  TIZ_BLOB__SOURCE_CONTAINER: content
+  TIZ_BLOB__SOURCE_CONTAINER: "${SOURCE_CONTAINER}"
   TIZ_BLOB__ARTIFACT_CONTAINER: ingest-artifacts
   TIZ_BLOB__MAX_SOURCE_BYTES: "1073741824"
   TIZ_BUS__NAMESPACE: "${SERVICE_BUS_FQDN}"
