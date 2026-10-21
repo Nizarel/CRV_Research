@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import PurePosixPath
 
-from .vocab import GENRE_WORDS, MONTHS, fold
+from .vocab import GENRE_WORDS, MONTHS, fold, periodic_genre
 
 _MONTH_YEAR = re.compile(r"[-_ ]\s*(\d{1,2})\s*-\s*((?:19|20)\d{2})\s*-?\s*$")
 _EIE_REVISION = re.compile(r"[_ ](\d{2})(\d{2})((?:19|20)\d{2})[_ ]R(\d{1,2})\s*$", re.I)
@@ -104,7 +104,7 @@ def parse_file_name(path: str) -> FileNameFacts:
 
     words = [word for word in folded.split() if not word.isdigit()]
     genre_word = words[0] if words else None
-    genre = GENRE_WORDS.get(genre_word or "")
+    genre = periodic_genre(folded) or GENRE_WORDS.get(genre_word or "")
     part: tuple[str, str] | None = None
     if match := _CHAPTER.search(title):
         part = ("chapter", str(int(match.group(1))))

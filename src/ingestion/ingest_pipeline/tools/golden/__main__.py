@@ -97,7 +97,7 @@ async def _evaluate(
                 "anchors": {str(k): anchor_scores(question, hits, k) for k in ks},
                 "documents": _documents(hits[:judge_k]),
             }
-            if mode == "kg":
+            if mode.startswith("kg"):
                 entry["kg_entities"] = [
                     {key: item[key] for key in ("iri", "kind", "status")}
                     for item in retrieved.kg_entities
@@ -187,7 +187,8 @@ async def _run(args: argparse.Namespace) -> int:
     modes = [mode for mode in args.mode or MODES if mode in MODES]
     ks = sorted({int(k) for k in args.k.split(",")})
     async with DefaultAzureCredential() as credential:
-        pool = await create_pool(settings.db, credential) if "kg" in modes else None
+        needs_kg = any(mode.startswith("kg") for mode in modes)
+        pool = await create_pool(settings.db, credential) if needs_kg else None
         try:
             kg = None
             if pool is not None:
@@ -232,6 +233,37 @@ async def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sources_sheet(args: argparse.Namespace) -> int:
+    """Expert review sheet: proposed sources per question (judge-cited, never ground truth)."""
+
+    import csv
+    import io
+
+    questions = {q.id: q for q in load_golden(args.golden)}
+    report = json.loads(Path(args.report).read_text(encoding="utf-8"))
+    buffer = io.StringIO()
+    fields = ["id", "category", "split", "question", "expected_answer", "proposed_sources",
+              "status", "confirmed_sources", "expert_comment"]
+    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\r\n")
+    writer.writeheader()
+    for result in report["questions"]:
+        question = questions[result["id"]]
+        writer.writerow({
+            "id": question.id,
+            "category": question.category,
+            "split": question.split,
+            "question": question.question,
+            "expected_answer": question.expected,
+            "proposed_sources": "\n".join(result.get("proposed_sources") or []),
+            "status": "proposed" if not question.must_abstain else "n/a (abstention)",
+            "confirmed_sources": "",
+            "expert_comment": "",
+        })
+    Path(args.out).write_text(buffer.getvalue(), encoding="utf-8-sig", newline="")
+    print(json.dumps({"rows": len(report["questions"]), "out": args.out}))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m ingest_pipeline.tools.golden")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -239,6 +271,12 @@ def main(argv: list[str] | None = None) -> int:
     convert.add_argument("--xlsx", required=True)
     convert.add_argument("--sheet", default="Sheet2")
     convert.add_argument("--out", required=True)
+    sheet = commands.add_parser(
+        "sources-sheet", help="Expert review sheet of proposed expected sources (offline)"
+    )
+    sheet.add_argument("--golden", required=True)
+    sheet.add_argument("--report", required=True, help="JSON report of a run")
+    sheet.add_argument("--out", required=True)
     run = commands.add_parser("run", help="Evaluate retrieval in the cluster")
     run.add_argument("--golden", required=True)
     run.add_argument("--release", default="crv-v1")
@@ -254,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "convert":
         return _convert(args)
+    if args.command == "sources-sheet":
+        return _sources_sheet(args)
     return asyncio.run(_run(args))
 
 

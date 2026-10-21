@@ -62,3 +62,41 @@ Judged recall at 10 by category, semantic mode, against the gates in [AGENTIC_AR
    - The report proposes expected sources for every question (`proposed_sources`, from the passages the judge cited).
    - Experts confirm them, so later runs can measure source-match.
 5. **Re-run this baseline** after each change. The job takes about 2 minutes, plus a few cents of judge tokens.
+
+## Iteration 2: periodic demotion and precise KG steering (same day)
+
+**What changed:**
+- KG build v2 (release `crvkg-20261021-adb13a21c7da`) tags periodic summaries with their own genres: `activity-report`, `executive-summary`, `flash` and `project-reporting`, with a `periodic` flag on each Document.
+- Two retrieval modes were added:
+  - **`semantic_focused`:** semantic top 50, then a soft rerank. Periodic summaries lose 10 positions, and a document's third and later chunks lose 20.
+  - **`kg_precise`:** KG steering on Site, ReportCode and Organisation only (no cover-page projects), fused as a boost, then the same focus rerank.
+
+**Overall results (ALL)**
+
+| Mode | anchor@10 | facts@50 | judge@10 | p50 latency |
+|---|---|---|---|---|
+| semantic (this run) | 0.570 | 0.484 | 0.346 | 0.29 s |
+| kg (this run) | 0.576 | 0.517 | 0.363 | 0.77 s |
+| semantic_focused | **0.583** | 0.484 | **0.366** | 0.31 s |
+| kg_precise | 0.582 | 0.492 | 0.353 | 0.78 s |
+
+**judge@10 by category**
+
+| Category | semantic | semantic_focused | kg_precise |
+|---|---|---|---|
+| A: lookup | 0.59 | 0.59 | 0.56 |
+| B: synthesis | 0.11 | **0.16** | 0.15 |
+| C: comparison | 0.07 | 0.07 | 0.09 |
+| E: catalogue | 0.00 | **0.25** | **0.25** |
+
+**Reading:**
+- Semantic judged recall moved by ±2 points between identical runs (0.366 → 0.346), so differences below about 3 points are noise.
+- The focus rerank is cheap (+0.02 s) and never hurts. It clearly helps synthesis (B) and catalogue (E) questions, where periodic summaries were crowding out primary reports.
+- Precise KG steering is equivalent to focusing alone at single-shot top 10.
+- The decisive gap remains depth. About 0.71 of the anchors are within the top 50, but only about 0.37 of the facts are judged present in the top 10. Gains must now come from the agent: decomposition, fan-out, and reading and reranking 30–50 chunks per facet. Further index-side heuristics won't close it.
+
+**Guidance for the agent's retrieval service:**
+1. Use semantic hybrid with the focus rerank (periodic penalty and per-document cap) as the default leg.
+2. Use KG steering only on precise entities, as a boost.
+3. Use the KG `periodic` flag or genre to label periodic summaries in citations: they are secondary sources.
+4. Measure the agent end-to-end with this golden set; expected sources are pending expert review in [expected_sources_review.csv](../../golden/expected_sources_review.csv).

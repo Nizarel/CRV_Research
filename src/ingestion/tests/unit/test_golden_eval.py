@@ -11,7 +11,7 @@ from ingest_pipeline.tools.golden.dataset import (
     category_of,
     split_facts,
 )
-from ingest_pipeline.tools.golden.retrieval import Hit, _fuse
+from ingest_pipeline.tools.golden.retrieval import Hit, _fuse, focus, is_periodic
 
 ROWS = [(f"Question {n}", "Réponse ; détail") for n in range(1, 77)]
 
@@ -67,3 +67,20 @@ def test_reciprocal_rank_fusion_rewards_agreement() -> None:
     steered = [_hit("a", ""), _hit("b", ""), _hit("c", "")]
     base = [_hit("c", ""), _hit("d", ""), _hit("a", "")]
     assert [hit.chunk_id for hit in _fuse([steered, base], 3)] == ["a", "c", "b"]
+
+
+def test_focus_demotes_periodic_summaries_and_repeated_documents() -> None:
+    def hit(chunk: str, digest: str, name: str) -> Hit:
+        return Hit(chunk, digest * 64, "", f"GED/{name}", "", (), None)
+
+    ranked = [
+        hit("m1", "m", "Rapport d'activité du mois de mars 2017- 04-2017-.pdf"),
+        hit("a1", "a", "Pilotage industriel de la digue de Ouanssimi -05-2018-.pdf"),
+        hit("a2", "a", "Pilotage industriel de la digue de Ouanssimi -05-2018-.pdf"),
+        hit("a3", "a", "Pilotage industriel de la digue de Ouanssimi -05-2018-.pdf"),
+        hit("b1", "b", "Valorisation de la digue oxydée de Bleida- 09-2013-.pdf"),
+    ]
+    assert [h.chunk_id for h in focus(ranked, 5)] == ["a1", "a2", "b1", "m1", "a3"]
+    assert is_periodic(hit("x", "x", "RA_Aboulaich_01_2016_ouasnimi.pdf"))
+    assert is_periodic(hit("x", "x", "Executive summary du mois de mars 2025- 04-2025-.pdf"))
+    assert not is_periodic(hit("x", "x", "Rapport de pilotage de Tizert- 11-2015-.pdf"))

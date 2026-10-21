@@ -14,11 +14,22 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-MODES = ("bm25", "hybrid", "semantic", "kg")
+from ...domain.crv_kg.vocab import fold, periodic_genre
+
+MODES = ("bm25", "hybrid", "semantic", "kg", "semantic_focused", "kg_precise")
 SELECT = ["chunk_id", "content_hash", "title", "source_path", "content",
           "original_page_numbers", "document_code"]
 RRF_K = 60
 MAX_KG_DOCUMENTS = 150
+DEPTH = 50
+"""Focused modes rerank this many semantic results."""
+PERIODIC_PENALTY = 10
+"""Rank positions a periodic summary (monthly activity report, executive summary...) loses."""
+PER_DOCUMENT = 2
+"""Chunks per document before further chunks of it lose ``REPEAT_PENALTY`` positions."""
+REPEAT_PENALTY = 20
+PRECISE_KINDS = frozenset({"Site", "ReportCode", "Organisation"})
+"""Entity kinds precise enough to steer retrieval; cover-page projects are too broad."""
 
 
 @dataclass(frozen=True)
@@ -87,23 +98,51 @@ class Retriever:
 
     async def retrieve(self, text: str, mode: str, top: int) -> Retrieved:
         started = time.perf_counter()
-        if mode != "kg":
+        if mode in ("bm25", "hybrid", "semantic"):
             hits = await self._query(text, mode, top)
             return Retrieved(hits, time.perf_counter() - started)
+        if mode == "semantic_focused":
+            hits = focus(await self._query(text, "semantic", max(top, DEPTH)), top)
+            return Retrieved(hits, time.perf_counter() - started)
         if self._kg is None:
-            raise ValueError("The kg mode needs the crv_kg read API")
+            raise ValueError("The kg modes need the crv_kg read API")
         entities = await self._kg.resolve(text)
+        if mode == "kg_precise":
+            entities = [entity for entity in entities if entity["kind"] in PRECISE_KINDS]
         iris = [entity["iri"] for entity in entities]
         hashes = await self._kg.documents(iris) if iris else []
-        base = await self._query(text, "semantic", top)
-        if not hashes:
-            return Retrieved(base, time.perf_counter() - started, entities, 0)
-        joined = ",".join(hashes[:MAX_KG_DOCUMENTS])
-        steered = await self._query(
-            text, "semantic", top, f"search.in(content_hash, '{joined}', ',')"
-        )
-        return Retrieved(_fuse([steered, base], top), time.perf_counter() - started,
-                         entities, len(hashes))
+        depth = max(top, DEPTH) if mode == "kg_precise" else top
+        base = await self._query(text, "semantic", depth)
+        if hashes:
+            joined = ",".join(hashes[:MAX_KG_DOCUMENTS])
+            steered = await self._query(
+                text, "semantic", depth, f"search.in(content_hash, '{joined}', ',')"
+            )
+            hits = _fuse([steered, base], depth)
+        else:
+            hits = base
+        if mode == "kg_precise":
+            hits = focus(hits, top)
+        return Retrieved(hits[:top], time.perf_counter() - started, entities, len(hashes))
+
+
+def is_periodic(hit: Hit) -> bool:
+    name = hit.source_path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return periodic_genre(fold(name)) is not None
+
+
+def focus(hits: Sequence[Hit], top: int) -> list[Hit]:
+    """Soft rerank: periodic summaries and a document's extra chunks move down, never out."""
+
+    seen: dict[str, int] = {}
+    keyed: list[tuple[float, int, Hit]] = []
+    for rank, hit in enumerate(hits, start=1):
+        seen[hit.content_hash] = seen.get(hit.content_hash, 0) + 1
+        key = rank + (PERIODIC_PENALTY if is_periodic(hit) else 0)
+        if seen[hit.content_hash] > PER_DOCUMENT:
+            key += REPEAT_PENALTY
+        keyed.append((key, rank, hit))
+    return [hit for _, _, hit in sorted(keyed, key=lambda item: (item[0], item[1]))][:top]
 
 
 def _fuse(rankings: Sequence[list[Hit]], top: int) -> list[Hit]:

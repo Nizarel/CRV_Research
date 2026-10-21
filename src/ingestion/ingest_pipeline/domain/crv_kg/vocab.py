@@ -7,7 +7,8 @@ import unicodedata
 from collections.abc import Mapping
 
 TOOL = "crv-kg-build"
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
+"""2: periodic-summary genres (activity-report, executive-summary, flash, project-reporting)."""
 PROJECTION_VERSION = "crv-kg-projection/1"
 
 ENTITY_KINDS = frozenset(
@@ -159,6 +160,25 @@ def fold(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value.casefold())
     ascii_text = "".join(c for c in decomposed if not unicodedata.combining(c))
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+# Periodic summaries restate many studies briefly; retrieval should prefer the primary reports
+# (Docs/evaluation/golden-retrieval-baseline-2026-10-21.md). Matched on the folded title.
+_PERIODIC: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\brapport d activite\b|\brapport mensuel\b|\bmonthly report\b|^ra\b"),
+     "activity-report"),
+    (re.compile(r"\bexecutive summary\b"), "executive-summary"),
+    (re.compile(r"\bflash\b"), "flash"),
+    (re.compile(r"^reporting\b"), "project-reporting"),
+)
+PERIODIC_GENRES = frozenset(genre for _, genre in _PERIODIC)
+
+
+def periodic_genre(folded_title: str) -> str | None:
+    """Genre of a periodic summary (monthly activity report, executive summary, weekly flash,
+    project reporting), or None for a primary document."""
+
+    return next((genre for pattern, genre in _PERIODIC if pattern.search(folded_title)), None)
 
 
 def slug(value: str, *, limit: int = 80) -> str:

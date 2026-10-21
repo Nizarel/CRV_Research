@@ -84,6 +84,8 @@ def test_file_names_carry_genre_date_revision_and_parts() -> None:
     assert parse_file_name("Documents Veille/Veille Aboulaich T4_2014-.pdf").year == 2014
     meeting = parse_file_name("SOMIFER/PPT/Réunion_Bleida_27-06-14.ppt")
     assert (meeting.genre, meeting.year, meeting.month) == ("minutes", 2014, 6)
+    monthly = parse_file_name("GED/Rapport d'activité du mois de mars 2017- 04-2017-.pdf")
+    assert (monthly.genre, monthly.year) == ("activity-report", 2017)
     copy = parse_file_name("CMO/Rapports/CR-AR-CJ-RP-08-11 (2).doc")
     assert copy.copy
     assert copy.title == "CR-AR-CJ-RP-08-11"
