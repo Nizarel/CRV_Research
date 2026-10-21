@@ -185,7 +185,7 @@ spec:
             - name: TIZ_DB__USER
               value: id-crv-pipeline-worker
             - name: TIZ_RUNTIME__CONCURRENCY
-              value: "1"
+              value: "${IO_CONCURRENCY}"
             - name: TIZ_RUNTIME__WORKER_ID
               valueFrom:
                 fieldRef:
@@ -282,8 +282,8 @@ spec:
   scaleTargetRef:
     name: crv-pipeline-worker-io
   minReplicaCount: 0
-  # 8 needs PostgreSQL max_connections above 50 (200 during the bulk rollout, 2026-10-13).
-  maxReplicaCount: 8
+  # Above 8 needs PostgreSQL max_connections above 50; the full run used 12 with 150.
+  maxReplicaCount: ${IO_MAX_REPLICAS}
   pollingInterval: 15
   cooldownPeriod: 300
   triggers:

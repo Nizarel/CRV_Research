@@ -417,7 +417,7 @@ data:
   AGENT_TEMPERATURE: "null"
   AGENT_PLANNER_REASONING_EFFORT: "none"
   # Registry facts from the pinned graph release (kg read API in ingestion-catalog on the same
-  # server). The agent identity logs in and runs SET ROLE tizert_kg_reader (execute-only).
+  # server). The agent identity logs in and runs SET ROLE crv_kg_reader (execute-only).
   KG_ENABLED: "true"
   KG_RELEASE_ID: "kg-20261014-88d9a099fb56"
   # Traces, metrics and feedback events to Application Insights (backend/observability.py).

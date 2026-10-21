@@ -1,6 +1,8 @@
 # CRV Research Knowledge Graph: design
 
-Status: **proposal**, October 2026. Companion to [AGENTIC_ARCHITECTURE.md](./AGENTIC_ARCHITECTURE.md) §8,
+Status: **KG-1 implemented** (deterministic tier, release `crvkg-20261021-a40f0b27792a` active
+as `dev`); KG-0 seed is provisional and awaits expert review; KG-2 onwards is a proposal,
+October 2026. Companion to [AGENTIC_ARCHITECTURE.md](./AGENTIC_ARCHITECTURE.md) §8,
 which explains *why* a graph is worth building. This document says *what* to build, based on a
 sample of the actual `Data\DATAROOM CRV` corpus.
 
@@ -472,6 +474,37 @@ always fetches the cited text via `search_evidence` filtered to `documents[]`.
 | **KG-2** | Tiers 2–3 on **Dossier Cu (186 files)**; tools wired into the agent | A/B on the 76 golden questions meets the §8.6 criteria |
 | **KG-3** | Tiers 2–3 on `Documents Activité` (~1,040 files), prioritising Cu, then Co / Au / Ag | Precedent queries validated by experts on 20 real requests |
 | **KG-4** | Environment module (Phytoremediation / EIE) | Use cases defined by the phytoremediation team |
+
+### 9.1 KG-1 as implemented (2026-10-21)
+
+- **Code:**
+  - Pure builder in `ingest_pipeline/domain/crv_kg/`: file-name, report-code and cover parsers, the gazetteer, lineage, the run model and the projection.
+  - Store and AGE loader in `adapters/postgres/crv_kg.py`; inputs in `adapters/postgres/crv_kg_inputs.py`.
+  - Migrations `0015` (drop the copied Tizert `kg.*`), `0016` (`crv_kg` system of record + `CREATE EXTENSION age`) and `0017` (read API).
+  - CLI: `kg-build`, `kg-release`, `kg-check`, `kg-gazetteer-sheet` and `kg-grant-reader`.
+- **Inputs:**
+  - Evidence documents of policy `crv-full-v1`, all source placements, page-header codes, and page-1/2 DI blocks.
+  - DI key-value pairs are not stored, so cover fields are parsed from paragraph lines and table rows.
+  - People on covers are never stored.
+- **Scope:**
+  - LIMS commercial documents and the reference collection (HSC manuals, digital library) are excluded.
+  - Scope keys are one per collection (`crv:research`, `crv:geometallurgy`, `crv:environment`), plus `crv:gazetteer` for the seed.
+- **Statuses:**
+  - Facts read from a path, file name, cover or printed code are `observed`.
+  - Anything resolved through the provisional gazetteer is `candidate` and released flagged. So are heuristic duplicates.
+- **Release `crvkg-20261021-a40f0b27792a`:**
+  - 1,848 documents and 4,313 vertices, including 1,725 report codes, 647 projects, 16 sites and 11 organisations.
+  - 9,860 edges: 7,263 observed and 2,597 candidate.
+  - AGE graph `crv_research_a40f0b27792a`.
+- **Coverage (genre and date):** 97.1% overall.
+  - research: 99.4%
+  - geometallurgy: 89.5%
+  - environment: 63.9% (most EIE annexes carry no date)
+- **Cover parsing:** covers were parsed for 1,560 of 1,595 research documents, and the issuer was resolved on 1,090 documents.
+- **Open items for review:**
+  - The KG-0 seed: [crv-gazetteer-review.csv](./crv-gazetteer-review.csv) and §10.
+  - A lineage audit sample.
+  - 386 documents whose report-code year differs from the file-name date by more than a year. Possible causes are OCR noise in header codes or cited codes.
 
 ---
 

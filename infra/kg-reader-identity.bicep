@@ -1,7 +1,7 @@
 // Knowledge-graph read identity for the maintenance agent backend.
 //
 // It holds no Azure role: its only use is an Entra login on the PostgreSQL catalog, mapped by
-// `tizagent-pipeline kg-grant-reader` to a role that may only EXECUTE the kg read functions.
+// `tizagent-pipeline kg-grant-reader` to a role that may only EXECUTE the crv_kg read functions.
 // It federates with the backend's existing service account, so the backend requests its
 // token explicitly by client ID while keeping its main workload identity for everything else.
 

@@ -164,4 +164,4 @@ build-backend = "setuptools.build_meta"
 include = ["ingest_pipeline*"]
 
 [tool.setuptools.package-data]
-"ingest_pipeline" = ["sql/*.sql"]
+"ingest_pipeline" = ["sql/*.sql", "data/*.json"]

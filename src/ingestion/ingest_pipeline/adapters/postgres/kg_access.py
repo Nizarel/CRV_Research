@@ -1,5 +1,5 @@
 """Database access for the agent's knowledge-graph login: an Entra principal that can do nothing
-in the catalog but execute the kg read functions (``tizert_kg_reader``, migrations 0012-0013).
+in the catalog but execute the crv_kg read functions (``crv_kg_reader``, migration 0017).
 
 Names are quoted server-side with ``format('%I')`` after a pattern check; values are bound.
 """
@@ -12,7 +12,9 @@ from typing import Any
 from ...domain.errors import IntegrityError, InvalidInputError
 from .pool import PgConnection
 
-READER_ROLE = "tizert_kg_reader"
+READER_ROLE = "crv_kg_reader"
+KG_WRITER_ROLES = ("crv_kg_writer", "crv_kg_release")
+"""Granted to the identity that runs kg-build and kg-release."""
 _LOGIN = re.compile(r"^[a-z][a-z0-9-]{2,62}$")
 _OBJECT_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -115,9 +117,10 @@ async def grant_reader(
                 raise
             defaults[name] = False
     checks = await connection.fetchrow(
-        "SELECT has_function_privilege($1, 'kg.context(text,text,text[],integer,integer)',"
-        " 'EXECUTE') AS can_read_context,"
-        " has_table_privilege($1, 'kg.entity', 'SELECT') AS can_select_tables,"
+        "SELECT has_function_privilege($1,"
+        " 'crv_kg.find_documents(text,text[],text[],text[],text[],integer,integer,text,integer)',"
+        " 'EXECUTE') AS can_read_documents,"
+        " has_table_privilege($1, 'crv_kg.entity', 'SELECT') AS can_select_tables,"
         " (SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname = $1)"
         " AS elevated",
         login,

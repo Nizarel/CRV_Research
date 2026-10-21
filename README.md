@@ -324,6 +324,24 @@ The same jobs run the full corpus. A few settings differ:
 `crv-full-v1` uses the same Document Intelligence layout settings as the pilot's
 `crv-layout-v1`, which it supersedes.
 
+For bulk runs, render with `-IoConcurrency 3 -IoMaxReplicas 12` and set
+PostgreSQL `max_connections` to at least 150. The I/O pool handles DI submission,
+embedding and Search verification. That work waits on remote services rather
+than using CPU, so higher parallelism cleared the projection backlog about six
+times faster. Expect HTTP 429 throttling from embeddings at 200K TPM; 600K TPM
+was used during the run and set back to 200K afterwards.
+
+Results of the 2026-10-21 run:
+- **Inputs:** 1,967 blobs, giving 1,929 distinct contents, and 46,584 DI pages,
+  exactly as predicted.
+- **DI spend:** $465.84. This subscription paid $260.00 and `manadry` paid $205.84.
+- **Output:** 145,855 rows in Search release `crv-v1`; 96K of them carry a
+  `printed_header` document code.
+
+The subscription has an external automatic shutdown, around 01:00 local time,
+that stops both AKS and PostgreSQL. After restarting both, the ledger resumes
+without redoing billed pages.
+
 ### Additional Document Intelligence account (full run)
 
 DI spend fills this subscription's `budget_usd` first. After that, it continues
@@ -353,6 +371,25 @@ subscription and $260 on `manadry`, with 8 in-flight requests each. It has this 
 Render with `-BillingPath billing.json -AccountKeySecrets @{ 'di-full' = '<secret-name>' }
 -KeyVaultName kv-awmc6icu2kueq -TenantId <tenant>`. The key is sent only to that
 account's endpoint. The endpoint must be reachable from AKS egress.
+
+## Knowledge graph (KG-1, deterministic tier)
+
+The graph is built from what ingestion recorded, with no model calls:
+- file placements and lineage (`ingest.source_snapshot`);
+- file names: genre, `MM-YYYY` dates, revisions, chapters and annexes;
+- report codes in page headers, on the cover and in file names;
+- CRV cover fields (Emetteur, Projet, Titre, Objet, Domaine, Attribué à) read from page-1/2 DI evidence.
+
+Every vertex and edge carries evidence and the scope keys of that evidence. Sites and organisations come from a **provisional gazetteer**, [crv-gazetteer.json](src/ingestion/ingest_pipeline/data/crv-gazetteer.json). Its review sheet is [Docs/crv-gazetteer-review.csv](Docs/crv-gazetteer-review.csv). Edges derived from it stay `candidate` until experts approve them. The design is in [KNOWLEDGE_GRAPH_DESIGN.md](Docs/KNOWLEDGE_GRAPH_DESIGN.md) §9.1.
+
+1. **Enable Apache AGE once.**
+   - Add `age` to the server's `azure.extensions` and `shared_preload_libraries` parameters. These are in the [Bicep](infra/core/database/postgresql-flexible-server.bicep), and changing them restarts the server.
+   - Run `-Job dbsetup -DbApply`. It applies migrations 0015–0017 and grants the ops identity `crv_kg_writer` and `crv_kg_release`.
+2. **Build.** Run `-Job kg-build -KgDryRun` first and review the coverage report in the job log. Then run `-Job kg-build` to record the run. Re-running on unchanged inputs records nothing. A changed build supersedes facts it no longer reports.
+3. **Release.** `-Job kg-release` freezes the projection, loads AGE graph `crv_research_<hash>`, activates it for `-KgEnvironment` (default `dev`) and prints a `kg-check` smoke test.
+4. **Agent access.** Use `kg-grant-reader --login <identity> --object-id <oid>`. The login gets EXECUTE only on the release-pinned, scope-filtered functions:
+   - `crv_kg.active_release`, `resolve`, `entity`, `neighbors`;
+   - `find_documents` and `document_lineage`.
 
 ## Pilot acceptance checks
 

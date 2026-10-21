@@ -243,7 +243,7 @@ spec:
         - name: dbsetup
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
           args: [db-bootstrap, --principal, "${PRINCIPAL_COORDINATOR}", --principal, "${PRINCIPAL_WORKER}",
-                 --principal, "${PRINCIPAL_OPS}"${DB_ARGS}]
+                 --principal, "${PRINCIPAL_OPS}", --kg-principal, "${OPS_IDENTITY_NAME}"${DB_ARGS}]
           env:
             - {name: TIZ_DB__HOST, value: "${PG_HOST}"}
             - {name: TIZ_DB__DATABASE, value: ingestion-catalog}
@@ -338,4 +338,84 @@ spec:
             - {name: tmp, mountPath: /tmp}
       volumes:
         - {name: schema, configMap: {name: crv-search-schema}}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB kg-build: KG-1 deterministic knowledge graph from the ingested evidence of KG_POLICY. Reads
+# ingest.* and evidence artifacts, writes crv_kg (crv_kg_writer); prints the coverage report.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-kg-build-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: kg-build}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: kg-build
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [kg-build, --policy, "${KG_POLICY}", --report, "-"${KG_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "1", memory: 3Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
+---
+# JOB kg-release: freeze the crv_kg projection, load it into its own AGE graph and point the
+# KG_ENVIRONMENT at it. Runs as the Entra admin: creating an AGE graph creates a schema.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-kg-release-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: kg-release}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      initContainers:
+        - name: release
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [kg-release, --load-age, --activate, "${KG_ENVIRONMENT}"]
+          env: &kg-admin-env
+            - {name: TIZ_DB__HOST, value: "${PG_HOST}"}
+            - {name: TIZ_DB__DATABASE, value: ingestion-catalog}
+            - {name: TIZ_DB__USER, value: "${ADMIN_IDENTITY_NAME}"}
+            - {name: TIZ_DB__MAX_POOL_SIZE, value: "2"}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: check
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [kg-check, --environment, "${KG_ENVIRONMENT}"]
+          env: *kg-admin-env
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
         - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
