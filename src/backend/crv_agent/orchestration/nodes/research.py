@@ -1,0 +1,185 @@
+import asyncio
+import json
+import logging
+
+from langgraph.runtime import Runtime
+
+from crv_agent.domain.answers import Coverage
+from crv_agent.domain.evidence import Calculation, CalculationRequest, Claim, Evidence
+from crv_agent.domain.execution import BudgetExceeded
+from crv_agent.domain.planning import Document, Facet, QueryPlan
+from crv_agent.orchestration.context import ResearchContext
+from crv_agent.orchestration.state import ResearchState
+from crv_agent.services.calculation import calculate
+from crv_agent.services.catalogue import enumerate_documents
+from crv_agent.services.policy import hazardous_instructions
+from crv_agent.services.reconciliation import conflicts
+from crv_agent.services.verification import claim_errors
+
+logger = logging.getLogger(__name__)
+
+
+async def understand(
+    state: ResearchState, runtime: Runtime[ResearchContext],
+) -> dict[str, object]:
+    context = runtime.context
+    if hazardous_instructions(state["question"]):
+        plan = QueryPlan(
+            intent="procedure", language="en"
+            if state["question"].lower().startswith(("how ", "what ", "which ")) else "fr",
+            facets=[], identifiers=[], premises=[],
+            clarification=None,
+        )
+    else:
+        plan = await context.models.plan(state["question"], state["history"], context.budget)
+    return {
+        "plan": plan, "claims": [], "evidence": [], "calculations": [], "conflicts": [],
+        "coverage": Coverage(),
+    }
+
+
+async def research(
+    state: ResearchState, runtime: Runtime[ResearchContext],
+) -> dict[str, object]:
+    context, plan = runtime.context, state["plan"]
+    if plan.intent in {"clarify", "out_of_scope", "procedure"}:
+        return {}
+    entities = []
+    if context.retrieval_mode == "kg":
+        await context.budget.reserve(retrieval=1)
+        entities = await context.budget.wait(
+            context.knowledge.resolve(state["question"], context.kg_release),
+        )
+    gaps = [f"Candidate entity mapping: {e.name}" for e in entities if e.status == "candidate"]
+    coverage = Coverage(gaps=gaps)
+    hashes: list[str] = []
+    docs: list[Document] = []
+    if context.retrieval_mode == "search":
+        gaps.append("Search-only baseline; no KG catalogue enumeration or navigation.")
+    navigation = entities if plan.intent == "catalogue" else [
+        e for e in entities
+        if (e.kind in {"Site", "ReportCode"} and e.status in {"observed", "candidate", "approved"})
+        or (e.kind == "Organisation" and e.status == "approved")
+    ]
+    if context.retrieval_mode == "kg" and (plan.intent == "catalogue" or navigation):
+        try:
+            docs, coverage = await enumerate_documents(
+                context.knowledge, [e.iri for e in navigation], context.kg_release, context.budget,
+            )
+        except BudgetExceeded:
+            return {"coverage": Coverage(gaps=["Catalogue enumeration exceeded the turn budget."])}
+        hashes = list(dict.fromkeys(doc.content_hash for doc in docs if doc.content_hash))
+        gaps.extend(coverage.gaps)
+        if any(not doc.content_hash for doc in docs):
+            gaps.append("Some KG documents have no Search-compatible content hash.")
+    if plan.intent == "catalogue":
+        items = []
+        for doc in docs:
+            await context.budget.reserve(retrieval=1)
+            lineage = await context.budget.wait(
+                context.knowledge.lineage(doc.iri, context.kg_release),
+            )
+            items.append({"document": doc.model_dump(mode="json"), "lineage": lineage})
+            if len(items) == 12 and len(docs) > 12:
+                gaps.append("Catalogue details limited to 12 documents; narrow the request.")
+                break
+        # Catalogue observations retain an explicit filename/manifest basis, not scientific facts.
+        evidence = [
+            Evidence(
+                id=f"catalogue:{i}", release=context.search_release, chunk_id="",
+                content_hash=doc.content_hash or "", title=doc.title,
+                content=json.dumps(items[i], ensure_ascii=False), source_uri=doc.source_paths[0]
+                if doc.source_paths else doc.iri, pages=[],
+                locators=[f"catalogue:{doc.iri}"], original_sources=doc.source_paths,
+                generated=False, document_class="catalogue_metadata",
+            ) for i, doc in enumerate(docs[:len(items)])
+        ]
+        catalogue_claims = [
+            Claim(
+                text=f"Catalogue metadata (filename/manifest basis): {item.title}",
+                evidence_ids=[item.id], quote=item.content, subject=item.title,
+                quantity=None, value=None, unit=None, date=None, conditions=None, scope=None,
+            ) for item in evidence
+        ]
+        return {
+            "evidence": evidence, "claims": catalogue_claims,
+            "coverage": coverage.model_copy(update={"visited": len(items), "gaps": gaps}),
+        }
+    facets = plan.facets or [Facet(question=state["question"])]
+    gaps.append("Top-k evidence retrieval is not an exhaustive corpus review.")
+    semaphore = asyncio.Semaphore(3)
+    evidence_by_id: dict[str, Evidence] = {}
+    claims: dict[str, Claim] = {}
+
+    async def run(facet: Facet) -> None:
+        async with semaphore:
+            try:
+                result, found = await context.worker.run(
+                    facet.question + "\nOriginal question: " + state["question"]
+                    + "\nPremises to verify: " + "; ".join(plan.premises),
+                    context.search_release, hashes, context.budget,
+                )
+                for item in found:
+                    previous = evidence_by_id.get(item.id)
+                    if previous is None or len(item.content) > len(previous.content):
+                        evidence_by_id[item.id] = item
+                gaps.extend(result.gaps)
+                for claim in result.claims:
+                    if not claim_errors(claim, evidence_by_id):
+                        claims[claim.model_dump_json()] = claim
+                    else:
+                        gaps.append("A worker claim failed source/locator/value validation.")
+            except BudgetExceeded:
+                gaps.append("A research facet exhausted the shared execution budget.")
+    async with asyncio.TaskGroup() as group:
+        for facet in facets:
+            group.create_task(run(facet))
+    visited = len({e.content_hash for e in evidence_by_id.values()})
+    if coverage.matched > visited:
+        gaps.append("Evidence retrieval did not inspect every enumerated document.")
+    return {
+        "evidence": sorted(evidence_by_id.values(), key=lambda e: e.id),
+        "claims": [claims[key] for key in sorted(claims)],
+        "coverage": coverage.model_copy(update={"visited": visited, "gaps": sorted(set(gaps))}),
+    }
+
+
+async def reconcile(
+    state: ResearchState, runtime: Runtime[ResearchContext],
+) -> dict[str, object]:
+    found = conflicts(state["claims"])
+    results: list[Calculation] = []
+    claims = list(state["claims"])
+    gaps = list(state["coverage"].gaps)
+
+    def add_calculation(request: CalculationRequest) -> None:
+        try:
+            result = calculate(request, state["claims"])
+            first_input = state["claims"][request.input_claims[0]]
+            claims.append(Claim(
+                text=f"Calculated {result.operation}: {result.value} {result.unit}",
+                evidence_ids=result.evidence_ids, quote=first_input.quote,
+                subject=first_input.subject, quantity=result.operation,
+                value=result.value, unit=result.unit, date=first_input.date,
+                conditions=first_input.conditions, scope=first_input.scope,
+                calculation_index=len(results),
+            ))
+            results.append(result)
+        except ValueError as error:
+            logger.info("calculation_rejected reason=%s", error)
+            gaps.append(str(error))
+
+    for index, claim in enumerate(state["claims"]):
+        if claim.unit == "kWh/sht":
+            add_calculation(CalculationRequest(
+                operation="convert", input_claims=[index], target_unit="kWh/t",
+            ))
+    if state["plan"].intent == "calculation" and state["claims"]:
+        request = await runtime.context.models.calculation(
+            state["question"], state["claims"], runtime.context.budget,
+        )
+        add_calculation(request)
+    return {
+        "conflicts": found, "calculations": results, "claims": claims,
+        "coverage": state["coverage"].model_copy(update={"gaps": gaps}),
+    }

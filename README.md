@@ -403,6 +403,97 @@ It scores two things:
 
 It prints a table and the full report between `GOLDEN REPORT` markers. The baseline is in [Docs/evaluation](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md).
 
+## Research backend (development/evaluation)
+
+[src/backend](src/backend) is a separate FastAPI application using LangChain 1.4.5
+and LangGraph 1.2.15. LangChain 1.4.5 was selected because the configured package
+feed did not yet provide 1.4.6. It reads the existing evidence index and KG-1;
+no corpus reindex, external connector, frontend or new model deployment is required.
+
+The package separates domain contracts, ports, research services, graph nodes,
+read-only tools, infrastructure adapters, API and runtime composition. Research
+workers have bounded tool/model calls. Scientific claims retain original source
+quotations and locators; derived values use deterministic decimal calculations.
+Candidate aliases, conflicts and incomplete coverage remain explicit.
+
+Retrieval uses semantic hybrid candidates at depth 50, with soft rank penalties
+matching the [retrieval baseline](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md):
+10 positions for filename-inferred periodic summaries and 20 for a document's
+third/later chunk. These are demotions, not exclusions or hard chunk caps.
+Workers receive the full candidate list and eight excerpts; `read_evidence` can
+read deeper candidates in bounded batches. Only exposed text can ground claims;
+truncation and top-k coverage remain explicit. Summary roles are filename
+inferences, not validated KG scientific facts.
+
+KG boosts use Site, ReportCode and **approved** Organisation entities, never
+Projects, while preserving an unrestricted semantic Search leg. Catalogue
+navigation remains broad. KG `content_hash` is passed unchanged to Search,
+including converted PDF hashes; original hashes in `converted_from` are lineage,
+not replacement search keys. The measured focused-semantic gain is modest and
+does not establish a quality improvement for this agent without live evaluation.
+
+**Evidence ACL implementation is intentionally deferred.** This is not a
+shared/production serving release. No public ingress is provided and the
+knowledge source remains deny-all. Entra authentication protects conversation
+ownership, not document permissions. The optional local identity is allowed by
+the CLI only on loopback; never expose a locally configured app via another server.
+
+```powershell
+python -m pip install -e ".\src\backend[dev]"
+python -m crv_agent --help
+```
+
+Configure the variables described in [the environment example](src/backend/.env.example);
+it is a reference, not an automatically loaded secrets file. Supply actual CRV
+deployment names for planner, worker, answer and verifier roles (they may share a
+deployment). Windows native dependencies may require an x64 Python interpreter.
+The CLI selects a psycopg-compatible event loop on Windows.
+
+Before serving:
+
+1. Apply ingestion migrations through `0019_crv_kg_document_page` using the
+   existing migration runner. This adds release-pinned, scope-filtered keyset
+   pagination without changing the existing `find_documents` contract. Its grant
+   flows through `crv_kg_reader`; keep the agent login execute-only.
+2. Provision a **separate** `crv-agent-memory` database. With the migration
+   identity configured as `CRV_MEMORY_USER`, run `crv-agent setup-memory` once.
+   Restore the runtime identity afterwards and grant only schema USAGE and
+   SELECT/INSERT/UPDATE/DELETE on the agent/checkpoint tables, not CREATE or
+   ingestion writes. Startup never runs DDL.
+3. Configure Entra database identities, Search Index Data Reader, existing model
+   access, and network reachability to private endpoints. PostgreSQL TLS is
+   `verify-full`; `CRV_POSTGRES_ROOT_CERT` accepts `system` or an approved CA file.
+4. Run `crv-agent serve` for loopback development. The
+   [backend Dockerfile](src/backend/Dockerfile) is available for internal packaging;
+   no infrastructure is deployed by these commands.
+
+The API exposes owned conversations, `/api/v1/chat`, feedback and health.
+Chat requires UUID `thread_id` and `request_id` plus a message. SSE streams
+progress, then a verified, persisted `answer`, then `done`; failures emit `error`,
+never draft answer tokens. Reusing a request ID replays its recorded status/result.
+Client disconnects cancel work. A lost pod's stale run is marked failed on a later
+request rather than silently rerun. Conversation history survives restarts;
+there is no cross-thread personal memory.
+
+```powershell
+python -m pytest .\src\backend\tests -q
+python -m pytest .\src\backend\tests\integration -m integration -q
+python -m ruff check .\src\backend
+python -m mypy --config-file .\src\backend\pyproject.toml .\src\backend\crv_agent
+# Run lint-imports from src\backend.
+```
+
+Integration tests start disposable local PostgreSQL containers. The answer
+evaluator is `python -m crv_agent.evaluation.cli --help`; it requires
+`--confirm-live` before calling a backend and an additional `--allow-heldout` for
+the held-out split. `--judge` scores atomic fact recall; `--gate` fails on missing
+or inadequate metrics. Missing expected sources/numeric tolerances are reported
+as unmeasured, never passed. Proposed sources in the expert review sheet are not
+ground truth until confirmed. Set server-side `CRV_RETRIEVAL_MODE=search` for the
+Search-only ablation and `kg` for KG-steered retrieval; compare identical releases.
+Progress latency and first **verified answer** latency are measured separately.
+These tools do not establish scientific accuracy or production readiness by themselves.
+
 ## Pilot acceptance checks
 
 Start with a copied, small representative subset, not all 24 GiB:
