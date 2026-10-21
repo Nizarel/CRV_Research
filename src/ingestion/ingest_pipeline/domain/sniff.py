@@ -137,12 +137,15 @@ def _kind(
 ) -> FileKind:
     if not head:
         return FileKind.EMPTY
-    if head.lstrip(b"\x00\t\r\n ").startswith(b"%PDF-") or b"%PDF-" in head[:1024]:
+    if head.lstrip(b"\x00\t\r\n ").startswith(b"%PDF-"):
         return FileKind.PDF
+    # Container magic at offset 0 wins: a stored ZIP member can put "%PDF-" in the first KiB.
     if head.startswith(b"PK\x03\x04"):
         return _zip_kind(entries or (), odf_mimetype)
     if head.startswith(CFB_SIGNATURE):
         return FileKind.XLS if extension == ".xls" else FileKind.CFB_OTHER
+    if b"%PDF-" in head[:1024]:
+        return FileKind.PDF
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return FileKind.PNG
     if head.startswith(b"\xff\xd8\xff"):

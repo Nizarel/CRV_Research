@@ -314,6 +314,8 @@ class EvidenceDocument(_Frozen):
     units: tuple[UnitSummary, ...]
     pages: tuple[DocumentPage, ...] = ()
     completeness: str
+    document_codes: tuple[str, ...] = ()
+    """Codes printed in page headers or repeated like them: the document's own identity."""
 
     @property
     def complete(self) -> bool:

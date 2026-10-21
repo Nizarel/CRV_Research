@@ -23,11 +23,12 @@ from ..domain.evidence import (
     LocatorKind,
     a1,
 )
+from ..domain.furniture import REMOVABLE, furniture_key
 from ..domain.process_cases import case_key, process_case_id
 from ..domain.routing import Route, UnitKind
 from ..ports.parsing import TokenCounter
 
-CHUNKER = "evidence-chunker@6"
+CHUNKER = "evidence-chunker@7"
 _SENTENCE = re.compile(r"(?<=[.!?;:])\s+")
 _SPAN = re.compile(r"^span:(?P<rep>[^:]+):(?P<offset>\d+)\+(?P<length>\d+)$")
 _STREAM_ANCHOR = re.compile(r"^stream\s*(?:no\b|n°|number)", re.IGNORECASE)
@@ -143,6 +144,8 @@ class DocumentChunker:
     _context: list[_Piece] = field(default_factory=list)
     _path: tuple[str, ...] = ()
     _language: str | None = None
+    running: frozenset[str] = frozenset()
+    """Furniture keys of lines repeated across the document's pages (``FurnitureScan``)."""
 
     @property
     def section_path(self) -> tuple[str, ...]:
@@ -363,6 +366,9 @@ class DocumentChunker:
                 evidence_kind=block.evidence_kind,
             )
 
+    def _is_running(self, block: EvidenceBlock) -> bool:
+        return block.kind in REMOVABLE and furniture_key(block.text) in self.running
+
     def feed(self, unit: EvidenceUnit) -> None:
         self._language = unit.language or self._language
         if _is_drawing(unit):
@@ -370,7 +376,7 @@ class DocumentChunker:
             self._drawing(unit)
             return
         for block in unit.blocks:
-            if block.kind in FURNITURE:
+            if block.kind in FURNITURE or self._is_running(block):
                 continue
             if block.evidence_kind is not EvidenceKind.SOURCE_TEXT:
                 self._break()

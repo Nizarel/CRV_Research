@@ -12,6 +12,8 @@
     "documentIntelligenceAccountName": { "value": "cog-di-awmc6icu2kueq" },
     "contentUnderstandingAccountName": { "value": "cu-awmc6icu2kueq" },
     "embeddingAccountName": { "value": "cog-awmc6icu2kueq" },
-    "searchServiceName": { "value": "gptkb-awmc6icu2kueq" }
+    "searchServiceName": { "value": "gptkb-awmc6icu2kueq" },
+    "keyVaultName": { "value": "kv-awmc6icu2kueq" },
+    "accountKeySecretNames": { "value": [ "manadry-di-key" ] }
   }
 }

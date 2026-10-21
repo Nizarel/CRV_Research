@@ -129,11 +129,13 @@ async def _stage_blobs(
     from azure.identity.aio import DefaultAzureCredential
     from azure.storage.blob.aio import BlobServiceClient
 
-    text = await asyncio.to_thread(Path(args.list).read_text, "utf-8")
-    entries = [
-        line.rstrip("\r\n") for line in text.splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
+    entries: list[str] | None = None
+    if args.list:
+        text = await asyncio.to_thread(Path(args.list).read_text, "utf-8")
+        entries = [
+            line.rstrip("\r\n") for line in text.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
     prefix = args.prefix.strip("/") + "/" if args.prefix.strip("/") else ""
     async with (
         DefaultAzureCredential() as credential,
@@ -714,11 +716,11 @@ def build_parser() -> argparse.ArgumentParser:
     collect.set_defaults(handler=_collect_office)
 
     stage = commands.add_parser(
-        "stage-blobs", help="Copy listed raw-corpus blobs (or a.zip!/member) to a local volume"
+        "stage-blobs", help="Copy raw-corpus blobs (all, or listed paths / a.zip!/member) locally"
     )
     stage.add_argument("--container", required=True, help="Read-only raw corpus container")
     stage.add_argument("--prefix", default="", help="Blob prefix of the corpus root")
-    stage.add_argument("--list", required=True, help="UTF-8 file, one corpus path per line")
+    stage.add_argument("--list", help="UTF-8 file, one corpus path per line; omit for all blobs")
     stage.add_argument("--output", required=True)
     stage.add_argument("--report", required=True)
     stage.set_defaults(handler=_stage_blobs)

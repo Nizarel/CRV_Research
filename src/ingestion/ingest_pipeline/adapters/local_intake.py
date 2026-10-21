@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import os
 import re
@@ -160,13 +161,17 @@ class CorpusIntake:
                         self._failed(child, error, archive_members=(*members, member),
                                      ancestor_hashes=(*ancestors, digest))
             return
-        if kind is FileKind.CFB_OTHER and Path(name).suffix.lower() in (".doc", ".ppt"):
-            if self.converter is None:
-                self._failed(
-                    name, UnsupportedContentError("Legacy Office needs a pinned --office-image"),
-                    input_hash=digest, archive_members=members, ancestor_hashes=ancestors,
-                )
-                return
+        legacy = kind is FileKind.CFB_OTHER and Path(name).suffix.lower() in (".doc", ".ppt")
+        if legacy and self.converter is None:
+            self._failed(
+                name, UnsupportedContentError("Legacy Office needs a pinned --office-image"),
+                input_hash=digest, archive_members=members, ancestor_hashes=ancestors,
+            )
+            return
+        extension = office_extension(kind, name)
+        # OOXML is analyzed natively without a converter; with one, it is rendered to PDF so
+        # embedded images (scanned pages pasted into Word) are OCRed and pages are citable.
+        if extension and self.converter is not None:
             cached = self.previous.get((digest, self.converter.image))
             if cached and cached.content_hash:
                 verify_object(self.output, cached.content_hash)
@@ -174,7 +179,7 @@ class CorpusIntake:
             else:
                 with tempfile.TemporaryDirectory(dir=self.output) as directory:
                     converted = Path(directory) / "converted.pdf"
-                    self.converter.convert(source, converted, Path(name).suffix.lower())
+                    self.converter.convert(source, converted, extension)
                     with converted.open("rb") as stream:
                         converted_hash, converted_size = self._store(stream)
             self.items.append(IntakeItem(
@@ -243,11 +248,31 @@ class CorpusIntake:
                 yield Path(folder) / name
 
 
-def collect_legacy_office(root: Path, output: Path) -> dict[str, int]:
-    """Copy top-level legacy DOC/PPT inputs to ``output/<sha256>.<ext>`` for the converter job.
+def office_extension(kind: FileKind, name: str) -> str | None:
+    """Converter input extension for content intake converts to PDF, decided by content."""
 
-    Detection matches intake (OLE signature and extension). Legacy files inside archives are
-    not collected; intake then reports them as explicit conversion failures.
+    if kind is FileKind.DOCX:
+        return ".docx"
+    if kind is FileKind.PPTX:
+        return ".pptx"
+    suffix = PurePosixPath(name.replace("\\", "/")).suffix.lower()
+    if kind is FileKind.CFB_OTHER and suffix in (".doc", ".ppt"):
+        return suffix
+    return None
+
+
+def _classify(head: bytes, name: str, entries: list[str] | None) -> FileKind:
+    return sniff(head, name=name, zip_entries=entries).kind
+
+
+def collect_legacy_office(
+    root: Path, output: Path, *, max_member_bytes: int = 1024**3
+) -> dict[str, int]:
+    """Copy every Office input intake will convert to ``output/<sha256>.<ext>``.
+
+    Legacy DOC/PPT and OOXML DOCX/PPTX are detected by content, as intake does, so a DOCX named
+    ``.pdf`` is collected with the extension LibreOffice needs. Members of top-level ZIP archives
+    are collected too; deeper nesting is left to intake, which reports it explicitly.
     """
 
     root, output = long_path(root), long_path(output)
@@ -255,26 +280,55 @@ def collect_legacy_office(root: Path, output: Path) -> dict[str, int]:
         raise ValueError("Office staging output must be outside the corpus")
     output.mkdir(parents=True, exist_ok=True)
     counts = {"collected": 0, "duplicates": 0}
+
+    def keep(stream: IO[bytes], extension: str) -> None:
+        with tempfile.NamedTemporaryFile(dir=output, delete=False) as temp:
+            temporary = Path(temp.name)
+            digest = hashlib.sha256()
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+                temp.write(chunk)
+        target = output / f"{digest.hexdigest()}{extension}"
+        if target.exists():
+            temporary.unlink()
+            counts["duplicates"] += 1
+        else:
+            temporary.replace(target)
+            counts["collected"] += 1
+
     for folder, directories, files in os.walk(root, followlinks=False):
         directories[:] = sorted(d for d in directories if not reparse(Path(folder) / d))
         for name in sorted(files):
             source = Path(folder) / name
-            extension = source.suffix.lower()
-            if extension not in (".doc", ".ppt") or reparse(source):
+            if reparse(source):
                 continue
             with source.open("rb") as handle:
-                if sniff(handle.read(8192), name=name).kind is not FileKind.CFB_OTHER:
-                    continue
-                handle.seek(0)
-                digest = hashlib.file_digest(handle, "sha256").hexdigest()
-            target = output / f"{digest}{extension}"
-            if target.exists():
-                counts["duplicates"] += 1
-                continue
-            temporary = target.with_suffix(".tmp")
-            with source.open("rb") as handle, temporary.open("wb") as copy:
-                while chunk := handle.read(1024 * 1024):
-                    copy.write(chunk)
-            temporary.replace(target)
-            counts["collected"] += 1
+                head = handle.read(8192)
+            entries = None
+            if zipfile.is_zipfile(source):
+                with zipfile.ZipFile(source) as archive:
+                    entries = archive.namelist()
+                    if _classify(head, name, entries) is FileKind.ZIP:
+                        for info in archive.infolist():
+                            if info.is_dir() or info.file_size > max_member_bytes:
+                                continue
+                            member = safe_member(info)
+                            with archive.open(info) as stream:
+                                member_head = stream.read(8192)
+                            member_entries = None
+                            if member_head.startswith(b"PK"):
+                                with archive.open(info) as stream, zipfile.ZipFile(
+                                    io.BytesIO(stream.read())
+                                ) as inner:
+                                    member_entries = inner.namelist()
+                            kind = _classify(member_head, member, member_entries)
+                            extension = office_extension(kind, member)
+                            if extension:
+                                with archive.open(info) as stream:
+                                    keep(stream, extension)
+                        continue
+            extension = office_extension(_classify(head, name, entries), name)
+            if extension:
+                with source.open("rb") as handle:
+                    keep(handle, extension)
     return counts

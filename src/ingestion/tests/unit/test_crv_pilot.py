@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ import pytest
 from azure.core.exceptions import ResourceModifiedError, ResourceNotFoundError
 from fixture_builders import PdfPage, Sheet, pdf_bytes, xlsx_bytes
 
-from ingest_pipeline.adapters.blob.staging import stage_blobs, staged_path
+from ingest_pipeline.adapters.blob.staging import resolve, stage_blobs, staged_path, windows_key
 from ingest_pipeline.adapters.local_intake import CorpusIntake, collect_legacy_office
 from ingest_pipeline.adapters.parsers.office import PrecomputedOfficeConverter
 from ingest_pipeline.adapters.pilot import Candidate, profile_corpus, select, selection_report
@@ -76,6 +77,11 @@ class _Container:
         self.requested.append(name)
         return _Blob(self.blobs, name)
 
+    async def list_blobs(self, *, name_starts_with: str = ""):
+        for name in sorted(self.blobs):
+            if name.startswith(name_starts_with):
+                yield SimpleNamespace(name=name)
+
 
 def _zip(entries: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
@@ -122,11 +128,85 @@ async def test_stage_blobs_mirrors_layout_extracts_members_and_reports_failures(
     assert container.requested.count("DATAROOM CRV/Phyto/bundle.zip") == 1
 
 
+async def test_stage_blobs_without_a_list_stages_every_blob_under_its_original_name(
+    tmp_path: Path,
+) -> None:
+    pdf = pdf_bytes([PdfPage(lines=["Rapport"])])
+    container = _Container({
+        "DATAROOM CRV/Données R&D/rapport.pdf": pdf,
+        "DATAROOM CRV/Phyto/bundle.zip": _zip({"other.pdf": pdf}),
+        "_transfer-reports/run.json": b"{}",
+    })
+    out = tmp_path / "corpus"
+    report = await stage_blobs(container, None, out, prefix="DATAROOM CRV/", max_bytes=10**7)
+    assert not report["failed"]
+    sources = [item["source"] for item in report["staged"]]
+    assert sources == ["Données R&D/rapport.pdf", "Phyto/bundle.zip"]
+    assert (out / "Données R&D" / "rapport.pdf").read_bytes() == pdf
+    assert zipfile.is_zipfile(out / "Phyto" / "bundle.zip")
+
+
 async def test_stage_blobs_rejects_oversized_sources(tmp_path: Path) -> None:
     container = _Container({"big.pdf": b"x" * 100})
     report = await stage_blobs(container, ["big.pdf"], tmp_path / "c", prefix="", max_bytes=10)
     assert report["failed"][0]["entry"] == "big.pdf"
     assert "staging limit" in report["failed"][0]["reason"]
+
+
+def test_resolve_maps_windows_renamed_paths_and_rejects_ambiguity() -> None:
+    names = [
+        "AI for Science: Geology/Bibliothèque: A/rapport.pdf",
+        "AI for Science: Geology/bundle.zip",
+        "Twin: A/x.pdf", "Twin? A/x.pdf", "exact_name.pdf", "exact:name.pdf",
+    ]
+    index: dict[str, list[str]] = {}
+    for name in names:
+        index.setdefault(windows_key(name), []).append(name)
+    assert resolve("AI for Science_ Geology/Bibliothèque_ A/rapport.pdf", index) == names[0]
+    assert resolve("AI for Science_ Geology/bundle.zip!/Données/Flore.xlsx", index) == (
+        "AI for Science: Geology/bundle.zip!/Données/Flore.xlsx"
+    )
+    assert resolve("exact_name.pdf", index) == "exact_name.pdf"
+    with pytest.raises(InvalidInputError, match="ambiguous"):
+        resolve("Twin_ A/x.pdf", index)
+    with pytest.raises(InvalidInputError, match="not found"):
+        resolve("absent.pdf", index)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="original names contain ':' (staging runs on Linux)")
+async def test_stage_blobs_resolves_windows_renamed_paths_to_original_names(
+    tmp_path: Path,
+) -> None:
+    pdf = pdf_bytes([PdfPage(lines=["Etude"])])
+    sheet = xlsx_bytes([Sheet("Flora", {"B1": "Species"})])
+    container = _Container({
+        "DATAROOM CRV/AI for Science: Geology/Bibliothèque: A/rapport.pdf": pdf,
+        "DATAROOM CRV/AI for Science: Geology/bundle.zip": _zip({"Flore.xlsx": sheet}),
+        "DATAROOM CRV/Twin: A/x.pdf": pdf,
+        "DATAROOM CRV/Twin? A/x.pdf": pdf,
+    })
+    out = tmp_path / "corpus"
+    report = await stage_blobs(
+        container,
+        [
+            "AI for Science_ Geology/Bibliothèque_ A/rapport.pdf",
+            "AI for Science_ Geology/bundle.zip!/Flore.xlsx",
+            "Twin_ A/x.pdf",
+        ],
+        out, prefix="DATAROOM CRV/", max_bytes=10_000_000,
+    )
+    sources = {item["entry"]: item["source"] for item in report["staged"]}
+    assert sources == {
+        "AI for Science_ Geology/Bibliothèque_ A/rapport.pdf":
+            "AI for Science: Geology/Bibliothèque: A/rapport.pdf",
+        "AI for Science_ Geology/bundle.zip!/Flore.xlsx":
+            "AI for Science: Geology/bundle.zip!/Flore.xlsx",
+    }
+    assert (out / "AI for Science: Geology" / "Bibliothèque: A" / "rapport.pdf").read_bytes() == pdf
+    assert staged_path(out, "AI for Science: Geology/bundle.zip!/Flore.xlsx").read_bytes() == sheet
+    [ambiguous] = report["failed"]
+    assert ambiguous["entry"] == "Twin_ A/x.pdf"
+    assert "ambiguous" in ambiguous["reason"]
 
 
 def test_collect_and_precomputed_conversion_feed_intake(tmp_path: Path) -> None:

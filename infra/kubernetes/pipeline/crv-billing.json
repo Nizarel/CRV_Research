@@ -1,0 +1,19 @@
+{
+  "budget_usd": 260,
+  "di_page_usd": 0.01,
+  "cu_page_estimate_usd": 0.005,
+  "cu_meter_usd": {
+    "documentPagesBasic": 0.005,
+    "documentPagesStandard": 0.005,
+    "contextualizationTokens": 0.000001
+  },
+  "accounts": [
+    {
+      "name": "manadry",
+      "budget_usd": 260,
+      "di_endpoint": "https://manadry.cognitiveservices.azure.com/",
+      "key_file": "/var/run/secrets/crv/accounts/manadry",
+      "di_max_inflight": 8
+    }
+  ]
+}

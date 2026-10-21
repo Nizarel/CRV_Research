@@ -5,21 +5,33 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ..domain.chunks import EvidenceChunk
-from ..domain.crv import REPORT_CODE, research_context, unique
+from ..domain.crv import report_codes, research_context, unique
 from ..domain.models import SourceSnapshot
 
 
 def research_fields(
-    chunk: EvidenceChunk, placements: Sequence[SourceSnapshot]
+    chunk: EvidenceChunk, placements: Sequence[SourceSnapshot],
+    *, document_codes: Sequence[str] = (),
 ) -> dict[str, object]:
+    """``document_codes`` are printed in page headers: the document's own code wins over codes
+    the body text merely cites, and both win over codes in folder or file names."""
+
     contexts = [
         research_context(s.provenance.source_path if s.provenance else s.blob_name)
         for s in placements
     ]
     primary = contexts[0]
-    printed = unique([code.upper() for code in REPORT_CODE.findall(chunk.text)])
+    header = unique([code.upper() for code in document_codes])
+    printed = report_codes(chunk.text)
     path_codes = unique([code for context in contexts for code in context.report_codes])
-    codes = printed or path_codes
+    if header:
+        document_code, basis = header[0], "printed_header"
+    elif printed:
+        document_code, basis = printed[0], "printed"
+    elif path_codes:
+        document_code, basis = path_codes[0], "path"
+    else:
+        document_code, basis = None, None
     page = f" - p. {','.join(map(str, chunk.pages))}" if chunk.pages else ""
     return {
         "title": f"{primary.file_name}{page}",
@@ -32,9 +44,9 @@ def research_fields(
         "document_class": primary.document_type,
         "document_classes": unique([c.document_type for c in contexts]),
         "metadata_basis": "path",
-        "document_code": codes[0] if codes else None,
-        "document_code_basis": "printed" if printed else "path" if codes else None,
-        "identifiers": unique([*printed, *path_codes]),
+        "document_code": document_code,
+        "document_code_basis": basis,
+        "identifiers": unique([*header, *printed, *path_codes]),
         "equipment_folder": None,
         "equipment_folders": [],
         "equipment_tags": [],

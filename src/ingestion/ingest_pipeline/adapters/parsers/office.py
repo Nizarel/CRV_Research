@@ -15,6 +15,8 @@ from typing import Protocol
 
 from ...domain.errors import ConfigurationError, UnsupportedContentError
 
+OFFICE_EXTENSIONS = (".doc", ".ppt", ".docx", ".pptx")
+OFFICE_ONLY = "Only Word and PowerPoint documents use Office conversion"
 _PINNED_IMAGE = re.compile(r"(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}")
 
 
@@ -50,8 +52,8 @@ class PrecomputedOfficeConverter:
     def convert(self, source: Path, destination: Path, extension: str) -> None:
         if not _PINNED_IMAGE.fullmatch(self.image):
             raise ConfigurationError("Office image must be pinned by sha256 digest")
-        if extension not in (".doc", ".ppt"):
-            raise UnsupportedContentError("Only legacy Word and PowerPoint use Office conversion")
+        if extension not in OFFICE_EXTENSIONS:
+            raise UnsupportedContentError(OFFICE_ONLY)
         with source.open("rb") as handle:
             digest = hashlib.file_digest(handle, "sha256").hexdigest()
         converted = self.directory / f"{digest}.pdf"
@@ -85,8 +87,8 @@ class OfficeConverter:
     def convert(self, source: Path, destination: Path, extension: str) -> None:
         if not _PINNED_IMAGE.fullmatch(self.image):
             raise ConfigurationError("Office image must be pinned by sha256 digest")
-        if extension not in (".doc", ".ppt"):
-            raise UnsupportedContentError("Only legacy Word and PowerPoint use Office conversion")
+        if extension not in OFFICE_EXTENSIONS:
+            raise UnsupportedContentError(OFFICE_ONLY)
         docker = shutil.which("docker")
         if docker is None:
             raise ConfigurationError("Docker is required for isolated Office conversion")

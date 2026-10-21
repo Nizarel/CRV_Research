@@ -7,7 +7,16 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-REPORT_CODE = re.compile(r"\bCR(?:[-/][A-Z0-9]+){2,7}\b", re.IGNORECASE)
+REPORT_CODE = re.compile(r"\bCR(?:[-/][A-Z0-9]+(?:\.[A-Z0-9]+)*){2,7}\b", re.IGNORECASE)
+# OCR reads the first "/" of a running-header code as a letter: CRIAR/PE/... is CR/AR/PE/...
+_OCR_FIRST_SLASH = re.compile(r"\bCR[I1l|](?=[A-Z]{2}/)")
+
+
+def report_codes(text: str) -> list[str]:
+    """CRV report codes in printed text, upper-cased, with the known OCR slash misread repaired."""
+
+    repaired = _OCR_FIRST_SLASH.sub("CR/", text)
+    return list(dict.fromkeys(code.upper() for code in REPORT_CODE.findall(repaired)))
 
 
 def label(value: str) -> str:
@@ -74,8 +83,7 @@ def research_context(path: str) -> ResearchContext:
     )
     sites = tuple(dict.fromkeys(SITES[p] for p in normalized[:-1] if p in SITES))
     return ResearchContext(
-        collection, sites, kind, "/".join(parts), parts[-1],
-        tuple(dict.fromkeys(code.upper() for code in REPORT_CODE.findall(path))),
+        collection, sites, kind, "/".join(parts), parts[-1], tuple(report_codes(path)),
     )
 
 

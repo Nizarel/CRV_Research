@@ -17,6 +17,7 @@ from ..domain.evidence import (
     PageStatus,
     UnitSummary,
 )
+from ..domain.furniture import FurnitureScan
 from ..domain.ids import Sha256Hex, fingerprint
 from ..domain.models import ArtifactLink, StageJob, StageOutcome, UnitDisposition, UnitState
 from ..domain.observations import ScientificObservation, numeric_observations
@@ -29,7 +30,7 @@ from .common import load_model, parse_inputs, put_json, put_jsonl
 from .links import _Inputs
 
 # 2: evidence-chunker@5 splits oversized figure/generated text (embed quarantined 8191+ tokens).
-STAGE_VERSION = "3"
+STAGE_VERSION = "4"
 _GAPS = frozenset(
     {UnitDisposition.FAILED, UnitDisposition.UNSUPPORTED, UnitDisposition.QUARANTINED}
 )
@@ -127,6 +128,12 @@ class ChunkStage:
             },
         )
         chunker = DocumentChunker(evidence_id=evidence_id, tokens=tokens, settings=self.settings)
+        # Pass 1: repeated running lines and header codes need the whole document.
+        scan = FurnitureScan()
+        for state in states:
+            if state.evidence is not None:
+                scan.add(await load_model(services, state.evidence, EvidenceUnit))
+        chunker.running = scan.running()
         pages: list[DocumentPage] = []
         observations: list[ScientificObservation] = []
         for state in states:
@@ -154,6 +161,7 @@ class ChunkStage:
             units=tuple(_summary(state) for state in states),
             pages=tuple(sorted(pages, key=lambda page: page.page)),
             completeness=completeness,
+            document_codes=scan.document_codes(),
         )
         manifest_ref = await put_json(services, manifest, schema_name=manifest.schema_name)
         links = [ArtifactLink(role="evidence_manifest", artifact=manifest_ref)]

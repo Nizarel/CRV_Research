@@ -31,7 +31,7 @@ from .base import StageContext
 from .common import fetch_content, parse_inputs, put_json, scratch
 from .links import PlanInputs, PreflightInputs, content_unit
 
-STAGE_VERSION = "2"
+STAGE_VERSION = "3"
 
 
 def _container(path: Path, limits: ZipLimits) -> tuple[list[str], str | None]:

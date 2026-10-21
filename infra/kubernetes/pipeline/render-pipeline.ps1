@@ -44,6 +44,7 @@ param(
     [string] $CuRegistryPath = (Join-Path $PSScriptRoot '../../content-understanding/crv-cu-registry.json'),
     [string] $PoliciesPath = (Join-Path $PSScriptRoot '../../content-understanding/crv-policies.json'),
     [ValidatePattern('^$|^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $RoutingPolicy = 'crv-layout-v1',
+    [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $SearchReleaseId = 'crv-pilot-v1',
     [string] $BillingPath = '',
     [hashtable] $AccountKeySecrets = @{},
     [ValidatePattern('^$|^[A-Za-z0-9-]{3,24}$')] [string] $KeyVaultName = '',
@@ -81,6 +82,7 @@ $values = @{
     CU_MAX_INFLIGHT                       = $CuMaxInflight.ToString()
     CU_EST_TOKENS_PER_PAGE                = $CuEstTokensPerPage.ToString()
     ROUTING_POLICY                        = $RoutingPolicy
+    SEARCH_RELEASE_ID                     = $SearchReleaseId
 }
 
 $text = Get-Content -LiteralPath $template -Raw

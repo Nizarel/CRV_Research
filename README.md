@@ -22,8 +22,14 @@ Search uploads are verified before a projection is marked complete.
   workbook uses independent site columns, not cross-site row relationships.
 - **Research metadata:** collections, sites, document types, report codes and
   original-file lineage replace equipment/zone metadata in the CRV Search index.
-  Filing context is marked `metadata_basis=path`; report codes found in extracted
-  text are separately marked `document_code_basis=printed`.
+  Filing context is marked `metadata_basis=path`. Report codes take precedence in
+  this order. A code printed in the running page header on most pages is marked
+  `document_code_basis=printed_header`, and every chunk of the document inherits it.
+  A code found in the chunk's own text is marked `printed`, and one from the path is
+  marked `path`. The OCR misreading of `CRAR/` as `CRIAR/` is repaired.
+- **Running headers and footers:** lines repeated on at least 30% of a document's
+  pages (minimum 3) are dropped from chunk text and section paths, even when DI
+  labels them as paragraphs or headings. The document title is kept.
 - **Optional observations:** numeric table-cell observations retain raw values,
   qualifiers, explicit units, headers, footnotes and locators. They are
   `unreviewed`, not certified measurements or inferred chemistry.
@@ -120,6 +126,9 @@ conversions for identical input bytes and image identity.
 ### Legacy Office conversion
 
 Legacy `.doc`/`.ppt` inputs fail explicitly unless `--office-image` is supplied.
+When a converter is supplied, `.docx`/`.pptx` files are also rendered to PDF.
+This makes scanned pages pasted into Word OCR-able and gives page citations.
+Without a converter they are still analyzed natively.
 Install/start Docker with Linux containers, then build the converter locally:
 
 ```powershell
@@ -280,8 +289,9 @@ Deploy identities, queues and containers with
 2. **Stage** (`-Job stage`): copy listed paths from `crv-raw` to the work disk,
    verifying size and Content-MD5. `archive.zip!/member` entries copy a single
    member, and archive lineage is then not recorded.
-3. **Convert** (`-Job convert`): collect legacy DOC/PPT files as `<sha256>.<ext>`
-   and convert them in an isolated pod. Every outcome is written to `results.json`.
+3. **Convert** (`-Job convert`): collect DOC/PPT/DOCX/PPTX files as `<sha256>.<ext>`,
+   including top-level ZIP members, and convert them in an isolated pod. Every
+   outcome is written to `results.json`.
 4. **Intake** (`-Job intake`): `prepare-corpus --office-converted` reads the
    converted PDFs, records the converter digest, and turns missing conversions
    into explicit failures. Review the manifest before publishing.
@@ -298,6 +308,51 @@ Deploy identities, queues and containers with
    unsupported units, billed pages and estimated cost. It also lists pages where
    the arms diverge, plus a seeded set of 30 pages for manual review. Coverage is
    only a proxy; the manual review decides.
+
+### Full corpus run
+
+The same jobs run the full corpus. A few settings differ:
+
+- `-Job stage -AllBlobs` stages every blob under `DATAROOM CRV` instead of a list.
+- `-WorkGib 128` sizes the work disk, and `-DeadlineSeconds 21600` allows up to
+  6 hours per job.
+- `-SourcePrefix crv` sets the source prefix.
+- The pipeline is rendered with `-RoutingPolicy crv-full-v1 -SearchReleaseId crv-v1`.
+  The full run therefore projects into its own Search release, separate from the
+  pilot releases.
+
+`crv-full-v1` uses the same Document Intelligence layout settings as the pilot's
+`crv-layout-v1`, which it supersedes.
+
+### Additional Document Intelligence account (full run)
+
+DI spend fills this subscription's `budget_usd` first. After that, it continues
+with the external accounts in `billing.json`, in order. An external account with its own
+`di_max_inflight` also runs in parallel with this subscription. The vault denies public
+data-plane access, so store the key with
+[set-account-key.ps1](infra/kubernetes/pipeline/set-account-key.ps1). It prompts without
+echoing and writes through ARM. Never put the key in files or chat. Add the
+secret name to the Bicep parameter `accountKeySecretNames` so the worker identity
+can read only that secret. The CRV setup is in
+[crv-billing.json](infra/kubernetes/pipeline/crv-billing.json): $260 on this
+subscription and $260 on `manadry`, with 8 in-flight requests each. It has this shape:
+
+```json
+{
+  "budget_usd": 0,
+  "di_page_usd": 0.01, "cu_page_estimate_usd": 0.005,
+  "cu_meter_usd": { "...": 0 },
+  "accounts": [
+    { "name": "di-full", "budget_usd": 600,
+      "di_endpoint": "https://<resource>.cognitiveservices.azure.com/",
+      "key_file": "/var/run/secrets/crv/accounts/di-full", "di_max_inflight": 10 }
+  ]
+}
+```
+
+Render with `-BillingPath billing.json -AccountKeySecrets @{ 'di-full' = '<secret-name>' }
+-KeyVaultName kv-awmc6icu2kueq -TenantId <tenant>`. The key is sent only to that
+account's endpoint. The endpoint must be reachable from AKS egress.
 
 ## Pilot acceptance checks
 

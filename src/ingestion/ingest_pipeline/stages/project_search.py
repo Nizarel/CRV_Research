@@ -32,7 +32,7 @@ from .links import ProjectInputs, project_job
 from .projection_fields import UnitMetadata, placement_metadata, row_metadata
 from .research_fields import research_fields
 
-STAGE_VERSION = "6"
+STAGE_VERSION = "7"
 KEY_FIELD = "projection_id"
 DIGEST_FIELD = "payload_sha256"
 PAGED_FAMILIES = frozenset({Family.PDF.value, Family.IMAGE.value})
@@ -82,6 +82,7 @@ def build_row(
     family: str,
     settings: ProjectionSettings,
     units: Mapping[str, UnitMetadata] | None = None,
+    document_codes: Sequence[str] = (),
 ) -> dict[str, Any]:
     """One row of ``infra/search/evidence-index-v2.json``; ``placements`` in canonical order."""
 
@@ -117,7 +118,7 @@ def build_row(
     }
     row[DIGEST_FIELD] = payload_digest(row)
     if settings.corpus == "crv":
-        row.update(research_fields(chunk, placements))
+        row.update(research_fields(chunk, placements, document_codes=document_codes))
         for field_name in (
             "equipment_folder", "equipment_folders", "equipment_tags", "path_tags",
             "mentioned_tags", "zone_name", "zone_names", "process_case_id", "drawing_sheet_id",
@@ -165,7 +166,7 @@ class ProjectSearchStage:
             return StageOutcome.succeeded(
                 next_jobs=refresh, checkpoint={"skipped": "no embedded evidence yet"}
             )
-        manifest_family, units = await self._units(context, record)
+        manifest_family, units, document_codes = await self._units(context, record)
         chunks = await load_jsonl(services, record.chunk_set, EvidenceChunk)
         provider = services.require_embeddings()
         vectors = await services.require_embedding_cache().get_many(
@@ -185,6 +186,7 @@ class ProjectSearchStage:
                     family=manifest_family,
                     settings=settings,
                     units=units,
+                    document_codes=document_codes,
                 )
                 for chunk in chunks
             )
@@ -350,8 +352,11 @@ class ProjectSearchStage:
 
     async def _units(
         self, context: StageContext, record: EvidenceRecord
-    ) -> tuple[str, dict[str, UnitMetadata]]:
-        """Manifest family and unit metadata; only field-bearing units load their evidence."""
+    ) -> tuple[str, dict[str, UnitMetadata], tuple[str, ...]]:
+        """Manifest family, unit metadata and printed document codes.
+
+        Only field-bearing units load their evidence.
+        """
 
         manifest = await load_model(context.services, record.manifest, EvidenceDocument)
         units: dict[str, UnitMetadata] = {}
@@ -361,7 +366,7 @@ class ProjectSearchStage:
                 evidence = await load_model(context.services, unit.evidence, EvidenceUnit)
                 fields = evidence.fields
             units[unit.unit_id] = UnitMetadata(route=unit.route, kind=unit.kind, fields=fields)
-        return manifest.family, units
+        return manifest.family, units, manifest.document_codes
 
     async def _retire(
         self,

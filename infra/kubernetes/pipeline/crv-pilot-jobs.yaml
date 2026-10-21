@@ -70,7 +70,7 @@ metadata:
   labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: stage}
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
@@ -82,7 +82,7 @@ spec:
       containers:
         - name: stage
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
-          args: [stage-blobs, --container, crv-raw, --prefix, "DATAROOM CRV", --list, /config/pilot.txt,
+          args: [stage-blobs, --container, crv-raw, --prefix, "DATAROOM CRV"${STAGE_LIST_ARGS},
                  --output, /work/corpus, --report, /work/stage-report.json]
           env:
             - {name: TIZ_BLOB__ACCOUNT_URL, value: "${STORAGE_ACCOUNT_URL}"}
@@ -106,7 +106,7 @@ metadata:
   labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: convert}
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
@@ -157,7 +157,7 @@ metadata:
   labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: intake}
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
@@ -192,7 +192,7 @@ metadata:
   labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: publish}
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
@@ -214,9 +214,11 @@ spec:
           volumeMounts:
             - {name: work, mountPath: /work, readOnly: true}
             - {name: tmp, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
       volumes:
         - {name: work, persistentVolumeClaim: {claimName: crv-pilot-work}}
         - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
 ---
 # JOB dbsetup: as the Entra admin, CRV baseline + migrations + pipeline principals + grants.
 # DB_ARGS is empty for a dry run, ", --apply" to apply.

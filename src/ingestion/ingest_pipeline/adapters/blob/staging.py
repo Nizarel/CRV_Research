@@ -19,6 +19,39 @@ from ..local_intake import safe_member
 
 MEMBER_SEPARATOR = "!/"
 MEMBERS_SUFFIX = ".members"
+_WINDOWS_ILLEGAL = str.maketrans({char: "_" for char in ':*?"<>|'})
+
+
+def windows_key(name: str) -> str:
+    """How a Windows download renames a path: illegal characters become ``_``."""
+
+    return name.translate(_WINDOWS_ILLEGAL)
+
+
+async def blob_index(container: Any, prefix: str) -> dict[str, list[str]]:
+    """Corpus-relative blob names under ``prefix``, grouped by their Windows-safe form."""
+
+    index: dict[str, list[str]] = {}
+    async for blob in container.list_blobs(name_starts_with=prefix):
+        relative = str(blob.name)[len(prefix):]
+        index.setdefault(windows_key(relative), []).append(relative)
+    return index
+
+
+def resolve(entry: str, index: dict[str, list[str]]) -> str:
+    """Map a locally listed path to the original blob name; exact names win, ambiguity fails."""
+
+    archive, separator, member = entry.partition(MEMBER_SEPARATOR)
+    candidates = index.get(windows_key(archive), [])
+    if archive in candidates:
+        resolved = archive
+    elif len(candidates) == 1:
+        [resolved] = candidates
+    elif candidates:
+        raise InvalidInputError(f"ambiguous source name; candidates: {sorted(candidates)}")
+    else:
+        raise InvalidInputError("blob not found")
+    return resolved + separator + member
 
 
 def _relative(name: str) -> PurePosixPath:
@@ -105,22 +138,34 @@ def _extract(archive: Path, member: str, target: Path, *, max_bytes: int) -> dic
 
 
 async def stage_blobs(
-    container: Any, entries: Sequence[str], destination: Path, *, prefix: str, max_bytes: int
+    container: Any,
+    entries: Sequence[str] | None,
+    destination: Path,
+    *,
+    prefix: str,
+    max_bytes: int,
 ) -> dict[str, Any]:
     """Stage ``entries`` (paths relative to ``prefix``; ``a.zip!/m`` for one member).
 
-    Every entry gets an explicit outcome; one failure never hides another.
+    ``None`` stages every blob under ``prefix`` (the full corpus) under its original name.
+    Entries listed from a Windows copy are resolved to the original blob names, and files are
+    staged under those original names. Every entry gets an explicit outcome; one failure never
+    hides another.
     """
 
     destination.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - one-time, local volume
     archives = destination.parent / (destination.name + ".archives")
+    index = await blob_index(container, prefix)
+    if entries is None:
+        entries = sorted(name for names in index.values() for name in names)
     staged: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
     downloaded: dict[str, Path] = {}
     for entry in dict.fromkeys(entries):
-        archive, _, member = entry.partition(MEMBER_SEPARATOR)
         try:
-            target = staged_path(destination, entry)
+            source = resolve(entry, index)
+            archive, _, member = source.partition(MEMBER_SEPARATOR)
+            target = staged_path(destination, source)
             if member:
                 local = downloaded.get(archive)
                 if local is None:
@@ -134,9 +179,9 @@ async def stage_blobs(
                 )
             else:
                 outcome = await _download(
-                    container.get_blob_client(prefix + entry), target, max_bytes=max_bytes
+                    container.get_blob_client(prefix + source), target, max_bytes=max_bytes
                 )
-            staged.append({"entry": entry, **outcome})
+            staged.append({"entry": entry, "source": source, **outcome})
         except (InvalidInputError, UnsupportedContentError, IntegrityError, zipfile.BadZipFile,
                 OSError) as error:
             failed.append({"entry": entry, "reason": str(error)})

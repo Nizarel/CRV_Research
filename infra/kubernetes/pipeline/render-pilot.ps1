@@ -39,6 +39,8 @@ param(
     [string] $EmbeddingDeployment = 'text-embedding-3-large',
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,62}$')] [string] $SourcePrefix = 'crv-pilot',
     [ValidateRange(8, 512)] [int] $WorkGib = 64,
+    [ValidateRange(900, 86400)] [int] $DeadlineSeconds = 7200,
+    [switch] $AllBlobs,
     [switch] $DbApply,
     [switch] $IndexApply,
     [string] $IndexSchema = (Join-Path $PSScriptRoot '../../search/crv-evidence-index.json'),
@@ -50,7 +52,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($Job -in 'convert', 'intake' -and -not $ConverterDigest) { throw "-Job $Job needs -ConverterDigest." }
-if ($Job -eq 'stage' -and -not $PilotList) { throw '-Job stage needs -PilotList.' }
+if ($Job -eq 'stage' -and -not ($PilotList -or $AllBlobs)) { throw '-Job stage needs -PilotList or -AllBlobs.' }
+if ($PilotList -and $AllBlobs) { throw 'Use either -PilotList or -AllBlobs.' }
 
 $entries = @()
 if ($PilotList) {
@@ -80,6 +83,8 @@ $values = [ordered]@{
     EMBEDDING_DEPLOYMENT  = $EmbeddingDeployment
     SOURCE_PREFIX         = $SourcePrefix
     WORK_GIB              = $WorkGib.ToString()
+    DEADLINE_SECONDS      = $DeadlineSeconds.ToString()
+    STAGE_LIST_ARGS       = if ($AllBlobs) { '' } else { ', --list, /config/pilot.txt' }
     RUN_ID                = $RunId
     DB_ARGS               = if ($DbApply) { ', --apply' } else { '' }
     INDEX_ARGS            = if ($IndexApply) { ', --apply' } else { '' }

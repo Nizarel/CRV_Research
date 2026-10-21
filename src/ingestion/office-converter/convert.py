@@ -1,7 +1,7 @@
 """Container entry point. The caller supplies network, memory, process and time limits.
 
 Single mode: ``convert.py /input/source.doc`` writes ``/output/source.pdf``.
-Batch mode: ``convert.py --batch IN OUT`` converts every ``<sha256>.doc|.ppt`` in IN to
+Batch mode: ``convert.py --batch IN OUT`` converts every ``<sha256>.doc|.ppt|.docx|.pptx`` in IN to
 ``OUT/<sha256>.pdf`` with a fresh LibreOffice profile and timeout per file, and records each
 outcome in ``OUT/results.json``. Failures are recorded, never silently skipped.
 """
@@ -19,7 +19,7 @@ import sys
 MAX_BYTES = 1024**3
 TIMEOUT_SECONDS = 110
 SOFFICE = "/usr/bin/soffice"
-NAME = re.compile(r"^[0-9a-f]{64}\.(doc|ppt)$")
+NAME = re.compile(r"^[0-9a-f]{64}\.(doc|ppt|docx|pptx)$")
 PROFILE = (
     '<oor:items xmlns:oor="http://openoffice.org/2001/registry">'
     '<item oor:path="/org.openoffice.Office.Common/Security/Scripting">'
