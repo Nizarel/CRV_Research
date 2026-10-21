@@ -77,7 +77,9 @@ def term_weights(query: str, hits: list[Evidence], identifiers: list[str]) -> di
 def identifier_rank(hit: Evidence, identifiers: list[str]) -> int:
     if not identifiers:
         return 0
-    names = fold(" ".join([hit.title, hit.source_uri, *hit.original_sources]))
+    names = fold(" ".join([
+        hit.title, hit.source_path, hit.document_code or "", hit.source_uri, *hit.original_sources,
+    ]))
     content = fold(hit.content)
     keys = [fold(value) for value in identifiers]
     if any(key in names for key in keys):

@@ -12,6 +12,9 @@ class Evidence(Contract):
     title: str
     content: str
     source_uri: str
+    # Original corpus path (source_uri is content-addressed); used for display and genre.
+    source_path: str = ""
+    document_code: str | None = None
     pages: list[int]
     locators: list[str]
     original_sources: list[str]

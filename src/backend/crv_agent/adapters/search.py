@@ -9,7 +9,8 @@ from crv_agent.domain.planning import Contract
 
 SELECT = [
     "projection_id", "release_id", "chunk_id", "content_hash", "title", "content",
-    "source_uri", "original_page_numbers", "source_locators", "original_source_uris",
+    "source_uri", "source_path", "document_code", "original_page_numbers", "source_locators",
+    "original_source_uris",
     "is_generated", "document_class",
     "citation_basis", "extraction_route", "original_content_hashes",
 ]
@@ -39,6 +40,8 @@ class SearchRow(Contract):
     title: str
     content: str
     source_uri: str
+    source_path: str | None = None
+    document_code: str | None = None
     original_page_numbers: list[int]
     source_locators: list[str] = Field(default_factory=list)
     original_source_uris: list[str] = Field(default_factory=list)
@@ -88,7 +91,8 @@ class AzureSearch:
             result.append(Evidence(
                 id=row.projection_id, release=row.release_id, chunk_id=row.chunk_id,
                 content_hash=row.content_hash, title=row.title, content=row.content,
-                source_uri=row.source_uri, pages=row.original_page_numbers,
+                source_uri=row.source_uri, source_path=row.source_path or "",
+                document_code=row.document_code, pages=row.original_page_numbers,
                 locators=row.source_locators, original_sources=row.original_source_uris,
                 generated=row.is_generated, document_class=row.document_class or "unknown",
                 citation_basis=row.citation_basis or "unknown",

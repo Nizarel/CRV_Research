@@ -15,7 +15,7 @@ def hits(n: int = 50) -> list[Evidence]:
     return [
         SOURCE.model_copy(update={
             "id": f"S{i}", "chunk_id": f"c{i}", "content_hash": f"{i:064x}", "content": LONG,
-            "source_uri": "Geometallurgy Cu/Dossier Cu/report.pdf" if i % 2 else "RA mai.pdf",
+            "source_path": "Geometallurgy Cu/Dossier Cu/report.pdf" if i % 2 else "RA mai.pdf",
         }) for i in range(n)
     ]
 

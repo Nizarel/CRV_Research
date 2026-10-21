@@ -31,7 +31,8 @@ def evidence_tools(
         visible = expose(hit, span)
         found[hit.id] = merge_exposure(found[hit.id], visible) if hit.id in found else visible
         return {
-            "id": hit.id, "title": hit.title, "source": hit.source_uri, "pages": hit.pages,
+            "id": hit.id, "title": hit.title, "source": hit.source_path or hit.source_uri,
+            "document_code": hit.document_code, "pages": hit.pages,
             "locators": hit.locators, "document_class": hit.document_class,
             "citation_basis": hit.citation_basis, "source_role": hit.source_role,
             "excerpt": list(span), "total_characters": len(hit.content),

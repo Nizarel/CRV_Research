@@ -62,7 +62,13 @@ def fuse(rankings: list[list[Evidence]], top: int = CANDIDATE_DEPTH) -> list[Evi
 
 
 def periodic_summary(evidence: Evidence) -> bool:
-    for uri in [evidence.source_uri, *evidence.original_sources]:
+    # Mirror golden-eval is_periodic(): the original corpus filename decides; source_uri is a
+    # content-addressed blob path. Fall back to the title (filename + page) only without a path.
+    names = (
+        [evidence.source_path] if evidence.source_path
+        else [evidence.title, evidence.source_uri]
+    )
+    for uri in names:
         name = unquote(uri).replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
         folded = unicodedata.normalize("NFKD", name.casefold())
         words = " ".join(re.findall(

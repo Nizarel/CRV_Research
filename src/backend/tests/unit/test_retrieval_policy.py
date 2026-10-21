@@ -89,7 +89,7 @@ def test_focused_ranking_uses_measured_soft_penalties_and_keeps_every_hit() -> N
     hits = candidates()
     hits[:3] = [hit.model_copy(update={"content_hash": "a" * 64}) for hit in hits[:3]]
     hits[3] = hits[3].model_copy(update={
-        "original_sources": ["raw/Rapport%20d%27activit%C3%A9%20mensuel.pdf"],
+        "source_path": "Documents Activité/Rapport d'activité mensuel.pdf",
     })
     result = focus(hits)
     positions = {hit.id: i for i, hit in enumerate(result)}
@@ -108,7 +108,7 @@ def test_focused_ranking_uses_measured_soft_penalties_and_keeps_every_hit() -> N
     "Flash hebdomadaire.pdf", "Reporting projet.pdf",
 ])
 def test_periodic_source_roles(filename: str) -> None:
-    result = focus([SOURCE.model_copy(update={"source_uri": filename})])
+    result = focus([SOURCE.model_copy(update={"source_path": "GED/" + filename})])
     assert result[0].source_role == "secondary_summary"
 
 

@@ -1,3 +1,5 @@
+import os
+import ssl
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -12,6 +14,23 @@ from psycopg_pool import AsyncConnectionPool
 from crv_agent.domain import answers, evidence, planning
 
 DB_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
+_SYSTEM_BUNDLES = (
+    "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
+    "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/Azure Linux
+)
+
+
+def resolve_root_cert(value: str) -> str:
+    """Concrete CA bundle for libpq.
+
+    psycopg-binary bundles its own libpq/OpenSSL, whose built-in "system" store may not be the
+    OS store, so verification would fail. Use the OS bundle file when one exists; verify-full
+    still checks the chain and host name.
+    """
+    if value != "system":
+        return value
+    candidates = [ssl.get_default_verify_paths().cafile, *_SYSTEM_BUNDLES]
+    return next((path for path in candidates if path and os.path.isfile(path)), value)
 
 
 def serializer() -> JsonPlusSerializer:
@@ -36,7 +55,8 @@ async def entra_pool(
         token = await credential.get_token(DB_SCOPE)
         return make_conninfo(
             host=host, dbname=database, user=user, password=token.token,
-            sslmode="verify-full", sslrootcert=root_cert, connect_timeout=10,
+            sslmode="verify-full", sslrootcert=resolve_root_cert(root_cert),
+            connect_timeout=10,
         )
 
     async def configure(conn: AsyncConnection[DictRow]) -> None:

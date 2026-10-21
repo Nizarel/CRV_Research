@@ -64,7 +64,10 @@ class ArmOutput:
 
 def full(hits: Sequence[Evidence]) -> list[Context]:
     return [
-        Context(h.id, h.content_hash, h.title, h.source_uri, h.pages, h.content, h.source_role)
+        Context(
+            h.id, h.content_hash, h.title, h.source_path or h.source_uri, h.pages, h.content,
+            h.source_role,
+        )
         for h in hits
     ]
 
@@ -82,7 +85,8 @@ def shown(spans: dict[str, tuple[Evidence, list[tuple[int, int]]]]) -> list[Cont
         for index, (start, end) in enumerate(merged):
             contexts.append(Context(
                 f"{hit.id}#{index}" if len(merged) > 1 else hit.id, hit.content_hash,
-                hit.title, hit.source_uri, hit.pages, hit.content[start:end], hit.source_role,
+                hit.title, hit.source_path or hit.source_uri, hit.pages, hit.content[start:end],
+                hit.source_role,
             ))
     return contexts
 

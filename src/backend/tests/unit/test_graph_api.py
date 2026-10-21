@@ -165,3 +165,36 @@ def test_body_cannot_set_principal_and_blank_input_is_rejected() -> None:
         body = {"thread_id": thread["id"], "request_id": str(uuid4()), "message": "Recovery?"}
         assert client.post("/api/v1/chat", json={**body, "owner": "someone"}).status_code == 422
         assert client.post("/api/v1/chat", json={**body, "message": "   "}).status_code == 422
+
+
+def test_system_root_cert_resolves_to_an_os_bundle_file(tmp_path, monkeypatch) -> None:
+    import ssl
+    from types import SimpleNamespace
+
+    from crv_agent.adapters.postgres import memory
+
+    bundle = tmp_path / "ca.pem"
+    bundle.write_text("x")
+    monkeypatch.setattr(ssl, "get_default_verify_paths", lambda: SimpleNamespace(cafile=None))
+    monkeypatch.setattr(memory, "_SYSTEM_BUNDLES", (str(tmp_path / "missing"), str(bundle)))
+    assert memory.resolve_root_cert("system") == str(bundle)
+    assert memory.resolve_root_cert("/custom/ca.pem") == "/custom/ca.pem"
+    monkeypatch.setattr(memory, "_SYSTEM_BUNDLES", ())
+    assert memory.resolve_root_cert("system") == "system"
+
+
+@pytest.mark.asyncio
+async def test_async_token_provider_models_close_without_sync_client() -> None:
+    from contextlib import AsyncExitStack
+
+    from langchain_openai import ChatOpenAI
+
+    from crv_agent.runtime.infrastructure import close_clients
+
+    async def token() -> str:
+        return "token"
+
+    model = ChatOpenAI(model="m", base_url="https://example.invalid/openai/v1/", api_key=token)
+    assert model.root_client is None and model.root_async_client is not None
+    async with AsyncExitStack() as stack:
+        close_clients(stack, model)

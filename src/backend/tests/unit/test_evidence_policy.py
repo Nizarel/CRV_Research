@@ -172,3 +172,26 @@ def test_steering_entities_are_precise_except_for_catalogue() -> None:
         "Organisation:approved", "Site:candidate", "ReportCode:observed",
     ]
     assert steering_entities(entities, "catalogue") == entities
+
+
+def test_periodic_detection_uses_original_path_not_content_addressed_uri() -> None:
+    from crv_agent.services.retrieval import periodic_summary
+
+    blob = "crv-sources/crv/sources/" + "8118" * 16 + ".pdf"
+    real = SOURCE.model_copy(update={
+        "source_uri": blob, "title": "Rapport d'activité de mois de mars 2022.pdf - p. 58",
+        "source_path": "GED/Documents R&D/Rapport d'activité de mois de mars 2022 -04-2022-.pdf",
+    })
+    assert periodic_summary(real)
+    primary = real.model_copy(update={
+        "source_path": "Geometallurgy Cu/Dossier Cu/CR-AR-PE-01-15 flottation.pdf",
+        "title": "CR-AR-PE-01-15 flottation.pdf - p. 3",
+    })
+    assert not periodic_summary(primary)
+
+
+def test_identifier_promotion_uses_document_code() -> None:
+    from crv_agent.services.evidence_pack import identifier_rank
+
+    coded = SOURCE.model_copy(update={"document_code": "CR/AR/PE/01/15", "content": "x"})
+    assert identifier_rank(coded, ["CR/AR/PE/01/15"]) == -2

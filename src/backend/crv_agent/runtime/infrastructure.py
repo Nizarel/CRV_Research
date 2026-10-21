@@ -27,6 +27,14 @@ class Infrastructure:
     models: dict[str, ChatOpenAI]
 
 
+def close_clients(stack: AsyncExitStack, chat_model: ChatOpenAI) -> None:
+    # An async Entra token provider yields only an async client (root_client is None).
+    if chat_model.root_async_client is not None:
+        stack.push_async_callback(chat_model.root_async_client.close)
+    if chat_model.root_client is not None:
+        stack.callback(chat_model.root_client.close)
+
+
 @asynccontextmanager
 async def infrastructure(
     settings: Settings, *, memory: bool = True,
@@ -63,8 +71,7 @@ async def infrastructure(
                 max_completion_tokens=settings.output_tokens,
                 max_retries=0, timeout=30, include_response_headers=False,
             )
-            stack.push_async_callback(chat_model.root_async_client.close)
-            stack.callback(chat_model.root_client.close)
+            close_clients(stack, chat_model)
             models[role] = chat_model
         yield Infrastructure(
             search=AzureSearch(search_client, settings.search_release),
