@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from crv_agent.services.evidence_pack import EvidencePolicy
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CRV_", extra="ignore")
@@ -26,8 +28,12 @@ class Settings(BaseSettings):
     answer_deployment: str
     verifier_deployment: str
     output_tokens: int = Field(default=2048, ge=256, le=8192)
-    turn_tokens: int = Field(default=100_000, ge=8192, le=1_000_000)
+    turn_tokens: int = Field(default=300_000, ge=8192, le=1_000_000)
     model_calls: int = Field(default=24, ge=4, le=40)
+    evidence_pack_size: int = Field(default=16, ge=1, le=50)
+    evidence_excerpt_characters: int = Field(default=1200, ge=200, le=8000)
+    evidence_anchor: Literal["lexical", "caption"] = "lexical"
+    evidence_rerank: Literal["none", "llm"] = "none"
     local_owner: str | None = None
     tenant_id: str | None = None
     audience: str | None = None
@@ -45,3 +51,11 @@ class Settings(BaseSettings):
         ):
             raise ValueError("Azure endpoints must use HTTPS")
         return self
+
+
+def evidence_policy(settings: Settings) -> EvidencePolicy:
+    return EvidencePolicy(
+        pack_size=settings.evidence_pack_size,
+        excerpt_characters=settings.evidence_excerpt_characters,
+        anchor=settings.evidence_anchor, rerank=settings.evidence_rerank,
+    )

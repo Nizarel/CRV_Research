@@ -12,6 +12,8 @@ from crv_agent.orchestration.context import ResearchContext
 from crv_agent.orchestration.state import ResearchState
 from crv_agent.services.calculation import calculate
 from crv_agent.services.catalogue import enumerate_documents
+from crv_agent.services.evidence_pack import merge_exposure
+from crv_agent.services.navigation import steering_entities
 from crv_agent.services.policy import hazardous_instructions
 from crv_agent.services.reconciliation import conflicts
 from crv_agent.services.verification import claim_errors
@@ -56,11 +58,7 @@ async def research(
     docs: list[Document] = []
     if context.retrieval_mode == "search":
         gaps.append("Search-only baseline; no KG catalogue enumeration or navigation.")
-    navigation = entities if plan.intent == "catalogue" else [
-        e for e in entities
-        if (e.kind in {"Site", "ReportCode"} and e.status in {"observed", "candidate", "approved"})
-        or (e.kind == "Organisation" and e.status == "approved")
-    ]
+    navigation = steering_entities(entities, plan.intent)
     if context.retrieval_mode == "kg" and (plan.intent == "catalogue" or navigation):
         try:
             docs, coverage = await enumerate_documents(
@@ -121,8 +119,9 @@ async def research(
                 )
                 for item in found:
                     previous = evidence_by_id.get(item.id)
-                    if previous is None or len(item.content) > len(previous.content):
-                        evidence_by_id[item.id] = item
+                    evidence_by_id[item.id] = (
+                        item if previous is None else merge_exposure(previous, item)
+                    )
                 gaps.extend(result.gaps)
                 for claim in result.claims:
                     if not claim_errors(claim, evidence_by_id):

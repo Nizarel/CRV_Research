@@ -7,12 +7,20 @@ import pytest
 from azure.search.documents.aio import SearchClient
 from langgraph.checkpoint.memory import InMemorySaver
 
+from crv_agent.adapters.postgres.memory import serializer
 from crv_agent.adapters.search import AzureSearch
 from crv_agent.domain.evidence import Evidence, WorkerResult
 from crv_agent.domain.execution import Budget, BudgetExceeded
 from crv_agent.domain.planning import DocumentPage, Entity, Facet, QueryPlan
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.orchestration.graph import build_graph
+from crv_agent.services.evidence_pack import (
+    best_window,
+    expose,
+    exposed_text,
+    merge_exposure,
+    term_weights,
+)
 from crv_agent.services.retrieval import Retrieval, focus
 from crv_agent.services.verification import claim_errors
 from crv_agent.tools.evidence import evidence_tools
@@ -34,6 +42,7 @@ class Search:
 
     async def query(
         self, text: str, release: str, mode: str, hashes: list[str], top: int = 50,
+        captions: bool = False,
     ) -> list[Evidence]:
         self.calls.append((text, release, mode, hashes, top))
         return [] if hashes else self.hits[:top]
@@ -104,34 +113,53 @@ def test_periodic_source_roles(filename: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_worker_can_read_rank_fifty_without_grounding_in_unseen_text() -> None:
-    hits = candidates()
-    long_text = "x" * 3000 + SOURCE.content + "y" * 8000 + "UNREAD quotation."
-    hits[0] = hits[0].model_copy(update={"content": long_text})
-    hits[-1] = hits[-1].model_copy(update={"content": long_text})
+async def test_pack_focuses_excerpts_and_never_grounds_in_unseen_text() -> None:
+    filler = "Contexte général du rapport sans résultat chiffré. " * 120
+    long_text = filler + SOURCE.content + " " + filler + "UNREAD quotation."
+    hits = [hit.model_copy(update={"content": long_text}) for hit in candidates()]
+    hits[30] = hits[30].model_copy(update={"title": "CR-AR-PE-01-15 final report"})
     search, budget = Search(hits), Budget()
     found: dict[str, Evidence] = {}
     search_tool, read_tool = evidence_tools(
         Retrieval(search), "r1", [], budget, found, "CR-AR-PE-01-15 recovery?",
     )
-    listing = json.loads(await search_tool.ainvoke({"query": "Rewritten question"}))
-    assert len(listing["candidates"]) == 50
-    assert len(listing["evidence"]) == 8
-    assert listing["evidence"][0]["truncated"]
+    listing = json.loads(await search_tool.ainvoke({"query": "pilot recovery"}))
+    assert len(listing["evidence"]) == 16
+    assert len(listing["more_candidates"]) == 34
+    assert listing["evidence"][0]["id"] == "S30"  # Exact report-code match is promoted.
+    assert all(SOURCE.content in item["text"] for item in listing["evidence"])
+    assert all(item["truncated"] and len(item["text"]) <= 1200 for item in listing["evidence"])
     assert "CR-AR-PE-01-15" in search.calls[0][0]
-    assert search.calls[0][2] == "semantic"
-    assert search.calls[1][2] == "lexical"
+    assert [call[2] for call in search.calls] == ["semantic", "lexical"]
     assert "S49" not in found
-    first_claim = CLAIM.model_copy(update={"evidence_ids": ["S0"]})
-    assert claim_errors(first_claim, found)
+    deep = CLAIM.model_copy(update={"evidence_ids": ["S49"]})
+    assert claim_errors(deep, found)
+    assert not claim_errors(CLAIM.model_copy(update={"evidence_ids": ["S0"]}), found)
     read = json.loads(await read_tool.ainvoke({"evidence_ids": ["S49", "S0"]}))
-    assert read[0]["truncated"] and len(read[0]["content"]) == 10000
-    assert not claim_errors(CLAIM.model_copy(update={"evidence_ids": ["S49"]}), found)
-    assert not claim_errors(first_claim, found)
+    assert read[0]["truncated"] and len(read[0]["text"]) <= 8000
+    assert not claim_errors(deep, found)
     assert claim_errors(CLAIM.model_copy(update={
         "evidence_ids": ["S49"], "quote": "UNREAD quotation.", "value": None,
     }), found)
+    assert found["S49"].content == long_text  # Citations retain the complete source chunk.
     assert budget.retrieval_calls == 2  # Reads use the cache, not another Search request.
+
+
+def test_windows_snap_to_words_and_exposure_merges_only_shown_spans() -> None:
+    content = "alpha " * 400 + "recovery 87.5 % pilot " + "omega " * 400
+    weights = term_weights("pilot recovery", [SOURCE.model_copy(update={
+        "content": content,
+    })], [])
+    start, end = best_window(content, weights, 200)
+    assert "recovery 87.5 % pilot" in content[start:end]
+    assert content[start - 1] == " " and content[end] == " "
+    left = expose(SOURCE.model_copy(update={"content": content}), (0, 10))
+    right = expose(SOURCE.model_copy(update={"content": content}), (5, 20))
+    other = expose(SOURCE.model_copy(update={"content": content}), (100, 110))
+    assert merge_exposure(merge_exposure(left, right), other).exposed == [(0, 20), (100, 110)]
+    assert exposed_text(other) == [content[100:110]]
+    with pytest.raises(ValueError):
+        merge_exposure(left, SOURCE)
 
 
 @pytest.mark.asyncio
@@ -221,15 +249,15 @@ async def test_no_precise_entities_never_enumerates_whole_corpus_as_a_boost() ->
             assert hashes == []
             self.questions.append(question)
             await budget.reserve(retrieval=1)
+            fact = len(long_content) - len(SOURCE.content)
+            full = SOURCE.model_copy(update={"content": long_content})
             if question.startswith("Pilot"):
                 longer_read_ready.set()
                 return WorkerResult(claims=[CLAIM], gaps=[]), [
-                    SOURCE.model_copy(update={"content": long_content}),
+                    expose(full, (fact, len(long_content))),
                 ]
             await longer_read_ready.wait()
-            return WorkerResult(claims=[], gaps=[]), [
-                SOURCE.model_copy(update={"content": long_content[:2500]}),
-            ]
+            return WorkerResult(claims=[], gaps=[]), [expose(full, (0, 2500))]
 
     class Models(FakeModels):
         async def plan(self, question: str, history: list[str], budget: Budget) -> QueryPlan:
@@ -239,7 +267,7 @@ async def test_no_precise_entities_never_enumerates_whole_corpus_as_a_boost() ->
             ]})
 
     worker = Worker()
-    result = await build_graph(InMemorySaver()).ainvoke(
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
         {"question": "Compare pilot and lab recovery", "history": []},
         {"configurable": {"thread_id": str(uuid4())}},
         context=ResearchContext(
@@ -252,4 +280,8 @@ async def test_no_precise_entities_never_enumerates_whole_corpus_as_a_boost() ->
         "Pilot recovery", "Lab recovery",
     }
     assert result["evidence"][0].content == long_content
+    assert result["evidence"][0].exposed == [
+        (0, 2500), (len(long_content) - len(SOURCE.content), len(long_content)),
+    ]
     assert result["answer"].status in {"answered", "partial"}
+    assert result["answer"].citations[0].exposed == result["evidence"][0].exposed

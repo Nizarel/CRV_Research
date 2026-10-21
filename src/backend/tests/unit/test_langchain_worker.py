@@ -43,15 +43,15 @@ class ToolModel(BaseChatModel):
         elif self.deep_read and self._calls == 2:
             assert isinstance(messages[-1].content, str)
             listing = json.loads(messages[-1].content)
-            assert len(listing["candidates"]) == 50
-            assert listing["candidates"][-1]["id"] == "S49"
+            assert len(listing["evidence"]) + len(listing["more_candidates"]) == 50
+            assert listing["more_candidates"][-1]["id"] == "S49"
             name, args = "read_evidence", {"evidence_ids": ["S49"]}
         else:
             selected = CLAIM
             if self.deep_read:
                 assert isinstance(messages[-1].content, str)
                 read = json.loads(messages[-1].content)
-                assert read[0]["id"] == "S49" and SOURCE.content in read[0]["content"]
+                assert read[0]["id"] == "S49" and SOURCE.content in read[0]["text"]
                 selected = CLAIM.model_copy(update={"evidence_ids": ["S49"]})
             name, args = "WorkerResult", WorkerResult(
                 claims=[selected], gaps=[],
@@ -70,6 +70,7 @@ async def test_real_create_agent_search_and_structured_result() -> None:
     class Search:
         async def query(
             self, text: str, release: str, mode: str, hashes: list[str], top: int = 50,
+            captions: bool = False,
         ) -> list[Evidence]:
             return [SOURCE]
 
@@ -80,7 +81,7 @@ async def test_real_create_agent_search_and_structured_result() -> None:
     worker = EvidenceWorker(ToolModel(), Retrieval(Search()), 1024)
     result, evidence = await worker.run("Recovery?", "r1", [], budget)
     assert result.claims == [CLAIM]
-    assert evidence == [SOURCE]
+    assert evidence == [SOURCE.model_copy(update={"exposed": [(0, len(SOURCE.content))]})]
     assert budget.model_calls == 2
     assert budget.retrieval_calls == 1
 
@@ -90,6 +91,7 @@ async def test_real_create_agent_reads_a_deep_candidate_before_claiming() -> Non
     class Search:
         async def query(
             self, text: str, release: str, mode: str, hashes: list[str], top: int = 50,
+            captions: bool = False,
         ) -> list[Evidence]:
             assert mode == "semantic" and top == 50
             return [

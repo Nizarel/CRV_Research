@@ -22,6 +22,10 @@ class Evidence(Contract):
     original_content_hashes: list[str] = []
     source_role: Literal["unclassified", "secondary_summary"] = "unclassified"
     source_role_basis: Literal["filename"] | None = None
+    # Semantic-ranker extractive caption (derived, never quotable; used only to place excerpts).
+    caption: str | None = None
+    # Character spans shown to a model; None means the complete content was supplied.
+    exposed: list[tuple[int, int]] | None = None
 
 
 class Claim(Contract):
@@ -42,6 +46,12 @@ class Claim(Contract):
 class WorkerResult(Contract):
     claims: list[Claim]
     gaps: list[str]
+
+
+class CandidateRanking(Contract):
+    """Listwise rerank output: candidate IDs, most useful first."""
+
+    ids: list[str]
 
 
 class CalculationRequest(Contract):

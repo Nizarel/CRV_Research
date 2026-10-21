@@ -7,6 +7,11 @@ from typing import TypeVar
 T = TypeVar("T")
 
 
+def estimate_tokens(text: str) -> int:
+    """Pre-call estimate; provider-reported usage enforces the hard turn limit."""
+    return len(text.encode()) // 3 + 1
+
+
 class BudgetExceeded(RuntimeError):
     pass
 
@@ -19,7 +24,7 @@ class DependencyUnavailable(RuntimeError):
 class Budget:
     retrieval_limit: int = 24
     model_limit: int = 24
-    token_limit: int = 100_000
+    token_limit: int = 300_000
     seconds: float = 120
     retrieval_calls: int = 0
     model_calls: int = 0

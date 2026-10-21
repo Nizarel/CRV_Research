@@ -2,6 +2,7 @@ import re
 
 from crv_agent.domain.answers import AnswerDraft
 from crv_agent.domain.evidence import Calculation, Claim, Evidence
+from crv_agent.services.evidence_pack import exposed_text
 
 _NUMBER = re.compile(
     r"(?<!\w)(?P<qualifier><=|>=|≤|≥|<|>|~|≈)?\s*(?P<number>[+-]?\d+(?:[.,]\d+)?)",
@@ -16,9 +17,10 @@ def claim_errors(
     if not selected or len(selected) != len(claim.evidence_ids):
         errors.append("Claim references missing evidence")
     if not claim.quote.strip() or not any(
-        claim.quote in item.content and not item.generated for item in selected
+        claim.quote in text for item in selected if not item.generated
+        for text in exposed_text(item)
     ):
-        errors.append("Claim requires an exact source quotation")
+        errors.append("Claim requires an exact quotation from source text shown to the model")
     if claim.calculation_index is not None:
         index = claim.calculation_index
         if calculations is None or index < 0 or index >= len(calculations):

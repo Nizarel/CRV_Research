@@ -63,19 +63,28 @@ class AzureSearch:
 
     async def query(
         self, text: str, release: str, mode: Literal["lexical", "semantic"],
-        hashes: list[str], top: int = 50,
+        hashes: list[str], top: int = 50, captions: bool = False,
     ) -> list[Evidence]:
+        semantic = mode == "semantic"
         rows = await self.client.search(
             search_text=text, filter=query_filter(release, hashes), top=top, select=SELECT,
-            query_type="semantic" if mode == "semantic" else "simple",
-            semantic_configuration_name="crv-evidence-semantic" if mode == "semantic" else None,
+            query_type="semantic" if semantic else "simple",
+            semantic_configuration_name="crv-evidence-semantic" if semantic else None,
+            query_caption="extractive" if semantic and captions else None,
+            query_caption_highlight_enabled=False if semantic and captions else None,
             vector_queries=[
                 VectorizableTextQuery(text=text, k_nearest_neighbors=50, fields="content_vector")
-            ] if mode == "semantic" else None,
+            ] if semantic else None,
         )
         result = []
         async for raw in rows:
             row = SearchRow.model_validate({key: raw.get(key) for key in SELECT})
+            found = raw.get("@search.captions") or []
+            caption = next((
+                value for item in found
+                if (value := item.get("text") if isinstance(item, dict)
+                    else getattr(item, "text", None))
+            ), None)
             result.append(Evidence(
                 id=row.projection_id, release=row.release_id, chunk_id=row.chunk_id,
                 content_hash=row.content_hash, title=row.title, content=row.content,
@@ -84,6 +93,6 @@ class AzureSearch:
                 generated=row.is_generated, document_class=row.document_class or "unknown",
                 citation_basis=row.citation_basis or "unknown",
                 extraction_route=row.extraction_route or "unknown",
-                original_content_hashes=row.original_content_hashes,
+                original_content_hashes=row.original_content_hashes, caption=caption,
             ))
         return result

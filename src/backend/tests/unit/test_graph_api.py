@@ -46,6 +46,8 @@ def test_strict_serializer_roundtrip_and_rejects_unapproved_class() -> None:
     serde = serializer()
     assert serde.loads_typed(serde.dumps_typed(CLAIM)) == CLAIM
     assert serde.loads_typed(serde.dumps_typed(SOURCE)) == SOURCE
+    shown = SOURCE.model_copy(update={"exposed": [(0, 8), (12, 20)]})
+    assert serde.loads_typed(serde.dumps_typed(shown)) == shown
 
 
 @pytest.mark.asyncio

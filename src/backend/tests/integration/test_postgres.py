@@ -1,6 +1,3 @@
-import os
-import secrets
-from collections.abc import Iterator
 from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
@@ -9,7 +6,6 @@ import pytest
 from psycopg import AsyncConnection, Rollback
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
-from testcontainers.community.postgres import PostgresContainer
 
 from crv_agent.adapters.postgres.memory import checkpointer
 from crv_agent.adapters.postgres.persistence import PostgresPersistence
@@ -20,18 +16,6 @@ from crv_agent.ports.persistence import ThreadNotFound, TurnConflict
 from tests.fakes import FakeKnowledge, FakeModels, FakeWorker
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(scope="module")
-def pg_dsn() -> Iterator[str]:
-    if configured := os.environ.get("CRV_TEST_PG_DSN"):
-        yield configured
-        return
-    with PostgresContainer(
-        "postgres:16", username="crv_test", password=secrets.token_urlsafe(24),
-        dbname="crv_agent_test", driver=None,
-    ) as database:
-        yield database.get_connection_url()
 
 
 async def test_postgres_ownership_idempotency_locking_and_checkpoints(pg_dsn: str) -> None:

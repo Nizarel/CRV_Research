@@ -17,11 +17,13 @@ Paid live evaluation and reviewed expected-source mappings remain release gates.
 Implemented retrieval follows the
 [measured baseline](evaluation/golden-retrieval-baseline-2026-10-21.md):
 50 semantic-hybrid candidates per leg, soft periodic-summary (+10 positions)
-and third/later-document-chunk (+20) penalties, and bounded reads beyond the
-initial eight excerpts. Secondary-summary labels are filename-derived, matching
+and third/later-document-chunk (+20) penalties. Each facet gets 16 query-focused
+excerpts (report-code matches promoted) plus 34 previews, with bounded full reads.
+Secondary-summary labels are filename-derived, matching
 the baseline heuristic; the runtime does not require a new KG metadata migration.
-Only exposed excerpts enter the claim ledger. Multi-part questions are decomposed
-into at most six facets within the existing shared budget.
+Evidence records the exact character spans shown to the model; only those spans
+can ground claims or reach the verifier. Multi-part questions are decomposed
+into at most six facets within a shared, measured-usage turn budget.
 KG steering is a boost, never a corpus-wide restriction: Site, ReportCode and
 approved Organisation only, with broad entity navigation retained for catalogue
 requests. Document hashes are identical between KG and Search, including converted

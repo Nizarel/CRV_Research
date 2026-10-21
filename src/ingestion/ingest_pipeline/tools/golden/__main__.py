@@ -289,11 +289,19 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--scope", action="append")
     run.add_argument("--only", action="append", help="Question id (repeatable)")
     run.add_argument("--concurrency", type=int, default=6)
+    from .score import add_parser as add_score_parser
+    from .score import run_score
+
+    add_score_parser(commands)
     args = parser.parse_args(argv)
     if args.command == "convert":
         return _convert(args)
     if args.command == "sources-sheet":
         return _sources_sheet(args)
+    if args.command == "score":
+        if args.judge_deployment and not args.openai_endpoint:
+            parser.error("score --judge-deployment needs --openai-endpoint")
+        return asyncio.run(run_score(args))
     return asyncio.run(_run(args))
 
 

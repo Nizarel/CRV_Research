@@ -7,11 +7,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from crv_agent.domain.answers import AnswerDraft, Verdict
-from crv_agent.domain.evidence import CalculationRequest, Claim, Evidence
-from crv_agent.domain.execution import Budget
+from crv_agent.domain.evidence import CalculationRequest, CandidateRanking, Claim, Evidence
+from crv_agent.domain.execution import Budget, estimate_tokens
 from crv_agent.domain.planning import QueryPlan
 from crv_agent.orchestration.middleware import UsageRecorder
-from crv_agent.orchestration.prompts import COMPOSE_RULES, PLAN_RULES, VERIFY_RULES
+from crv_agent.orchestration.prompts import COMPOSE_RULES, PLAN_RULES, RERANK_RULES, VERIFY_RULES
+from crv_agent.services.evidence_pack import exposed_text
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -37,10 +38,9 @@ class LangChainModels:
     async def _invoke(
         self, model: BaseChatModel, schema: type[T], system: str, data: str, budget: Budget,
     ) -> T:
-        # UTF-8 bytes are a conservative upper bound for byte-pair input tokenization.
         await budget.reserve(
-            model=1, tokens=len((system + data).encode()) + self.output_tokens
-            + len(json.dumps(schema.model_json_schema()).encode()),
+            model=1, tokens=estimate_tokens(system + data) + self.output_tokens
+            + estimate_tokens(json.dumps(schema.model_json_schema())),
         )
         result = await budget.wait(model.with_structured_output(
             schema, method="json_schema", strict=True,
@@ -74,7 +74,12 @@ class LangChainModels:
             self.verifier, Verdict, VERIFY_RULES,
             json.dumps({
                 "draft": draft.model_dump(mode="json"),
-                "sources": [e.model_dump(mode="json") for e in evidence],
+                "sources": [
+                    {
+                        **e.model_dump(mode="json", exclude={"content", "exposed"}),
+                        "shown_text": exposed_text(e),
+                    } for e in evidence
+                ],
                 "calculation_and_coverage_context": context,
             }, ensure_ascii=False), budget,
         )
@@ -93,3 +98,25 @@ class LangChainModels:
             }),
             budget,
         )
+
+
+class LangChainReranker:
+    """Listwise reranker over candidate previews; returns IDs only, never evidence text."""
+
+    def __init__(self, models: LangChainModels, model: BaseChatModel) -> None:
+        self.models, self.model = models, model
+
+    async def rerank(
+        self, query: str, candidates: list[tuple[str, str, str]], budget: Budget,
+    ) -> list[str]:
+        ranking = await self.models._invoke(
+            self.model, CandidateRanking, RERANK_RULES,
+            json.dumps({
+                "query": query,
+                "candidates": [
+                    {"id": key, "title": title, "preview": preview}
+                    for key, title, preview in candidates
+                ],
+            }, ensure_ascii=False), budget,
+        )
+        return ranking.ids

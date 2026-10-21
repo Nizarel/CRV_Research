@@ -29,6 +29,7 @@ class Retrieval:
 
     async def retrieve(
         self, text: str, release: str, hashes: list[str], budget: Budget,
+        captions: bool = False,
     ) -> list[Evidence]:
         modes: list[tuple[Literal["lexical", "semantic"], list[str]]] = [("semantic", [])]
         if hashes:
@@ -40,6 +41,7 @@ class Retrieval:
             tasks = [
                 group.create_task(budget.wait(self.search.query(
                     text, release, mode, selected, top=CANDIDATE_DEPTH,
+                    captions=captions and mode == "semantic",
                 )))
                 for mode, selected in modes
             ]
@@ -54,7 +56,8 @@ def fuse(rankings: list[list[Evidence]], top: int = CANDIDATE_DEPTH) -> list[Evi
             if evidence.generated:
                 continue
             scores[evidence.id] += 1 / (60 + rank)
-            by_id[evidence.id] = evidence
+            # Keep the first occurrence: semantic legs come first and carry captions.
+            by_id.setdefault(evidence.id, evidence)
     return [by_id[key] for key in sorted(scores, key=lambda k: (-scores[k], k))[:top]]
 
 

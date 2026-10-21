@@ -25,5 +25,5 @@ class AppServices:
     kg_release: str
     ready: Callable[[], Awaitable[None]]
     model_calls: int = 24
-    turn_tokens: int = 100_000
+    turn_tokens: int = 300_000
     retrieval_mode: Literal["kg", "search"] = "kg"

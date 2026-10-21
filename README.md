@@ -420,10 +420,19 @@ Retrieval uses semantic hybrid candidates at depth 50, with soft rank penalties
 matching the [retrieval baseline](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md):
 10 positions for filename-inferred periodic summaries and 20 for a document's
 third/later chunk. These are demotions, not exclusions or hard chunk caps.
-Workers receive the full candidate list and eight excerpts; `read_evidence` can
-read deeper candidates in bounded batches. Only exposed text can ground claims;
-truncation and top-k coverage remain explicit. Summary roles are filename
-inferences, not validated KG scientific facts.
+Each facet worker receives a deterministic evidence pack: the first 16 candidates
+(exact report-code matches promoted, otherwise the focused order) as 1,200-character
+query-focused excerpts, plus previews of the other 34. `read_evidence` reads up to
+three batches of four candidates (8,000 characters each). Evidence records the exact
+character spans shown to the model; claims must quote those spans, and the verifier
+receives only them. Citations keep the complete chunk. Truncation and top-k coverage
+remain explicit. Summary roles are filename inferences, not validated KG facts.
+
+Pre-call token reservations estimate UTF-8 bytes ÷ 3. Provider-reported usage
+enforces the hard `CRV_TURN_TOKENS` limit, now 300,000 by default. A local
+50-candidate payload measured about 12k estimated tokens per search and 5k per
+four-chunk read, roughly 20–70k per facet. Facets beyond the budget report gaps.
+Cost, latency and recall effects need live measurement.
 
 KG boosts use Site, ReportCode and **approved** Organisation entities, never
 Projects, while preserving an unrestricted semantic Search leg. Catalogue
@@ -455,17 +464,33 @@ Before serving:
    existing migration runner. This adds release-pinned, scope-filtered keyset
    pagination without changing the existing `find_documents` contract. Its grant
    flows through `crv_kg_reader`; keep the agent login execute-only.
-2. Provision a **separate** `crv-agent-memory` database. With the migration
-   identity configured as `CRV_MEMORY_USER`, run `crv-agent setup-memory` once.
-   Restore the runtime identity afterwards and grant only schema USAGE and
-   SELECT/INSERT/UPDATE/DELETE on the agent/checkpoint tables, not CREATE or
-   ingestion writes. Startup never runs DDL.
-3. Configure Entra database identities, Search Index Data Reader, existing model
-   access, and network reachability to private endpoints. PostgreSQL TLS is
+2. Provision a **separate** `crv-agent-memory` database
+   ([crv-agent-memory-db.bicep](infra/crv-agent-memory-db.bicep), database only on
+   the existing server). As the migration identity run `crv-agent setup-memory`
+   once, then `crv-agent grant-memory-runtime --login <runtime-login>`. The grant
+   is DML-only on the agent/checkpoint tables and fails if the login can CREATE.
+   Startup never runs DDL.
+3. Use the dedicated runtime identity
+   ([crv-research-agent-identity.bicep](infra/crv-research-agent-identity.bicep)):
+   Search Index Data Reader and Cognitive Services OpenAI User only, federated to
+   `crv/crv-research-agent`. Its PostgreSQL login comes from
+   `crv-pipeline kg-grant-reader` (execute-only `crv_kg_reader`). PostgreSQL TLS is
    `verify-full`; `CRV_POSTGRES_ROOT_CERT` accepts `system` or an approved CA file.
-4. Run `crv-agent serve` for loopback development. The
-   [backend Dockerfile](src/backend/Dockerfile) is available for internal packaging;
-   no infrastructure is deployed by these commands.
+4. `crv-agent check [--models]` verifies Search, the KG release, memory tables and
+   least privilege (KG table SELECT and memory DDL must be denied); it exits
+   non-zero on failure.
+5. Run `crv-agent serve` for loopback development. The
+   [backend Dockerfile](src/backend/Dockerfile) is available for internal packaging
+   (`--build-arg PIP_INDEX_URL=...` for an approved mirror; TLS stays verified).
+
+On the private AKS cluster,
+[render-research-agent.ps1](infra/kubernetes/research-agent/render-research-agent.ps1)
+renders one job at a time (`kg-login`, `memory-setup`, `memory-grant`,
+`agent-check`, `retrieval-eval`) with digest-pinned images and applies it through
+`az aks command invoke`. No Service or ingress is created.
+
+The semantic ranker must be on the Standard billing plan: on the Free plan,
+requests fail with a billing error once the monthly allowance is consumed.
 
 The API exposes owned conversations, `/api/v1/chat`, feedback and health.
 Chat requires UUID `thread_id` and `request_id` plus a message. SSE streams
@@ -493,6 +518,25 @@ ground truth until confirmed. Set server-side `CRV_RETRIEVAL_MODE=search` for th
 Search-only ablation and `kg` for KG-steered retrieval; compare identical releases.
 Progress latency and first **verified answer** latency are measured separately.
 These tools do not establish scientific accuracy or production readiness by themselves.
+
+Retrieval-depth experiments use `python -m crv_agent.evaluation.retrieval`. It emits
+the exact context each arm would expose, without judging:
+
+- `A0`/`A1` reproduce golden-eval `semantic`/`semantic_focused` at 10.
+- Pack variants `P12`/`P16`/`P24`/`P16W2000`, caption-anchored `CAP` and LLM-reranked
+  `LLM` are single-query arms.
+- `DEC` is planner decomposition; `KGB` adds the precise KG boost.
+- `CEIL` is the top-50 full-chunk ceiling.
+- `AAR` is the Azure AI Search agentic-retrieval comparator: knowledge source and
+  knowledge base in [infra/search](infra/search), minimal effort with an enforced
+  release filter.
+
+`python -m ingest_pipeline.tools.golden score` scores those contexts with the
+golden-eval anchors and judge. The judge is repeated, with a majority vote per fact,
+and every arm gets paired bootstrap confidence intervals. Tune on `dev`; the
+held-out split needs `--allow-heldout` and is run once for the frozen winner. The
+winning configuration becomes the runtime default through `CRV_EVIDENCE_PACK_SIZE`,
+`CRV_EVIDENCE_EXCERPT_CHARACTERS`, `CRV_EVIDENCE_ANCHOR` and `CRV_EVIDENCE_RERANK`.
 
 ## Pilot acceptance checks
 
