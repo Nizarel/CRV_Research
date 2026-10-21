@@ -391,6 +391,18 @@ Every vertex and edge carries evidence and the scope keys of that evidence. Site
    - `crv_kg.active_release`, `resolve`, `entity`, `neighbors`;
    - `find_documents` and `document_lineage`.
 
+## Golden-set retrieval evaluation
+
+[golden/crv_golden.jsonl](golden/crv_golden.jsonl) holds the 76 golden questions with categories, atomic key facts and deterministic anchors. Regenerate it with `python -m ingest_pipeline.tools.golden convert --xlsx Docs/QA_REMINEX.xlsx --out golden/crv_golden.jsonl`.
+
+`-Job golden-eval` runs as the worker identity. That identity needs `db-bootstrap --kg-reader`, which the `dbsetup` job passes. The job queries release `-EvalRelease` (default `crv-v1`) in four modes: `bm25`, `hybrid`, `semantic`, and `kg` (steered by `crv_kg.find_documents`).
+
+It scores two things:
+- anchor recall at 10/20/50;
+- LLM-judged key-fact recall at 10, using `-JudgeDeployment` (default `gpt-5.4-mini`; raise its TPM for the run).
+
+It prints a table and the full report between `GOLDEN REPORT` markers. The baseline is in [Docs/evaluation](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md).
+
 ## Pilot acceptance checks
 
 Start with a copied, small representative subset, not all 24 GiB:

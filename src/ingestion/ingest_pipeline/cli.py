@@ -29,6 +29,7 @@ from .adapters.postgres.crv_kg import CrvKgStore
 from .adapters.postgres.crv_kg_inputs import load_inputs
 from .adapters.postgres.kg_access import (
     KG_WRITER_ROLES,
+    READER_ROLE,
     ensure_entra_login,
     grant_reader,
     grant_role,
@@ -473,6 +474,10 @@ async def _db_bootstrap(
                 for role in KG_WRITER_ROLES:
                     if await grant_role(connection, login, role):
                         report["granted"].append(f"{login}:{role}")
+            # Membership only (no session defaults): pipeline identities keep their own role.
+            for login in args.kg_reader or ():
+                if await grant_role(connection, login, READER_ROLE):
+                    report["granted"].append(f"{login}:{READER_ROLE}")
         else:
             report["pending_grants"] = [
                 login for login in principals
@@ -878,6 +883,10 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap.add_argument(
         "--kg-principal", action="append",
         help="LOGIN (also given as --principal) granted crv_kg_writer and crv_kg_release",
+    )
+    bootstrap.add_argument(
+        "--kg-reader", action="append",
+        help="LOGIN (also given as --principal) made a member of crv_kg_reader (evaluation)",
     )
     bootstrap.add_argument("--apply", action="store_true", help="Default is a dry run")
     bootstrap.set_defaults(handler=_db_bootstrap)

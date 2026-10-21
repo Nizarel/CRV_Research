@@ -142,6 +142,7 @@ async def test_read_api_filters_by_scope_and_needs_execute_only(
         release, RESEARCH, ["urn:crv:site:bleida"],
     )
     assert {row["iri"] for row in found} == {a, b}
+    assert {row["content_hash"] for row in found} == {"a" * 64, "b" * 64}
     linked = next(row for row in found if row["iri"] == a)["linked"]
     assert {"relation": "ISSUED_BY", "iri": "urn:crv:org:reminex"} in [
         {key: item[key] for key in ("relation", "iri")} for item in _json(linked)
