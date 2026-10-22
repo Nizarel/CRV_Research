@@ -1,23 +1,16 @@
 import type { FocusEvent, MouseEvent } from 'react'
-import type { ChatMessage, Evidence, ProgressStep } from '../types'
+import type { ChatMessage, Evidence } from '../types'
 import { AnswerView } from './AnswerView'
 import { CitationList } from './CitationList'
 import { FeedbackBar } from './FeedbackBar'
 import { Icon } from './Icon'
+import { ResearchProgress } from './ResearchProgress'
 import './MessageBubble.css'
 
 interface MessageBubbleProps {
   message: ChatMessage
   onOpenEvidence: (evidence: Evidence, answer: NonNullable<ChatMessage['answer']>) => void
 }
-
-const STAGES: Array<{ after: ProgressStep; label: string }> = [
-  { after: 'started', label: 'Analyse de la question' },
-  { after: 'understand', label: 'Recherche dans le corpus' },
-  { after: 'research', label: 'Rapprochement des preuves' },
-  { after: 'reconcile', label: 'Rédaction et vérification des citations' },
-]
-const ORDER: ProgressStep[] = ['started', 'understand', 'research', 'reconcile', 'answer']
 
 /** Highlights every element of the answer tied to the hovered citation (marker, source card).
  * Done on the DOM, not in React state: re-rendering the answer between hover and click would
@@ -48,7 +41,7 @@ export function MessageBubble({ message, onOpenEvidence }: MessageBubbleProps) {
   return (
     <div className="message-row message-row-assistant">
       <div className="message-avatar" aria-hidden="true">
-        <img src="/favicon.svg" alt="" />
+        <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
       </div>
 
       <div className="message-bubble-wrap">
@@ -60,7 +53,13 @@ export function MessageBubble({ message, onOpenEvidence }: MessageBubbleProps) {
           onFocus={(event) => linkCitations(event, true)}
           onBlur={(event) => linkCitations(event, false)}
         >
-          {message.pending && <ProgressSteps step={message.step ?? 'started'} />}
+          {message.pending && (
+            <ResearchProgress
+              step={message.step ?? 'started'}
+              plan={message.plan}
+              findings={message.findings ?? []}
+            />
+          )}
 
           {message.failure && (
             <div className="answer-failure" role="alert">
@@ -88,22 +87,5 @@ export function MessageBubble({ message, onOpenEvidence }: MessageBubbleProps) {
         )}
       </div>
     </div>
-  )
-}
-
-function ProgressSteps({ step }: { step: ProgressStep }) {
-  const reached = ORDER.indexOf(step)
-  return (
-    <ol className="progress-steps" role="status" aria-label="Recherche en cours">
-      {STAGES.map((stage, index) => {
-        const state = index < reached ? 'done' : index === reached ? 'active' : 'todo'
-        return (
-          <li key={stage.after} className={`progress-step progress-step-${state}`}>
-            <span className="progress-dot" aria-hidden="true" />
-            {stage.label}
-          </li>
-        )
-      })}
-    </ol>
   )
 }

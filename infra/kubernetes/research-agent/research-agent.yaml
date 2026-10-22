@@ -258,6 +258,16 @@ spec:
           env:
             - {name: CRV_TURN_SECONDS, value: "${TURN_SECONDS}"}
             - {name: CRV_EVAL_DIAGNOSTICS, value: "${EVAL_DIAGNOSTICS}"}
+            # Pinned per run: the shared ConfigMap is re-applied by every render.
+            - {name: CRV_PLANNER_DEPLOYMENT, value: "${PLANNER_DEPLOYMENT}"}
+            - {name: CRV_WORKER_DEPLOYMENT, value: "${WORKER_DEPLOYMENT}"}
+            - {name: CRV_ANSWER_DEPLOYMENT, value: "${ANSWER_DEPLOYMENT}"}
+            - {name: CRV_VERIFIER_DEPLOYMENT, value: "${VERIFIER_DEPLOYMENT}"}
+            - {name: CRV_PLANNER_REASONING_EFFORT, value: "${PLANNER_EFFORT}"}
+            - {name: CRV_WORKER_REASONING_EFFORT, value: "${WORKER_EFFORT}"}
+            - {name: CRV_ANSWER_REASONING_EFFORT, value: "${ANSWER_EFFORT}"}
+            - {name: CRV_VERIFIER_REASONING_EFFORT, value: "${VERIFIER_EFFORT}"}
+            - {name: CRV_FACET_CONCURRENCY, value: "${FACET_CONCURRENCY}"}
           # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:
             exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]}

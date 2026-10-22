@@ -105,6 +105,30 @@ export interface Thread {
 /** Research graph steps reported by `progress` events, in execution order. */
 export type ProgressStep = 'started' | 'understand' | 'research' | 'reconcile' | 'answer'
 
+/** `plan` event: the sub-questions the agent will research. */
+export interface ResearchPlan {
+  intent: string
+  facets: string[]
+}
+
+export interface FacetSource {
+  id: string
+  title: string
+  source: string
+  pages: number[]
+  document_code: string | null
+  source_role: Evidence['source_role']
+}
+
+/** `facet` event: claims found for one sub-question, quotes located verbatim but not yet
+ * verified as an answer. */
+export interface FacetFinding {
+  facet: string
+  status: 'completed' | 'budget_exhausted' | 'failed'
+  claims: Claim[]
+  sources: FacetSource[]
+}
+
 export type ChatRole = 'user' | 'assistant'
 
 export interface ChatMessage {
@@ -115,6 +139,9 @@ export interface ChatMessage {
   answer?: Answer
   pending?: boolean
   step?: ProgressStep
+  /** Sub-questions and provisional findings shown while the turn runs. */
+  plan?: ResearchPlan
+  findings?: FacetFinding[]
   /** Why a turn produced no answer (failed, cancelled, interrupted). */
   failure?: string
   threadId?: string

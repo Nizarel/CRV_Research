@@ -116,6 +116,21 @@ def test_score_record_uses_golden_anchors_and_repeated_judge() -> None:
     assert Judge.calls == 3
 
 
+def test_judge_failure_leaves_the_question_unmeasured_without_aborting() -> None:
+    class Throttled:
+        async def judge(self, question: GoldenQuestion, hits: Any) -> list[dict[str, Any]]:
+            raise RuntimeError("429 after retries")
+
+    result = asyncio.run(
+        score_record(QUESTION, record("Recovery 87,5 %"), Throttled(), 3)  # type: ignore[arg-type]
+    )
+    assert result["judge_recall"] is None
+    assert result["judge_error"] == "RuntimeError"
+    assert result["anchor_recall"] == 0.5  # anchors are still measured deterministically
+    summary = summarize([{**record("x"), **result}], [])
+    assert summary["arms"]["P16"]["judge_errors"] == 1
+
+
 def test_paired_bootstrap_and_summary() -> None:
     low, high = bootstrap([0.1] * 20)[1:]
     assert low == high == 0.1

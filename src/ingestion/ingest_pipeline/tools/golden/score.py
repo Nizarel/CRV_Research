@@ -131,7 +131,11 @@ async def score_record(
         judge_agreement=None,
     )
     if judge is not None and not question.must_abstain and not record.get("error"):
-        runs = [await judge.judge(question, passages) for _ in range(repeats)]
+        try:
+            runs = [await judge.judge(question, passages) for _ in range(repeats)]
+        except Exception as error:  # e.g. sustained throttling: unmeasured, never a zero
+            result["judge_error"] = type(error).__name__
+            return result
         supported, agreement = majority(runs)
         if supported:
             result["judge_recall"] = round(sum(supported) / len(supported), 3)
@@ -182,6 +186,7 @@ def summarize(
         seconds = sorted(i["seconds"] for i in items if i.get("seconds") is not None)
         summary["arms"][arm] = {
             "errors": sum(1 for i in items if i.get("error")),
+            "judge_errors": sum(1 for i in items if i.get("judge_error")),
             "categories": {
                 category: {
                     "n": len(group),

@@ -27,3 +27,11 @@ npm run build
 Set `VITE_API_BASE_URL` to use a separately hosted API instead of same-origin.
 
 Entra bearer tokens are not attached yet: the UI works against the backend's local-owner mode.
+
+## Deploy
+
+The image bundles nginx and the SPA built for the `/crv/` gateway prefix (`VITE_BASE_PATH`).
+It runs in one pod with the research backend on loopback. Build it with
+`docker buildx build --platform linux/amd64 --target runtime --push`, then use
+[infra/kubernetes/research-agent/deploy-research-web.ps1](../../../infra/kubernetes/research-agent/deploy-research-web.ps1)
+with both image digests (`-Remove` takes it offline).

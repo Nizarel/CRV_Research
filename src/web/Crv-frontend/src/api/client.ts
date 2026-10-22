@@ -1,9 +1,9 @@
-import type { Answer, ProgressStep, Run, Thread } from '../types'
+import type { Answer, FacetFinding, ProgressStep, ResearchPlan, Run, Thread } from '../types'
 
-/** Base URL for the backend API. Empty string = same-origin/relative (works with the Vite dev
- * proxy locally and with a same-origin reverse proxy in production). Override via
+/** Base URL for the backend API. Defaults to the app's own base path (`/crv` behind the gateway,
+ * empty locally) so the browser stays same-origin with the reverse proxy. Override via
  * VITE_API_BASE_URL for a separately-hosted API. */
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.BASE_URL.replace(/\/$/, '')
 const API = `${API_BASE}/api/v1`
 
 export class ApiError extends Error {
@@ -66,6 +66,8 @@ export async function postFeedback(
 
 export interface ChatStreamHandlers {
   onProgress: (step: ProgressStep) => void
+  onPlan: (plan: ResearchPlan) => void
+  onFacet: (finding: FacetFinding) => void
   onAnswer: (answer: Answer) => void
   onError: (error: Error) => void
 }
@@ -146,6 +148,10 @@ export function streamChatTurn(
         for (const evt of events) {
           if (evt.event === 'progress') {
             handlers.onProgress((JSON.parse(evt.data) as { step: ProgressStep }).step)
+          } else if (evt.event === 'plan') {
+            handlers.onPlan(JSON.parse(evt.data) as ResearchPlan)
+          } else if (evt.event === 'facet') {
+            handlers.onFacet(JSON.parse(evt.data) as FacetFinding)
           } else if (evt.event === 'answer') {
             settled = true
             handlers.onAnswer(JSON.parse(evt.data) as Answer)

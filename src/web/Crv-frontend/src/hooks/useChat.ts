@@ -96,19 +96,28 @@ export function useChat(onThreadPersisted: (threadId: string, title: string) => 
 
       abortRef.current = streamChatTurn(thread, runId, question, {
         onProgress: (step) => update({ step }),
+        onPlan: (plan) => update({ plan }),
+        onFacet: (finding) =>
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, findings: [...(m.findings ?? []), finding] } : m,
+            ),
+          ),
         onAnswer: (answer) => {
           update({
             content: answer.content,
             answer,
             pending: false,
             step: undefined,
+            plan: undefined,
+            findings: undefined,
             threadId: thread,
             runId,
           })
           setIsStreaming(false)
         },
         onError: (err) => {
-          update({ pending: false, step: undefined, failure: err.message })
+          update({ pending: false, step: undefined, plan: undefined, findings: undefined, failure: err.message })
           setIsStreaming(false)
         },
       })

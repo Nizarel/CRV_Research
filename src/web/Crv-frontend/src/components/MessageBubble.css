@@ -87,56 +87,6 @@
   margin-top: 3px;
 }
 
-/* ---- Research progress ---------------------------------------------------------- */
-
-.progress-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 16px 20px;
-  list-style: none;
-  font-size: 13.5px;
-}
-
-.progress-step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--color-text-faint);
-}
-
-.progress-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-border-strong);
-}
-
-.progress-step-done {
-  color: var(--color-text-muted);
-}
-
-.progress-step-done .progress-dot {
-  background: var(--color-success);
-}
-
-.progress-step-active {
-  color: var(--color-text);
-  font-weight: 600;
-}
-
-.progress-step-active .progress-dot {
-  background: var(--color-primary);
-  animation: status-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes status-pulse {
-  50% {
-    opacity: 0.25;
-  }
-}
-
 /* ---- Feedback ------------------------------------------------------------------ */
 
 .feedback-bar {

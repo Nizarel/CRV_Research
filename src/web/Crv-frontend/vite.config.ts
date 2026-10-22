@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // `/crv/` when served behind the gateway prefix; `/` for local development.
+  base: process.env.VITE_BASE_PATH ?? '/',
   plugins: [react()],
   server: {
     proxy: {

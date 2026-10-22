@@ -1,0 +1,131 @@
+# CRV research agent web: nginx (SPA + /api/v1 proxy) and the research backend in ONE pod.
+# The backend uses the fixed local identity, which the app only allows on loopback, so nginx
+# reaches it on 127.0.0.1:8000 and is the only listener. No Entra sign-in: every visitor shares
+# one identity, so keep the Ingress closed (-Remove) when not testing.
+# Render and apply with deploy-research-web.ps1 (substitutes every dollar-brace placeholder).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crv-research-web
+  namespace: crv
+  labels: {app.kubernetes.io/name: crv-research-web, app.kubernetes.io/part-of: crv-research-agent}
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  selector:
+    matchLabels: {app: crv-research-web}
+  template:
+    metadata:
+      labels:
+        app: crv-research-web
+        app.kubernetes.io/name: crv-research-web
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: crv-research-agent
+      # A research turn lasts up to the turn budget; let running turns finish on rollout.
+      terminationGracePeriodSeconds: 200
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: web
+          image: ${ACR_LOGIN_SERVER}/crv-research-web@${WEB_DIGEST}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: web-tmp, mountPath: /tmp}
+        - name: backend
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [crv-agent, serve, --host, 127.0.0.1, --port, "8000"]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          env:
+            # Explicit values win over the shared ConfigMap, which every eval render rewrites.
+            - {name: CRV_LOCAL_OWNER, value: crv-web}
+            - {name: CRV_EVAL_DIAGNOSTICS, value: "false"}
+            - {name: CRV_TURN_SECONDS, value: "${TURN_SECONDS}"}
+            - {name: CRV_PLANNER_DEPLOYMENT, value: "${PLANNER_DEPLOYMENT}"}
+            - {name: CRV_WORKER_DEPLOYMENT, value: "${WORKER_DEPLOYMENT}"}
+            - {name: CRV_ANSWER_DEPLOYMENT, value: "${ANSWER_DEPLOYMENT}"}
+            - {name: CRV_VERIFIER_DEPLOYMENT, value: "${VERIFIER_DEPLOYMENT}"}
+            - {name: CRV_PLANNER_REASONING_EFFORT, value: "${PLANNER_EFFORT}"}
+            - {name: CRV_WORKER_REASONING_EFFORT, value: "${WORKER_EFFORT}"}
+            - {name: CRV_ANSWER_REASONING_EFFORT, value: "${ANSWER_EFFORT}"}
+            - {name: CRV_VERIFIER_REASONING_EFFORT, value: "${VERIFIER_EFFORT}"}
+            - {name: CRV_FACET_CONCURRENCY, value: "${FACET_CONCURRENCY}"}
+          # Exec probes: kubelet httpGet probes come from the node and cannot reach pod loopback.
+          startupProbe:
+            exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=8)"]}
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=8)"]}
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=4)"]}
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 3Gi}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: backend-tmp, mountPath: /tmp}
+      volumes:
+        - {name: web-tmp, emptyDir: {sizeLimit: 64Mi}}
+        - {name: backend-tmp, emptyDir: {sizeLimit: 256Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crv-research-web
+  namespace: crv
+  labels: {app.kubernetes.io/name: crv-research-web, app.kubernetes.io/part-of: crv-research-agent}
+spec:
+  type: ClusterIP
+  selector: {app: crv-research-web}
+  ports:
+    - {name: http, port: 80, targetPort: 8080}
+---
+# Served under /crv/; the gateway strips the prefix before nginx. request-timeout covers the
+# longest streamed turn (gateway default is 20 s, which would cut the chat stream).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crv-research-web
+  namespace: crv
+  labels: {app.kubernetes.io/name: crv-research-web, app.kubernetes.io/part-of: crv-research-agent}
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/"
+    appgw.ingress.kubernetes.io/request-timeout: "300"
+    appgw.ingress.kubernetes.io/health-probe-path: "/healthz"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /crv/
+            pathType: Prefix
+            backend: {service: {name: crv-research-web, port: {name: http}}}
+          - path: /crv
+            pathType: Exact
+            backend: {service: {name: crv-research-web, port: {name: http}}}
