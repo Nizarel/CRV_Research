@@ -1,32 +1,29 @@
-# React + TypeScript + Vite
+# CRV web
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite front end for the CRV research agent (Reminex branding).
 
-Currently, two official plugins are available:
+It talks to the backend in [src/backend](../../backend) through `/api/v1`:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `POST /api/v1/conversations` creates a thread on the first question.
+- `POST /api/v1/chat` streams `progress`, then `answer`, then `done` (SSE).
+- `GET /api/v1/conversations/{id}` restores a conversation.
+- `POST /api/v1/feedback` records a thumbs up/down against a run.
 
-## React Compiler
+Answers cite sources as `[<evidence id>]`; the UI numbers them and opens the cited passage
+with its exact quotations highlighted.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Develop
 
-## Expanding the Oxlint configuration
+Start the backend (`crv-agent serve`, with `CRV_LOCAL_OWNER` set for loopback development),
+then:
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm install
+npm run dev      # proxies /api and /health to http://127.0.0.1:8000
+npm test
+npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Set `VITE_API_BASE_URL` to use a separately hosted API instead of same-origin.
+
+Entra bearer tokens are not attached yet: the UI works against the backend's local-owner mode.

@@ -1,9 +1,11 @@
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from crv_agent.services.evidence_pack import EvidencePolicy
+
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
 
 class Settings(BaseSettings):
@@ -27,6 +29,11 @@ class Settings(BaseSettings):
     worker_deployment: str
     answer_deployment: str
     verifier_deployment: str
+    # Unset sends no reasoning_effort, so the deployment's default applies.
+    planner_reasoning_effort: ReasoningEffort | None = None
+    worker_reasoning_effort: ReasoningEffort | None = None
+    answer_reasoning_effort: ReasoningEffort | None = None
+    verifier_reasoning_effort: ReasoningEffort | None = None
     output_tokens: int = Field(default=2048, ge=256, le=8192)
     worker_output_tokens: int = Field(default=8192, ge=1024, le=32768)
     # extract: bounded retrieve-then-extract (default); agent: LangChain tool-loop worker.
@@ -41,14 +48,26 @@ class Settings(BaseSettings):
     evidence_excerpt_characters: int = Field(default=8000, ge=200, le=8000)
     evidence_anchor: Literal["lexical", "caption"] = "lexical"
     evidence_rerank: Literal["none", "llm"] = "none"
+    # Evaluation only: streams the full claim ledger and exposed passage text per turn.
+    eval_diagnostics: bool = False
     local_owner: str | None = None
     tenant_id: str | None = None
     audience: str | None = None
+
+    @field_validator(
+        "planner_reasoning_effort", "worker_reasoning_effort", "answer_reasoning_effort",
+        "verifier_reasoning_effort", mode="before",
+    )
+    @classmethod
+    def blank_effort_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
 
     @model_validator(mode="after")
     def check_identity_and_isolation(self) -> "Settings":
         if not self.local_owner and not (self.tenant_id and self.audience):
             raise ValueError("Configure Entra identity or explicit local development owner")
+        if self.eval_diagnostics and not self.local_owner:
+            raise ValueError("Evaluation diagnostics are only allowed for loopback local owners")
         if self.kg_database == self.memory_database:
             raise ValueError("Agent memory must be separate from the ingestion database")
         if not self.kg_scopes:

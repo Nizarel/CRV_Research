@@ -1,0 +1,288 @@
+.answer {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px 18px;
+}
+
+/* ---- Status notice -------------------------------------------------------------- */
+
+.answer-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.answer-notice-warn {
+  background: var(--color-warn-bg);
+  border-color: var(--color-warn-border);
+  color: var(--color-warn);
+}
+
+.answer-notice-info {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+  color: var(--color-info);
+}
+
+.answer-notice-neutral {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+/* ---- Prose (Markdown subset) ----------------------------------------------------- */
+
+.answer-prose {
+  min-width: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.answer-prose > :first-child {
+  margin-top: 0;
+}
+
+.answer-prose > :last-child {
+  margin-bottom: 0;
+}
+
+.answer-prose p {
+  margin: 0 0 8px;
+}
+
+.answer-prose strong {
+  font-weight: 650;
+  color: #101828;
+}
+
+.answer-prose ul,
+.answer-prose ol {
+  margin: 4px 0 8px;
+  padding-left: 22px;
+}
+
+.answer-prose li {
+  margin: 3px 0;
+  padding-left: 2px;
+}
+
+.answer-prose li::marker {
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+
+.answer-prose code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-surface-hover);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.md-heading {
+  font-weight: 650;
+  color: #101828;
+}
+
+.md-table-wrap {
+  margin: 6px 0 10px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.md-table th,
+.md-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.md-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---- Citation markers ------------------------------------------------------------ */
+
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  margin: 0 1px;
+  padding: 0 5px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: 999px;
+  background: var(--color-primary-light);
+  color: var(--color-primary-dark);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: 0.15em;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+
+button.ref-chip {
+  cursor: pointer;
+}
+
+button.ref-chip:hover,
+.ref-chip.is-linked {
+  border-color: var(--color-primary-dark);
+  background: var(--color-primary);
+  color: var(--color-ink);
+}
+
+.ref-chip-static {
+  cursor: default;
+}
+
+/* ---- Side panels (conflicts, calculations, limits) -------------------------------- */
+
+.answer-panel {
+  padding: 10px 14px 12px;
+  border: 1px solid;
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+}
+
+.answer-panel-warn {
+  border-color: var(--color-warn-border);
+  border-left-color: #f79009;
+  background: #fffcf5;
+}
+
+.answer-panel-info {
+  border-color: var(--color-info-border);
+  border-left-color: var(--color-info);
+  background: #f8fbff;
+}
+
+.answer-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.answer-panel-warn .answer-panel-title {
+  color: var(--color-warn);
+}
+
+.answer-panel-info .answer-panel-title {
+  color: var(--color-info);
+}
+
+.answer-panel ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.answer-panel li + li {
+  margin-top: 4px;
+}
+
+.answer-conflict + .answer-conflict {
+  margin-top: 10px;
+}
+
+.answer-panel-note {
+  color: var(--color-text-muted);
+}
+
+/* ---- Claims ledger ------------------------------------------------------------------ */
+
+.answer-claims {
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+  font-size: 13.5px;
+}
+
+.answer-claims > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  list-style-position: outside;
+}
+
+.answer-claims > ol {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding-left: 22px;
+}
+
+.claim-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.claim-text {
+  font-weight: 600;
+}
+
+.claim-value {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-primary-border);
+  color: var(--color-primary-dark);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.claim-context {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.claim-quote {
+  margin: 6px 0 0;
+  padding: 4px 10px;
+  border-left: 2px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}

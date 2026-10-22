@@ -38,7 +38,8 @@ def serializer() -> JsonPlusSerializer:
         (model.__module__, model.__name__)
         for model in (
             planning.QueryPlan, planning.Facet, answers.Coverage, answers.Conflict,
-            answers.Answer, evidence.Claim, evidence.Evidence, evidence.Calculation,
+            answers.Answer, answers.RoleUsage, evidence.Claim, evidence.Evidence,
+            evidence.Calculation,
         )
     ]
     return JsonPlusSerializer(

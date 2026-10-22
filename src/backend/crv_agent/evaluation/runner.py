@@ -11,7 +11,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from math import ceil
-from statistics import mean
+from statistics import mean, median
 from typing import Any
 from uuid import uuid4
 
@@ -31,6 +31,8 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
     answer: Answer | None = None
     error: str | None = None
     steps: list[str] = []
+    progress: list[tuple[str, float]] = []
+    diagnostics: dict[str, Any] | None = None
     try:
         created = await client.post("/api/v1/conversations")
         created.raise_for_status()
@@ -45,8 +47,12 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
                 elif line.startswith("data: "):
                     data = json.loads(line.removeprefix("data: "))
                     if event == "progress":
-                        first_progress = first_progress or time.monotonic() - started
+                        elapsed = time.monotonic() - started
+                        first_progress = first_progress or elapsed
                         steps.append(str(data.get("step")))
+                        progress.append((str(data.get("step")), elapsed))
+                    elif event == "diagnostics":
+                        diagnostics = {"ledger": data["ledger"], "exposed": data["exposed"]}
                     elif event == "answer":
                         first_answer = time.monotonic() - started
                         answer = Answer.model_validate({
@@ -61,12 +67,26 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
         error = f"{type(exc).__name__}"
     return {
         "answer": answer, "error": error, "steps": steps,
+        "step_seconds": step_durations(progress), "diagnostics": diagnostics,
         "first_progress_seconds": first_progress, "first_answer_seconds": first_answer,
         "total_seconds": time.monotonic() - started,
     }
 
 
-def compact(question: GoldenQuestion, result: dict[str, Any]) -> dict[str, Any]:
+def step_durations(progress: list[tuple[str, float]]) -> dict[str, float]:
+    """Seconds spent in each graph step, from consecutive progress timestamps."""
+    durations: dict[str, float] = {}
+    previous = 0.0
+    for step, at in progress:
+        if step != "started":
+            durations[step] = round(durations.get(step, 0.0) + at - previous, 3)
+        previous = at
+    return durations
+
+
+def compact(
+    question: GoldenQuestion, result: dict[str, Any], arm: str = "AGENT",
+) -> dict[str, Any]:
     """One answer record without source text: reviewable, and scoreable as a context."""
     answer: Answer | None = result["answer"]
     content = answer.content if answer else ""
@@ -74,11 +94,15 @@ def compact(question: GoldenQuestion, result: dict[str, Any]) -> dict[str, Any]:
     sources = [c.source_path or c.source_uri for c in citations]
     return {
         "id": question.id, "category": question.category, "split": question.split,
-        "arm": "AGENT", "passage_mode": "split", "error": None,
+        "arm": arm, "passage_mode": "split", "error": None,
         "turn_error": result["error"], "status": answer.status if answer else "error",
         "seconds": round(result["first_answer_seconds"] or result["total_seconds"], 3),
         "first_progress_seconds": result["first_progress_seconds"],
+        "step_seconds": result["step_seconds"],
         "usage": answer.usage if answer else {},
+        "role_usage": {
+            role: usage.model_dump() for role, usage in answer.role_usage.items()
+        } if answer else {},
         "exposed_characters": len(content),
         "documents": len({c.content_hash for c in citations}),
         "secondary_share": round(
@@ -116,12 +140,78 @@ def compact(question: GoldenQuestion, result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_EMPTY_CONTEXT = {"id": "empty", "content_hash": "", "title": "", "source": "", "pages": [],
+                  "text": ""}
+
+
+def stage_records(
+    question: GoldenQuestion, result: dict[str, Any], arm: str = "AGENT",
+) -> list[dict[str, Any]]:
+    """Exposed passages and the claim ledger as extra scorer arms, to locate lost facts."""
+    found: dict[str, Any] | None = result.get("diagnostics")
+    if found is None:
+        return []
+    base = {
+        "id": question.id, "category": question.category, "split": question.split,
+        "passage_mode": "split", "error": None, "seconds": None, "usage": {},
+        "secondary_share": None, "dossier_cu_share": None,
+    }
+    exposed = [
+        {key: passage[key] for key in ("id", "content_hash", "title", "source", "pages", "text")}
+        for passage in found["exposed"]
+    ]
+    ledger = [
+        {
+            "id": f"claim-{n}", "content_hash": "", "title": claim["subject"],
+            "source": "ledger", "pages": [], "text": f"{claim['text']}\n{claim['quote']}",
+        } for n, claim in enumerate(found["ledger"])
+    ]
+    return [
+        {
+            **base, "arm": f"{arm}-EXPOSED",
+            "exposed_characters": sum(len(p["text"]) for p in exposed),
+            "documents": len({p["content_hash"] for p in exposed}),
+            "contexts": exposed or [_EMPTY_CONTEXT],
+        },
+        {
+            **base, "arm": f"{arm}-LEDGER",
+            "exposed_characters": sum(len(c["text"]) for c in ledger),
+            "documents": len({e for c in found["ledger"] for e in c["evidence_ids"]}),
+            "contexts": ledger or [_EMPTY_CONTEXT],
+        },
+    ]
+
+
+def role_summary(records: list[dict[str, Any]]) -> dict[str, dict[str, object]]:
+    """Mean per-turn usage per deployment role over completed turns, plus served models."""
+    completed = [r["role_usage"] for r in records if r["answer_status"] != "error"]
+    summary: dict[str, dict[str, object]] = {}
+    for role in sorted({role for usage in completed for role in usage}):
+        rows = [usage.get(role, {}) for usage in completed]
+        models: dict[str, int] = defaultdict(int)
+        for row in rows:
+            for name, calls in row.get("models", {}).items():
+                models[name] += calls
+        summary[role] = {
+            **{
+                key: round(mean(row.get(key, 0) for row in rows), 3)
+                for key in (
+                    "calls", "seconds", "input_tokens", "output_tokens", "reasoning_tokens",
+                    "cached_tokens",
+                )
+            },
+            "models": dict(models),
+        }
+    return summary
+
+
 async def evaluate(
     client: httpx.AsyncClient, questions: list[GoldenQuestion], judge: FactJudge | None = None,
     *, concurrency: int = 1, emit: Callable[[dict[str, Any]], None] | None = None,
+    arm: str = "AGENT", emit_stages: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> dict[str, object]:
     gate = asyncio.Semaphore(concurrency)
-    records: list[dict[str, object]] = []
+    records: list[dict[str, Any]] = []
     measurements: dict[str, list[float | bool | None]] = defaultdict(list)
     latencies: list[float] = []
 
@@ -169,20 +259,31 @@ async def evaluate(
             "turn_error": result["error"], "judge_error": judge_error,
             "retrieval_mode": answer.retrieval_mode if answer else None,
             "usage": answer.usage if answer else {},
+            "role_usage": {
+                role: usage.model_dump() for role, usage in answer.role_usage.items()
+            } if answer else {},
+            "step_seconds": result["step_seconds"],
             "first_progress_seconds": result["first_progress_seconds"],
             "first_answer_seconds": result["first_answer_seconds"],
             "total_seconds": result["total_seconds"],
         })
+        record = compact(question, result, arm)
         if emit is not None:
-            emit(compact(question, result))
+            emit(record)
+        if emit_stages is not None:
+            emit_stages([record, *stage_records(question, result, arm)])
 
     await asyncio.gather(*(one(question) for question in questions))
     records.sort(key=lambda record: int(str(record["id"]).lstrip("Q") or 0))
     p95 = sorted(latencies)[ceil(len(latencies) * 0.95) - 1] if latencies else None
     p50 = sorted(latencies)[len(latencies) // 2] if latencies else None
     failures = gate_failures(measurements, p95)
+    durations: dict[str, list[float]] = defaultdict(list)
+    for record in records:
+        for step, seconds in record["step_seconds"].items():
+            durations[step].append(seconds)
     return {
-        "questions": len(records), "records": records,
+        "arm": arm, "questions": len(records), "records": records,
         "metrics": {name: measured_rate(values) for name, values in measurements.items()},
         "statuses": {
             status: sum(1 for r in records if r["answer_status"] == status)
@@ -193,6 +294,10 @@ async def evaluate(
             for error in sorted({str(r["turn_error"]) for r in records if r["turn_error"]})
         },
         "first_answer_seconds_p50": p50, "first_answer_seconds_p95": p95,
+        "step_seconds_p50": {
+            step: round(median(values), 3) for step, values in sorted(durations.items())
+        },
+        "role_usage_mean": role_summary(records),
         "gate_failures": failures, "gates_passed": not failures,
     }
 

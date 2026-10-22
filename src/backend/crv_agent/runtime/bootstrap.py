@@ -62,7 +62,7 @@ def application(settings: Settings) -> FastAPI:
                 search_release=settings.search_release, kg_release=settings.kg_release,
                 ready=ready, model_calls=settings.model_calls, turn_tokens=settings.turn_tokens,
                 turn_seconds=settings.turn_seconds, facet_concurrency=settings.facet_concurrency,
-                retrieval_mode=settings.retrieval_mode,
+                retrieval_mode=settings.retrieval_mode, diagnostics=settings.eval_diagnostics,
             )
             yield
     return create_app(lifespan=lifespan)

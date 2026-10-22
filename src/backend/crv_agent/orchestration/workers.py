@@ -81,6 +81,8 @@ class EvidenceWorker:
         )
         output = await budget.wait(agent.ainvoke(
             {"messages": [HumanMessage(content=question)]},
-            {"recursion_limit": 16, "callbacks": [UsageRecorder(budget, "evidence_worker")]},
+            {"recursion_limit": 16, "callbacks": [
+                UsageRecorder(budget, "worker", "evidence_worker"),
+            ]},
         ))
         return WorkerResult.model_validate(output["structured_response"]), list(found.values())

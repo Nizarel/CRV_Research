@@ -62,15 +62,18 @@ async def infrastructure(
         if not endpoint.endswith("/openai/v1"):
             endpoint += "/openai/v1"
         models: dict[str, ChatOpenAI] = {}
-        for role, deployment in (
-            ("planner", settings.planner_deployment), ("worker", settings.worker_deployment),
-            ("answer", settings.answer_deployment), ("verifier", settings.verifier_deployment),
+        for role, deployment, effort in (
+            ("planner", settings.planner_deployment, settings.planner_reasoning_effort),
+            ("worker", settings.worker_deployment, settings.worker_reasoning_effort),
+            ("answer", settings.answer_deployment, settings.answer_reasoning_effort),
+            ("verifier", settings.verifier_deployment, settings.verifier_reasoning_effort),
         ):
             chat_model = ChatOpenAI(
                 model=deployment, base_url=endpoint + "/", api_key=token_provider,
                 max_completion_tokens=(
                     settings.worker_output_tokens if role == "worker" else settings.output_tokens
                 ),
+                reasoning_effort=effort,
                 max_retries=settings.model_retries, timeout=60, include_response_headers=False,
             )
             close_clients(stack, chat_model)

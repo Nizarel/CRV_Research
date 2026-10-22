@@ -1,12 +1,20 @@
 """Explicit operational commands: memory grants and least-privilege readiness checks."""
 
 import re
-from typing import Any, LiteralString
+import time
+from typing import Any, LiteralString, cast
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from psycopg import AsyncConnection, errors, sql
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
 
+from crv_agent.domain.answers import ComposedAnswer, Verdict
+from crv_agent.domain.evidence import WorkerResult
+from crv_agent.domain.planning import QueryPlan
+from crv_agent.orchestration.extraction import Extraction
 from crv_agent.runtime.infrastructure import infrastructure
 from crv_agent.runtime.settings import Settings
 
@@ -69,8 +77,41 @@ async def denied(connection: AsyncConnection[Any], statement: LiteralString) -> 
     return False
 
 
+PROBE_RULES = (
+    "Connectivity probe. Return the smallest valid object for the schema: empty lists, null "
+    "where allowed, false for booleans, intent 'lookup', language 'en', short strings."
+)
+
+
+async def probe_model(chat_model: ChatOpenAI, schema: type[BaseModel]) -> dict[str, object]:
+    """One strict structured-output call with the role's real schema and reasoning effort."""
+    report: dict[str, object] = {
+        "deployment": chat_model.model_name, "reasoning_effort": chat_model.reasoning_effort,
+        "schema": schema.__name__,
+    }
+    started = time.monotonic()
+    try:
+        result = cast(dict[str, Any], await chat_model.with_structured_output(
+            schema, method="json_schema", strict=True, include_raw=True,
+        ).ainvoke([SystemMessage(content=PROBE_RULES), HumanMessage(content="Probe.")]))
+    except Exception as error:
+        return {**report, "ok": False, "error": f"{type(error).__name__}: {error}"[:300]}
+    raw = result.get("raw")
+    usage = raw.usage_metadata if isinstance(raw, AIMessage) else None
+    report.update(
+        ok=result.get("parsed") is not None, seconds=round(time.monotonic() - started, 3),
+        served_model=raw.response_metadata.get("model_name") if isinstance(raw, AIMessage)
+        else None,
+        reasoning_tokens=(usage or {}).get("output_token_details", {}).get("reasoning"),
+    )
+    if not report["ok"]:
+        report["error"] = str(result.get("parsing_error"))[:300]
+    return report
+
+
 async def run_checks(settings: Settings, *, models: bool) -> dict[str, object]:
     report: dict[str, object] = {}
+    probes: dict[str, dict[str, object]] = {}
     async with infrastructure(settings) as infra:
         await infra.search.ready()
         report["search_release"] = settings.search_release
@@ -88,17 +129,20 @@ async def run_checks(settings: Settings, *, models: bool) -> dict[str, object]:
                 connection, "CREATE TABLE public.crv_permission_probe (id integer)",
             )
         if models:
-            pinged: dict[str, bool] = {}
-            for chat_model in infra.models.values():
-                if chat_model.model_name in pinged:
-                    continue
-                reply = await chat_model.ainvoke("Reply with OK.")
-                pinged[chat_model.model_name] = bool(reply.content)
-            report["models"] = pinged
+            schemas: dict[str, type[BaseModel]] = {
+                "planner": QueryPlan, "answer": ComposedAnswer, "verifier": Verdict,
+                "worker": Extraction if settings.worker_mode == "extract" else WorkerResult,
+            }
+            probes = {
+                role: await probe_model(chat_model, schemas[role])
+                for role, chat_model in infra.models.items()
+            }
+            report["models"] = probes
     failures = [
         key for key in ("kg_table_select_denied", "memory_ddl_denied") if report[key] is not True
     ]
     if report["kg_documents"] == 0:
         failures.append("kg_documents")
+    failures.extend(f"model:{role}" for role, probe in probes.items() if not probe["ok"])
     report["failures"] = failures
     return report

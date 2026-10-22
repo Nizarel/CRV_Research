@@ -167,6 +167,98 @@ def test_body_cannot_set_principal_and_blank_input_is_rejected() -> None:
         assert client.post("/api/v1/chat", json={**body, "message": "   "}).status_code == 422
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_diagnostics_event_streams_ledger_and_exposed_text_only_when_enabled(
+    enabled: bool,
+) -> None:
+    from dataclasses import replace
+
+    with TestClient(create_app(replace(services(), diagnostics=enabled))) as client:
+        thread = client.post("/api/v1/conversations").json()
+        response = client.post("/api/v1/chat", json={
+            "thread_id": thread["id"], "request_id": str(uuid4()), "message": "Recovery?",
+        })
+        blocks = [block.splitlines() for block in response.text.strip().split("\n\n")]
+        found = [
+            json.loads(lines[2].removeprefix("data: "))
+            for lines in blocks if lines[1] == "event: diagnostics"
+        ]
+        sequences = [json.loads(lines[2].removeprefix("data: "))["sequence"] for lines in blocks]
+    assert sequences == sorted(set(sequences))
+    if not enabled:
+        assert found == []
+        return
+    [payload] = found
+    assert payload["ledger"] == [CLAIM.model_dump(mode="json")]
+    assert payload["exposed"] == [{
+        "id": "S1", "content_hash": SOURCE.content_hash, "title": SOURCE.title,
+        "source": SOURCE.source_uri, "pages": [4], "text": SOURCE.content,
+    }]
+
+
+def test_blank_reasoning_effort_is_unset_and_diagnostics_need_a_local_owner(monkeypatch) -> None:
+    import os
+
+    from crv_agent.runtime.settings import Settings
+
+    for key in [key for key in os.environ if key.upper().startswith("CRV_")]:
+        monkeypatch.delenv(key)
+    base = {
+        "search_endpoint": "https://search", "kg_release": "kg1", "postgres_host": "pg",
+        "postgres_user": "u", "kg_database": "kg", "memory_user": "m",
+        "openai_endpoint": "https://openai", "planner_deployment": "p",
+        "worker_deployment": "w", "answer_deployment": "a", "verifier_deployment": "v",
+    }
+    settings = Settings(
+        **base, local_owner="dev", planner_reasoning_effort="", worker_reasoning_effort="low",
+        eval_diagnostics=True,
+    )
+    assert settings.planner_reasoning_effort is None and settings.worker_reasoning_effort == "low"
+    with pytest.raises(ValueError, match="loopback"):
+        Settings(**base, tenant_id="t", audience="api", eval_diagnostics=True)
+    with pytest.raises(ValueError):
+        Settings(**base, local_owner="dev", answer_reasoning_effort="extreme")
+
+
+@pytest.mark.asyncio
+async def test_model_probe_reports_served_model_and_structured_output_failures() -> None:
+    from langchain_core.messages import AIMessage
+
+    from crv_agent.domain.answers import Verdict
+    from crv_agent.runtime.operations import probe_model
+
+    class Model:
+        model_name, reasoning_effort = "model-router", "low"
+
+        def __init__(self, result: object) -> None:
+            self.result = result
+
+        def with_structured_output(self, schema: object, **kwargs: object) -> "Model":
+            assert kwargs == {"method": "json_schema", "strict": True, "include_raw": True}
+            return self
+
+        async def ainvoke(self, messages: object) -> object:
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    raw = AIMessage(content="{}", usage_metadata={
+        "input_tokens": 9, "output_tokens": 3, "total_tokens": 12,
+        "output_token_details": {"reasoning": 2},
+    }, response_metadata={"model_name": "gpt-5.4-mini-2026-03-17"})
+    ok = await probe_model(Model({  # type: ignore[arg-type]
+        "raw": raw, "parsed": Verdict(supported=True, reasons=[]), "parsing_error": None,
+    }), Verdict)
+    assert ok["ok"] is True and ok["served_model"] == "gpt-5.4-mini-2026-03-17"
+    assert ok["reasoning_tokens"] == 2 and ok["reasoning_effort"] == "low"
+    unparsed = await probe_model(Model({  # type: ignore[arg-type]
+        "raw": raw, "parsed": None, "parsing_error": ValueError("bad json"),
+    }), Verdict)
+    assert unparsed["ok"] is False and "bad json" in str(unparsed["error"])
+    failed = await probe_model(Model(ConnectionError("schema rejected")), Verdict)  # type: ignore[arg-type]
+    assert failed["ok"] is False and failed["error"] == "ConnectionError: schema rejected"
+
+
 def test_system_root_cert_resolves_to_an_os_bundle_file(tmp_path, monkeypatch) -> None:
     import ssl
     from types import SimpleNamespace

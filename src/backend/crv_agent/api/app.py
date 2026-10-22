@@ -11,7 +11,7 @@ from opentelemetry import trace
 from starlette.requests import Request
 
 from crv_agent.api.dependencies import AppServices
-from crv_agent.api.events import event
+from crv_agent.api.events import diagnostics, event
 from crv_agent.api.identity import AuthenticationError
 from crv_agent.api.schemas import ChatRequest, FeedbackRequest
 from crv_agent.domain.answers import Answer
@@ -153,6 +153,11 @@ def create_app(
                                     final = Answer.model_validate(values["answer"])
                                 yield event("progress", {"step": step}, sequence, run_id)
                                 sequence += 1
+                                if step == "research" and deps.diagnostics:
+                                    yield event(
+                                        "diagnostics", diagnostics(values or {}), sequence, run_id,
+                                    )
+                                    sequence += 1
                 if final is None:
                     raise RuntimeError("Research graph produced no final answer")
                 payload = final.model_dump(mode="json")

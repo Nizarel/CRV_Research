@@ -99,6 +99,6 @@ class ExtractionWorker:
             Extraction, method="json_schema", strict=True,
         ).ainvoke(
             [SystemMessage(content=EXTRACT_RULES), HumanMessage(content=data)],
-            {"callbacks": [UsageRecorder(budget, "evidence_extractor")]},
+            {"callbacks": [UsageRecorder(budget, "worker", "evidence_extractor")]},
         ))
         return Extraction.model_validate(result)

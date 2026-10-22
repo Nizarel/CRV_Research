@@ -50,6 +50,16 @@ class Coverage(Contract):
     gaps: list[str] = []
 
 
+class RoleUsage(Contract):
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    reasoning_tokens: int
+    seconds: float
+    models: dict[str, int]
+
+
 class Answer(Contract):
     status: Literal[
         "answered", "partial", "insufficient_evidence", "needs_clarification", "out_of_scope",
@@ -65,4 +75,5 @@ class Answer(Contract):
     kg_release: str
     trace_id: str
     usage: dict[str, int]
+    role_usage: dict[str, RoleUsage] = {}
     retrieval_mode: Literal["kg", "search"] = "kg"

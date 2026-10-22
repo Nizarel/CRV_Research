@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,11 @@ def main(argv: list[str] | None = None) -> None:
                         help="JSONL answers in the shared golden `score` context format")
     parser.add_argument("--print-answers", action="store_true",
                         help="Also print answers (no source text) between markers")
+    parser.add_argument("--arm", default="AGENT",
+                        help="Scorer arm label for this configuration (paired comparisons)")
+    parser.add_argument("--stages-out", type=Path,
+                        help="JSONL answer, exposed-passage and claim-ledger arms per question "
+                        "(needs a backend with CRV_EVAL_DIAGNOSTICS=true; contains source text)")
     parser.add_argument("--split", choices=["dev", "heldout"], default="dev")
     parser.add_argument("--allow-heldout", action="store_true")
     parser.add_argument("--confirm-live", action="store_true")
@@ -62,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--allow-heldout is required to evaluate the held-out split")
     if not 1 <= args.concurrency <= 8:
         parser.error("--concurrency must be between 1 and 8")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", args.arm):
+        parser.error("--arm must be 1-32 letters, digits, '-' or '_'")
     parsed = urlparse(args.base_url)
     if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
         parser.error("Remote evaluation requires HTTPS")
@@ -72,11 +80,17 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("The selected split has no questions")
 
     answers = args.answers_out.open("w", encoding="utf-8") if args.answers_out else None
+    stages = args.stages_out.open("w", encoding="utf-8") if args.stages_out else None
 
     def emit(record: dict[str, Any]) -> None:
         if answers is not None:
             answers.write(json.dumps(record, ensure_ascii=False) + "\n")
             answers.flush()
+
+    def emit_stages(records: list[dict[str, Any]]) -> None:
+        if stages is not None:
+            stages.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+            stages.flush()
 
     async def run() -> dict[str, object]:
         headers = {}
@@ -90,6 +104,7 @@ def main(argv: list[str] | None = None) -> None:
             if not args.judge:
                 return await evaluate(
                     client, questions, concurrency=args.concurrency, emit=emit,
+                    arm=args.arm, emit_stages=emit_stages,
                 )
             endpoint = os.environ["CRV_OPENAI_ENDPOINT"].rstrip("/")
             if not endpoint.endswith("/openai/v1"):
@@ -106,6 +121,7 @@ def main(argv: list[str] | None = None) -> None:
                     return await evaluate(
                         client, questions, LangChainJudge(model),
                         concurrency=args.concurrency, emit=emit,
+                        arm=args.arm, emit_stages=emit_stages,
                     )
                 finally:
                     # An async token provider yields only an async client.
@@ -118,6 +134,8 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         if answers is not None:
             answers.close()
+        if stages is not None:
+            stages.close()
     args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     summary = {key: value for key, value in report.items() if key != "records"}
     print(REPORT_BEGIN)

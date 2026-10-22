@@ -104,6 +104,7 @@ async def answer(
         "coverage": state["coverage"], "reasons": reasons,
         "search_release": context.search_release, "kg_release": context.kg_release,
         "trace_id": context.trace_id, "usage": context.budget.usage(),
+        "role_usage": context.budget.role_usage(),
         "retrieval_mode": context.retrieval_mode,
     })
     return {"answer": result}

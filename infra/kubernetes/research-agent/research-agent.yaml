@@ -30,10 +30,16 @@ data:
   CRV_POSTGRES_USER: "${AGENT_IDENTITY_NAME}"
   CRV_MEMORY_USER: "${AGENT_IDENTITY_NAME}"
   CRV_OPENAI_ENDPOINT: "${OPENAI_ENDPOINT}"
-  CRV_PLANNER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
-  CRV_WORKER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
-  CRV_ANSWER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
-  CRV_VERIFIER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
+  CRV_PLANNER_DEPLOYMENT: "${PLANNER_DEPLOYMENT}"
+  CRV_WORKER_DEPLOYMENT: "${WORKER_DEPLOYMENT}"
+  CRV_ANSWER_DEPLOYMENT: "${ANSWER_DEPLOYMENT}"
+  CRV_VERIFIER_DEPLOYMENT: "${VERIFIER_DEPLOYMENT}"
+  # Empty = no reasoning_effort sent (deployment default).
+  CRV_PLANNER_REASONING_EFFORT: "${PLANNER_EFFORT}"
+  CRV_WORKER_REASONING_EFFORT: "${WORKER_EFFORT}"
+  CRV_ANSWER_REASONING_EFFORT: "${ANSWER_EFFORT}"
+  CRV_VERIFIER_REASONING_EFFORT: "${VERIFIER_EFFORT}"
+  CRV_FACET_CONCURRENCY: "${FACET_CONCURRENCY}"
   CRV_TURN_TOKENS: "300000"
   # Jobs never serve HTTP; this only satisfies settings validation (serve is loopback-only).
   CRV_LOCAL_OWNER: ops-job
@@ -251,6 +257,7 @@ spec:
             - configMapRef: {name: crv-research-agent}
           env:
             - {name: CRV_TURN_SECONDS, value: "${TURN_SECONDS}"}
+            - {name: CRV_EVAL_DIAGNOSTICS, value: "${EVAL_DIAGNOSTICS}"}
           # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:
             exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]}
@@ -266,6 +273,7 @@ spec:
           args: [python, -m, crv_agent.evaluation.cli, --base-url, "http://127.0.0.1:8000",
                  --dataset, /golden/crv_golden.jsonl, --split, "${EVAL_SPLIT}",
                  --concurrency, "${EVAL_CONCURRENCY}", --wait-ready, "300", --judge,
+                 --arm, "${ANSWER_ARM}",
                  --output, /results/report.json, --answers-out, /results/answers.jsonl,
                  --print-answers, --confirm-live${ANSWER_ARGS}]
           envFrom:
@@ -282,9 +290,10 @@ spec:
         - name: score
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
           command: [python, -m, ingest_pipeline.tools.golden]
-          args: [score, --golden, /golden/crv_golden.jsonl, --contexts, /results/answers.jsonl,
+          # With -Diagnostics the contexts also hold the exposed and ledger arms (funnel).
+          args: [score, --golden, /golden/crv_golden.jsonl, --contexts, "${SCORE_CONTEXTS}",
                  --judge-deployment, "${JUDGE_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
-                 --repeats, "${JUDGE_REPEATS}"]
+                 --repeats, "${JUDGE_REPEATS}", --reference, "${ANSWER_ARM}"]
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:

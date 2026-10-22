@@ -29,3 +29,5 @@ class AppServices:
     turn_seconds: float = 120
     facet_concurrency: int = 4
     retrieval_mode: Literal["kg", "search"] = "kg"
+    # Evaluation only (loopback local owner): stream ledger and exposed passages per turn.
+    diagnostics: bool = False

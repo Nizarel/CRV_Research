@@ -38,6 +38,7 @@ class LangChainModels:
 
     async def _invoke(
         self, model: BaseChatModel, schema: type[T], system: str, data: str, budget: Budget,
+        *, role: str,
     ) -> T:
         await budget.reserve(
             model=1, tokens=estimate_tokens(system + data) + self.output_tokens
@@ -47,7 +48,7 @@ class LangChainModels:
             schema, method="json_schema", strict=True,
         ).ainvoke(
             [SystemMessage(content=system), HumanMessage(content=data)],
-            {"callbacks": [UsageRecorder(budget, schema.__name__)]},
+            {"callbacks": [UsageRecorder(budget, role, schema.__name__)]},
         ))
         return schema.model_validate(result)
 
@@ -55,6 +56,7 @@ class LangChainModels:
         return await self._invoke(
             self.planner, QueryPlan, PLAN_RULES,
             json.dumps({"question": question, "history": history[-6:]}, ensure_ascii=False), budget,
+            role="planner",
         )
 
     async def compose(
@@ -77,7 +79,7 @@ class LangChainModels:
                     } for n, c in enumerate(claims)
                 ],
                 "context": context,
-            }, ensure_ascii=False), budget,
+            }, ensure_ascii=False), budget, role="answer",
         )
         evidence_ids = {handle: evidence_id for evidence_id, handle in handles.items()}
         content = re.sub(
@@ -128,7 +130,7 @@ class LangChainModels:
                     } for e in evidence
                 ],
                 "calculation_and_coverage_context": context,
-            }, ensure_ascii=False), budget,
+            }, ensure_ascii=False), budget, role="verifier",
         )
 
     async def calculation(
@@ -143,7 +145,7 @@ class LangChainModels:
             json.dumps({
                 "question": question, "claims": [c.model_dump(mode="json") for c in claims],
             }),
-            budget,
+            budget, role="planner",
         )
 
 
@@ -164,6 +166,6 @@ class LangChainReranker:
                     {"id": key, "title": title, "preview": preview}
                     for key, title, preview in candidates
                 ],
-            }, ensure_ascii=False), budget,
+            }, ensure_ascii=False), budget, role="worker",
         )
         return ranking.ids

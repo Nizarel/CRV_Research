@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { ChatMessage } from '../types'
+import type { Answer, ChatMessage, Evidence } from '../types'
 import { EmptyState } from './EmptyState'
 import { MessageBubble } from './MessageBubble'
 import './ChatWindow.css'
@@ -7,7 +7,7 @@ import './ChatWindow.css'
 interface ChatWindowProps {
   messages: ChatMessage[]
   error: string | null
-  onOpenEvidence: (citation: ChatMessage['citations'][number]) => void
+  onOpenEvidence: (evidence: Evidence, answer: Answer) => void
   onPickExample: (question: string) => void
 }
 

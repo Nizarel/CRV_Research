@@ -12,6 +12,8 @@
   height: 64px;
   width: auto;
   margin-bottom: 18px;
+  /* The JPEG has a white background; blend it into the page. */
+  mix-blend-mode: multiply;
 }
 
 .empty-state h1 {

@@ -6,17 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // FastAPI backend (Phase 3). Override target with a reverse proxy / same-origin
-      // deployment in production (Phase 5) instead of relying on this dev-only proxy.
-      '/chat': 'http://localhost:8000',
-      '/conversations': 'http://localhost:8000',
-      '/images': 'http://localhost:8000',
-      '/documents': 'http://localhost:8000',
-      '/media': 'http://localhost:8000',
-      '/uploads': 'http://localhost:8000',
-      '/feedback': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
-      '/healthz': 'http://localhost:8000',
+      // CRV backend (`crv-agent serve`, loopback). Production uses a same-origin reverse proxy
+      // (see infra/nginx) instead of this dev-only proxy.
+      '/api': 'http://127.0.0.1:8000',
+      '/health': 'http://127.0.0.1:8000',
     },
   },
   test: {

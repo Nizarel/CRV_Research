@@ -141,6 +141,61 @@ async def test_answer_export_matches_shared_score_context_format_without_source_
     assert citation["pages"] == [4] and "content" not in citation
 
 
+def test_step_durations_come_from_consecutive_progress_events() -> None:
+    from crv_agent.evaluation.runner import step_durations
+
+    assert step_durations([
+        ("started", 0.1), ("understand", 8.1), ("research", 20.6), ("reconcile", 20.7),
+        ("answer", 41.2),
+    ]) == {"understand": 8.0, "research": 12.5, "reconcile": 0.1, "answer": 20.5}
+
+
+@pytest.mark.asyncio
+async def test_labelled_arm_exports_answer_exposed_and_ledger_stages_with_role_usage() -> None:
+    from dataclasses import replace
+
+    from crv_agent.domain.answers import AnswerDraft
+    from crv_agent.domain.evidence import Claim
+    from crv_agent.domain.execution import Budget
+
+    class Recording(FakeModels):
+        async def compose(
+            self, question: str, claims: list[Claim], context: str, budget: Budget,
+        ) -> AnswerDraft:
+            await budget.record_tokens(100, 20, role="answer", model="gpt-6.1-sol", reasoning=8)
+            return await super().compose(question, claims, context, budget)
+
+    stages: list[dict[str, object]] = []
+    answers: list[dict[str, object]] = []
+    app = create_app(replace(services(Recording()), diagnostics=True))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+    ) as client:
+        report = await evaluate(client, [GoldenQuestion(
+            id="Q4", question="Recovery?", category="A", split="dev",
+            key_facts=[KeyFact(text="Recovery 87.5 %")],
+        )], emit=answers.append, arm="R1", emit_stages=stages.extend)
+    assert report["arm"] == "R1"
+    assert set(report["step_seconds_p50"]) == {  # type: ignore[arg-type]
+        "understand", "research", "reconcile", "answer",
+    }
+    assert report["role_usage_mean"] == {"answer": {  # type: ignore[comparison-overlap]
+        "calls": 1, "seconds": 0, "input_tokens": 100, "output_tokens": 20,
+        "reasoning_tokens": 8, "cached_tokens": 0, "models": {"gpt-6.1-sol": 1},
+    }}
+    [answer] = answers
+    assert answer["arm"] == "R1" and "diagnostics" not in answer
+    assert answer["role_usage"]["answer"]["calls"] == 1  # type: ignore[index]
+    assert [s["arm"] for s in stages] == ["R1", "R1-EXPOSED", "R1-LEDGER"]
+    exposed, ledger = stages[1], stages[2]
+    assert exposed["contexts"][0]["text"] == SOURCE.content  # type: ignore[index]
+    assert exposed["documents"] == 1 and exposed["passage_mode"] == "split"
+    assert ledger["contexts"] == [{  # type: ignore[comparison-overlap]
+        "id": "claim-0", "content_hash": "", "title": CLAIM.subject, "source": "ledger",
+        "pages": [], "text": f"{CLAIM.text}\n{CLAIM.quote}",
+    }]
+
+
 @pytest.mark.asyncio
 async def test_judge_failures_leave_questions_unmeasured_without_aborting_the_run() -> None:
     from typing import Any

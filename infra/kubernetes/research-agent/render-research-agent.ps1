@@ -22,6 +22,20 @@ param(
     [string] $SearchEndpoint = 'https://gptkb-awmc6icu2kueq.search.windows.net',
     [string] $OpenAiEndpoint = 'https://cog-awmc6icu2kueq.cognitiveservices.azure.com/',
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $ChatDeployment = 'gpt-6.1-sol',
+    # Per-role overrides; empty uses -ChatDeployment.
+    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $PlannerDeployment = '',
+    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $WorkerDeployment = '',
+    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $AnswerDeployment = '',
+    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $VerifierDeployment = '',
+    # Per-role reasoning effort; empty sends none (deployment default).
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $PlannerEffort = '',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $WorkerEffort = '',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $AnswerEffort = '',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $VerifierEffort = '',
+    [ValidateRange(1, 6)] [int] $FacetConcurrency = 4,
+    # answer-eval: scorer arm label of this configuration, and the exposed/ledger funnel arms.
+    [ValidatePattern('^[A-Za-z0-9_-]{1,32}$')] [string] $AnswerArm = 'AGENT',
+    [switch] $Diagnostics,
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $SearchRelease = 'crv-v1',
     [ValidatePattern('^crvkg-[0-9]{8}-[a-f0-9]{12}$')] [string] $KgRelease = 'crvkg-20261021-adb13a21c7da',
     [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
@@ -56,6 +70,7 @@ if ($Split -eq 'heldout') { $evalArgs += ', --allow-heldout' }
 $answerArgs = ''
 foreach ($item in $Only) { $answerArgs += ", --question-id, $item" }
 if ($Split -eq 'heldout') { $answerArgs += ', --allow-heldout' }
+if ($Diagnostics) { $answerArgs += ', --stages-out, /results/stages.jsonl' }
 $zero = 'sha256:' + ('0' * 64)
 $values = [ordered]@{
     AGENT_CLIENT_ID     = $AgentClientId.ToString()
@@ -65,7 +80,18 @@ $values = [ordered]@{
     PG_HOST             = $PgHost
     SEARCH_ENDPOINT     = $SearchEndpoint
     OPENAI_ENDPOINT     = $OpenAiEndpoint
-    CHAT_DEPLOYMENT     = $ChatDeployment
+    PLANNER_DEPLOYMENT  = if ($PlannerDeployment) { $PlannerDeployment } else { $ChatDeployment }
+    WORKER_DEPLOYMENT   = if ($WorkerDeployment) { $WorkerDeployment } else { $ChatDeployment }
+    ANSWER_DEPLOYMENT   = if ($AnswerDeployment) { $AnswerDeployment } else { $ChatDeployment }
+    VERIFIER_DEPLOYMENT = if ($VerifierDeployment) { $VerifierDeployment } else { $ChatDeployment }
+    PLANNER_EFFORT      = $PlannerEffort
+    WORKER_EFFORT       = $WorkerEffort
+    ANSWER_EFFORT       = $AnswerEffort
+    VERIFIER_EFFORT     = $VerifierEffort
+    FACET_CONCURRENCY   = $FacetConcurrency.ToString()
+    ANSWER_ARM          = $AnswerArm
+    EVAL_DIAGNOSTICS    = if ($Diagnostics) { 'true' } else { 'false' }
+    SCORE_CONTEXTS      = if ($Diagnostics) { '/results/stages.jsonl' } else { '/results/answers.jsonl' }
     SEARCH_RELEASE      = $SearchRelease
     KG_RELEASE          = $KgRelease
     ACR_LOGIN_SERVER    = $AcrLoginServer

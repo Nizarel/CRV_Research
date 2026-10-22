@@ -182,8 +182,9 @@ async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_number
         def __init__(self) -> None:
             self.output_tokens, self.answer = 10, None
 
-        async def _invoke(self, model, schema, system, data, budget):  # type: ignore[no-untyped-def]
+        async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
             assert schema is ComposedAnswer and '"number": 1' in data and '"cite": ["S1"]' in data
+            assert role == "answer"
             assert '"evidence_ids"' not in data
             return ComposedAnswer(content="87.5 % [S1] [S9]", claim_numbers=[1, 1, 7, -1],
                                   insufficient=False, conflicts=[])
@@ -210,7 +211,7 @@ async def test_composer_conflicts_need_two_selected_claims_that_differ() -> None
         def __init__(self, conflicts: list[ComposedConflict]) -> None:
             self.output_tokens, self.answer, self.conflicts = 10, None, conflicts
 
-        async def _invoke(self, model, schema, system, data, budget):  # type: ignore[no-untyped-def]
+        async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
             return ComposedAnswer(content="[S1]", claim_numbers=[0, 1, 2], insufficient=False,
                                   conflicts=self.conflicts)
 
@@ -234,6 +235,37 @@ async def test_research_reservations_keep_answer_headroom() -> None:
     with pytest.raises(BudgetExceeded):
         await calls.reserve(model=1, headroom=1)  # two model calls stay for answering
     await calls.reserve(model=2)
+
+
+@pytest.mark.asyncio
+async def test_usage_recorder_aggregates_role_served_model_cache_reasoning_and_latency() -> None:
+    from uuid import uuid4
+
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, LLMResult
+
+    from crv_agent.orchestration.middleware import UsageRecorder
+
+    budget = Budget()
+    recorder = UsageRecorder(budget, "worker", "evidence_extractor")
+    run_id = uuid4()
+    await recorder.on_chat_model_start({}, [[]], run_id=run_id)
+    message = AIMessage(content="{}", usage_metadata={
+        "input_tokens": 100, "output_tokens": 40, "total_tokens": 140,
+        "input_token_details": {"cache_read": 64}, "output_token_details": {"reasoning": 30},
+    }, response_metadata={"model_name": "gpt-5.4-mini-2026-03-17"})
+    await recorder.on_llm_end(
+        LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=run_id,
+    )
+    await budget.record_tokens(10, 5, role="worker", model="gpt-5.4-nano")
+    await budget.record_tokens(1, 1)  # role-less usage still counts toward the turn budget
+    usage = budget.role_usage()["worker"]
+    assert usage["calls"] == 2 and usage["input_tokens"] == 110 and usage["cached_tokens"] == 64
+    assert usage["reasoning_tokens"] == 30
+    assert usage["models"] == {"gpt-5.4-mini-2026-03-17": 1, "gpt-5.4-nano": 1}
+    assert isinstance(usage["seconds"], float) and not recorder.started
+    assert budget.usage()["input_tokens"] == 111
+    assert budget.usage()["cached_tokens"] == 64 and budget.usage()["reasoning_tokens"] == 30
 
 
 def test_answer_numbers_must_come_from_claims_or_deterministic_calculations() -> None:
