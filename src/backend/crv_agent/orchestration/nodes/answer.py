@@ -5,6 +5,7 @@ from langgraph.runtime import Runtime
 
 from crv_agent.domain.answers import Answer, AnswerDraft, Conflict, Verdict
 from crv_agent.domain.evidence import Calculation, Claim
+from crv_agent.domain.execution import BudgetExceeded
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.orchestration.state import ResearchState
 from crv_agent.services.verification import ungrounded_numbers, verify_draft
@@ -48,36 +49,45 @@ async def answer(
         draft: AnswerDraft | None = None
         verdict: Verdict | None = None
         pruned = False
-        for round_number in range(2):
-            draft = await context.models.compose(
-                state["question"], claims, details + "\n" + "\n".join(reasons), context.budget,
-            )
-            reasons = verify_draft(
-                draft, evidence, context.search_release, state["calculations"],
-            )
-            used = {cid for claim in draft.claims for cid in claim.evidence_ids}
-            verdict = await context.models.verify(
-                draft, [item for item in evidence if item.id in used], details, context.budget,
-            )
-            reasons.extend(verdict.reasons if not verdict.supported else [])
-            if not reasons:
-                break
-            if context.repair_mode == "prune" and round_number == 0:
-                candidate = prune_ungrounded(draft, verdict, state["calculations"])
-                if candidate is not None and not verify_draft(
-                    candidate, evidence, context.search_release, state["calculations"],
-                ):
-                    draft, reasons, pruned = candidate, [], True
+        try:
+            for round_number in range(2):
+                composed = await context.models.compose(
+                    state["question"], claims, details + "\n" + "\n".join(reasons),
+                    context.budget,
+                )
+                checked = verify_draft(
+                    composed, evidence, context.search_release, state["calculations"],
+                )
+                used = {cid for claim in composed.claims for cid in claim.evidence_ids}
+                judged = await context.models.verify(
+                    composed, [item for item in evidence if item.id in used], details,
+                    context.budget,
+                )
+                # Draft, verdict and reasons only change together, so a budget stop below
+                # never pairs a new draft with the previous round's verdict.
+                draft, verdict = composed, judged
+                reasons = checked + (judged.reasons if not judged.supported else [])
+                if not reasons:
                     break
-            # Converge on the single repair: drop exactly the claims the verifier rejected,
-            # rather than asking the composer to rewrite a mis-bound claim it cannot edit.
-            rejected = [
-                draft.claims[n] for n in verdict.unsupported_claims
-                if 0 <= n < len(draft.claims)
-            ]
-            claims = [claim for claim in claims if claim not in rejected]
-            if not claims:
-                break
+                if context.repair_mode == "prune" and round_number == 0:
+                    candidate = prune_ungrounded(draft, verdict, state["calculations"])
+                    if candidate is not None and not verify_draft(
+                        candidate, evidence, context.search_release, state["calculations"],
+                    ):
+                        draft, reasons, pruned = candidate, [], True
+                        break
+                # Converge on the single repair: drop exactly the claims the verifier rejected,
+                # rather than asking the composer to rewrite a mis-bound claim it cannot edit.
+                rejected = [
+                    draft.claims[n] for n in verdict.unsupported_claims
+                    if 0 <= n < len(draft.claims)
+                ]
+                claims = [claim for claim in claims if claim not in rejected]
+                if not claims:
+                    break
+        except BudgetExceeded:
+            if draft is None:
+                reasons = ["The turn budget ran out before an answer could be verified."]
         if reasons and draft is not None and verdict is not None:
             candidate = prune_ungrounded(draft, verdict, state["calculations"])
             if candidate is not None and not verify_draft(

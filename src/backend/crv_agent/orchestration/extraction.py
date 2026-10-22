@@ -7,6 +7,7 @@ candidates not already shown. Each passage is sent to the model exactly once, so
 is bounded (about 1-2 model calls per facet) instead of growing with an agent loop.
 """
 
+import asyncio
 import json
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -37,11 +38,11 @@ class ExtractionWorker:
     def __init__(
         self, model: BaseChatModel, retrieval: Retrieval, output_tokens: int,
         policy: EvidencePolicy | None = None, reranker: Reranker | None = None,
-        max_claims: int = 8,
+        max_claims: int = 8, batches: int = 1,
     ) -> None:
         self.model, self.retrieval, self.output_tokens = model, retrieval, output_tokens
         self.policy, self.reranker = policy or EvidencePolicy(), reranker
-        self.max_claims = max_claims
+        self.max_claims, self.batches = max_claims, batches
         self.schema = json.dumps(Extraction.model_json_schema())
 
     async def run(
@@ -75,14 +76,35 @@ class ExtractionWorker:
                     "truncated": span != (0, len(hit.content)),
                     "text": hit.content[span[0]:span[1]],
                 })
-            extraction = await self.extract(question, passages, round_number, claims, budget)
-            claims.extend(extraction.claims[:self.max_claims])
-            gaps.extend(extraction.gaps)
+            # Round-robin batches mix top- and lower-ranked passages; each is extracted in
+            # parallel, so one call no longer has to find every fact in ~50 full chunks.
+            groups = [
+                group for i in range(self.batches) if (group := passages[i::self.batches])
+            ]
+            results = await asyncio.gather(*(
+                self.extract(question, group, round_number, claims, budget) for group in groups
+            ), return_exceptions=True)
+            extractions = [result for result in results if isinstance(result, Extraction)]
+            if not extractions:
+                # Re-raise the original type so BudgetExceeded keeps its facet status.
+                raise next(r for r in results if isinstance(r, BaseException))
+            if len(extractions) < len(results):
+                gaps.append("An extraction batch failed; some retrieved passages were not read.")
+            fresh_claims = {
+                claim.model_dump_json(): claim
+                for extraction in extractions for claim in extraction.claims[:self.max_claims]
+            }
+            claims.extend(fresh_claims.values())
+            # A batch reports aspects missing from its own passages; keep them only when no
+            # batch found anything, otherwise they contradict the other batches' claims.
+            if not fresh_claims or len(extractions) == 1:
+                gaps.extend(gap for extraction in extractions for gap in extraction.gaps)
+            rewrite = next((e.rewrite for e in extractions if e.rewrite), None)
             # Rewrite only when nothing usable was found: a second sequential round costs
             # another full model call on the critical path.
-            if extraction.claims or not extraction.rewrite or round_number + 1 >= MAX_ROUNDS:
+            if fresh_claims or not rewrite or round_number + 1 >= MAX_ROUNDS:
                 break
-            query = extraction.rewrite
+            query = rewrite
         gaps.append("Top-50 candidate search per query; not an exhaustive document review.")
         return WorkerResult(claims=claims, gaps=list(dict.fromkeys(gaps))), list(found.values())
 

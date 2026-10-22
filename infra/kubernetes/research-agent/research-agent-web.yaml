@@ -67,6 +67,9 @@ spec:
             - {name: CRV_ANSWER_REASONING_EFFORT, value: "${ANSWER_EFFORT}"}
             - {name: CRV_VERIFIER_REASONING_EFFORT, value: "${VERIFIER_EFFORT}"}
             - {name: CRV_FACET_CONCURRENCY, value: "${FACET_CONCURRENCY}"}
+            - {name: CRV_WORKER_MAX_CLAIMS, value: "${WORKER_MAX_CLAIMS}"}
+            - {name: CRV_EXTRACT_BATCHES, value: "${EXTRACT_BATCHES}"}
+            - {name: CRV_REPAIR_MODE, value: "${REPAIR_MODE}"}
           # Exec probes: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:
             exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=8)"]}

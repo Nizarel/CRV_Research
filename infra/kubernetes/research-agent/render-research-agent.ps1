@@ -34,6 +34,7 @@ param(
     [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $VerifierEffort = 'low',
     [ValidateRange(1, 6)] [int] $FacetConcurrency = 4,
     [ValidateRange(1, 24)] [int] $WorkerMaxClaims = 8,
+    [ValidateRange(1, 4)] [int] $ExtractBatches = 1,
     [ValidateSet('recompose', 'prune')] [string] $RepairMode = 'recompose',
     # answer-eval: scorer arm label of this configuration, and the exposed/ledger funnel arms.
     [ValidatePattern('^[A-Za-z0-9_-]{1,32}$')] [string] $AnswerArm = 'AGENT',
@@ -94,6 +95,7 @@ $values = [ordered]@{
     VERIFIER_EFFORT     = $VerifierEffort
     FACET_CONCURRENCY   = $FacetConcurrency.ToString()
     WORKER_MAX_CLAIMS   = $WorkerMaxClaims.ToString()
+    EXTRACT_BATCHES     = $ExtractBatches.ToString()
     REPAIR_MODE         = $RepairMode
     ANSWER_ARM          = $AnswerArm
     EVAL_DIAGNOSTICS    = if ($Diagnostics) { 'true' } else { 'false' }

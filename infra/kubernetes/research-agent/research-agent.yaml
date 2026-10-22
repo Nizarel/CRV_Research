@@ -270,6 +270,7 @@ spec:
             - {name: CRV_VERIFIER_REASONING_EFFORT, value: "${VERIFIER_EFFORT}"}
             - {name: CRV_FACET_CONCURRENCY, value: "${FACET_CONCURRENCY}"}
             - {name: CRV_WORKER_MAX_CLAIMS, value: "${WORKER_MAX_CLAIMS}"}
+            - {name: CRV_EXTRACT_BATCHES, value: "${EXTRACT_BATCHES}"}
             - {name: CRV_REPAIR_MODE, value: "${REPAIR_MODE}"}
           # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:

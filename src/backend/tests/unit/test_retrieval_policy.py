@@ -195,7 +195,9 @@ async def test_extraction_claim_cap_is_configurable_and_enforced() -> None:
 
         async def ainvoke(self, messages: list[object], config: object = None) -> Extraction:
             self.data = json.loads(messages[1].content)  # type: ignore[attr-defined]
-            return Extraction(claims=[CLAIM] * 5, gaps=[], rewrite=None)
+            return Extraction(claims=[
+                CLAIM.model_copy(update={"text": f"Recovery claim {n}"}) for n in range(5)
+            ], gaps=[], rewrite=None)
 
     model = Model()
     worker = ExtractionWorker(
@@ -204,6 +206,64 @@ async def test_extraction_claim_cap_is_configurable_and_enforced() -> None:
     result, _ = await worker.run("Recovery?", "r1", [], Budget())
     assert model.data["max_claims"] == 3
     assert len(result.claims) == 3
+
+
+@pytest.mark.asyncio
+async def test_batched_extraction_splits_passages_and_merges_claims() -> None:
+    from crv_agent.orchestration.extraction import Extraction, ExtractionWorker
+
+    class Model:
+        def __init__(self) -> None:
+            self.batches: list[list[str]] = []
+
+        def with_structured_output(self, *args: object, **kwargs: object) -> "Model":
+            return self
+
+        async def ainvoke(self, messages: list[object], config: object = None) -> Extraction:
+            data = json.loads(messages[1].content)  # type: ignore[attr-defined]
+            self.batches.append([p["id"] for p in data["passages"]])
+            return Extraction(claims=[CLAIM], gaps=["Batch lacks the 2019 value"], rewrite=None)
+
+    model = Model()
+    worker = ExtractionWorker(
+        model, Retrieval(Search()), 1024, batches=2,  # type: ignore[arg-type]
+    )
+    result, shown = await worker.run("Recovery?", "r1", [], Budget())
+    first, second = model.batches
+    assert not set(first) & set(second)
+    assert sorted(first + second) == sorted(e.id for e in shown)
+    assert result.claims == [CLAIM]  # duplicates across batches are merged
+    assert not any("2019" in gap for gap in result.gaps)
+
+
+@pytest.mark.asyncio
+async def test_failed_extraction_batch_keeps_the_other_batches_claims() -> None:
+    from crv_agent.orchestration.extraction import Extraction, ExtractionWorker
+
+    class Model:
+        calls = 0
+        fail_all = False
+
+        def with_structured_output(self, *args: object, **kwargs: object) -> "Model":
+            return self
+
+        async def ainvoke(self, messages: list[object], config: object = None) -> Extraction:
+            Model.calls += 1
+            if Model.fail_all or Model.calls == 1:
+                raise BudgetExceeded("model-call")
+            await asyncio.sleep(0)
+            return Extraction(claims=[CLAIM], gaps=[], rewrite=None)
+
+    worker = ExtractionWorker(
+        Model(), Retrieval(Search()), 1024, batches=2,  # type: ignore[arg-type]
+    )
+    result, _ = await worker.run("Recovery?", "r1", [], Budget())
+    assert result.claims == [CLAIM]
+    assert any("batch failed" in gap for gap in result.gaps)
+
+    Model.fail_all = True  # every batch fails: the original exception type reaches the facet
+    with pytest.raises(BudgetExceeded):
+        await worker.run("Recovery?", "r1", [], Budget())
 
 
 @pytest.mark.asyncio

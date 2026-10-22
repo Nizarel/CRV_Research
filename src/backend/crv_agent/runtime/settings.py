@@ -34,12 +34,15 @@ class Settings(BaseSettings):
     worker_reasoning_effort: ReasoningEffort | None = None
     answer_reasoning_effort: ReasoningEffort | None = None
     verifier_reasoning_effort: ReasoningEffort | None = None
-    output_tokens: int = Field(default=2048, ge=256, le=8192)
+    # Planner/answer/verifier cap; reasoning tokens count against it.
+    output_tokens: int = Field(default=4096, ge=256, le=8192)
     worker_output_tokens: int = Field(default=8192, ge=1024, le=32768)
     # extract: bounded retrieve-then-extract (default); agent: LangChain tool-loop worker.
     worker_mode: Literal["extract", "agent"] = "extract"
     # Claims kept per facet and extraction round (extract mode).
     worker_max_claims: int = Field(default=8, ge=1, le=24)
+    # Parallel extraction calls per facet over round-robin passage batches (extract mode).
+    extract_batches: int = Field(default=1, ge=1, le=4)
     # prune: after a failed verification, delete rejected text before composing a second draft.
     repair_mode: Literal["recompose", "prune"] = "recompose"
     facet_concurrency: int = Field(default=4, ge=1, le=6)

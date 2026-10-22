@@ -452,6 +452,47 @@ async def test_prune_repair_mode_skips_the_second_compose_and_verify(
     assert answer.claims == [CLAIM]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_at", [1, 2])
+async def test_budget_stop_during_answer_keeps_the_last_verified_draft(stop_at: int) -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.domain.execution import BudgetExceeded
+
+    unsupported = "It is the best result ever recorded."
+
+    class Models(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.compositions += 1
+            if self.compositions == stop_at:
+                raise BudgetExceeded("Turn execution budget exhausted")
+            return AnswerDraft(
+                content=f"Recovery was 87.5 % [S1]. {unsupported}", claims=claims[:1],
+                insufficient=False,
+            )
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            return Verdict(
+                supported=False, reasons=["unsupported superlative"],
+                unsupported_sentences=[unsupported],
+            )
+
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=Models(), knowledge=FakeKnowledge(), worker=FakeWorker(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    answer = result["answer"]
+    if stop_at == 1:
+        assert answer.status == "insufficient_evidence" and not answer.claims
+        assert any("budget" in reason for reason in answer.reasons)
+    else:  # round 1 was verified; its pruned draft survives the stop in round 2
+        assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
+        assert answer.claims == [CLAIM]
+
+
 def test_prune_removes_only_verbatim_unsupported_sentences_and_keeps_cited_claims() -> None:
     from crv_agent.domain.answers import AnswerDraft, Verdict
     from crv_agent.orchestration.nodes.answer import prune

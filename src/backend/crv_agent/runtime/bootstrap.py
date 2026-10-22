@@ -54,7 +54,7 @@ def application(settings: Settings) -> FastAPI:
             retrieval = Retrieval(infra.search)
             worker: Worker = ExtractionWorker(
                 models["worker"], retrieval, settings.worker_output_tokens, policy, reranker,
-                settings.worker_max_claims,
+                settings.worker_max_claims, settings.extract_batches,
             ) if settings.worker_mode == "extract" else EvidenceWorker(
                 models["worker"], retrieval, settings.worker_output_tokens, policy, reranker,
             )
