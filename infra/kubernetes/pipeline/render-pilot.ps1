@@ -7,7 +7,7 @@ Render one CRV pilot operations job (crv-pilot-jobs.yaml) and optionally apply i
 Shared objects (ops service account, converter service account, work disk, isolation policy and
 pilot list) are always rendered; exactly one job is selected with -Job, so stages run in order:
 verify-raw, dbsetup, index (setup, dry runs by default) then stage -> convert -> intake ->
-(review) -> publish.
+(review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-release.
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest.
 
@@ -17,7 +17,7 @@ Images are referenced only by digest.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-release', 'golden-eval')] [string] $Job,
     [Parameter(Mandatory)] [guid] $OpsClientId,
     [Parameter(Mandatory)] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $ConverterDigest = '',
@@ -41,6 +41,13 @@ param(
     [ValidateRange(8, 512)] [int] $WorkGib = 64,
     [ValidateRange(900, 86400)] [int] $DeadlineSeconds = 7200,
     [switch] $AllBlobs,
+    [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $KgPolicy = 'crv-full-v1',
+    [ValidatePattern('^[a-z][a-z0-9-]{0,30}$')] [string] $KgEnvironment = 'dev',
+    [switch] $KgDryRun,
+    [string] $WorkerIdentityName = 'id-crv-pipeline-worker',
+    [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $EvalRelease = 'crv-v1',
+    [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $JudgeDeployment = 'gpt-5.4-mini',
+    [string] $GoldenPath = (Join-Path $PSScriptRoot '../../../golden/crv_golden.jsonl'),
     [switch] $DbApply,
     [switch] $IndexApply,
     [string] $IndexSchema = (Join-Path $PSScriptRoot '../../search/crv-evidence-index.json'),
@@ -88,6 +95,12 @@ $values = [ordered]@{
     RUN_ID                = $RunId
     DB_ARGS               = if ($DbApply) { ', --apply' } else { '' }
     INDEX_ARGS            = if ($IndexApply) { ', --apply' } else { '' }
+    KG_POLICY             = $KgPolicy
+    KG_ENVIRONMENT        = $KgEnvironment
+    KG_ARGS               = if ($KgDryRun) { ', --dry-run' } else { '' }
+    WORKER_IDENTITY_NAME  = $WorkerIdentityName
+    EVAL_RELEASE          = $EvalRelease
+    JUDGE_DEPLOYMENT      = $JudgeDeployment
 }
 foreach ($name in 'PRINCIPAL_COORDINATOR', 'PRINCIPAL_WORKER', 'PRINCIPAL_OPS') {
     if ($values[$name] -notmatch '^[a-z][a-z0-9-]{2,62}=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
@@ -117,6 +130,15 @@ if ($Job -eq 'index') {
         apiVersion = 'v1'; kind = 'ConfigMap'
         metadata = [ordered]@{ name = 'crv-search-schema'; namespace = 'crv' }
         data = [ordered]@{ 'crv-evidence-index.json' = $schema }
+    }
+    $rendered += "`n---`n" + ($configMap | ConvertTo-Json -Depth 5)
+}
+if ($Job -eq 'golden-eval') {
+    $golden = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $GoldenPath).Path, [Text.UTF8Encoding]::new($false))
+    $configMap = [ordered]@{
+        apiVersion = 'v1'; kind = 'ConfigMap'
+        metadata = [ordered]@{ name = 'crv-golden'; namespace = 'crv' }
+        data = [ordered]@{ 'crv_golden.jsonl' = $golden }
     }
     $rendered += "`n---`n" + ($configMap | ConvertTo-Json -Depth 5)
 }

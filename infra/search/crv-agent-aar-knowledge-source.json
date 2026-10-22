@@ -1,0 +1,19 @@
+{
+  "name": "crv-evidence-ks",
+  "kind": "searchIndex",
+  "description": "Research-agent AAR comparator over crv-evidence-v1. Evaluation only; queries must add filterAddOn release_id eq '<release>'.",
+  "searchIndexParameters": {
+    "searchIndexName": "crv-evidence-v1",
+    "semanticConfigurationName": "crv-evidence-semantic",
+    "sourceDataFields": [
+      { "name": "projection_id" },
+      { "name": "release_id" },
+      { "name": "chunk_id" },
+      { "name": "content_hash" },
+      { "name": "title" },
+      { "name": "source_uri" },
+      { "name": "original_page_numbers" },
+      { "name": "content" }
+    ]
+  }
+}

@@ -5,7 +5,8 @@
 // - Least-privilege workload identities:
 //     coordinator: sends outbox events to the pool queues;
 //     worker:      receives from the pool queues, reads published sources, writes artifacts;
-//     ops:         short jobs that stage from the raw copy, publish sources and create the index.
+//     ops:         short jobs that stage from the raw copy, publish sources and create the index,
+//                  and the knowledge-graph build (reads evidence artifacts, writes crv_kg).
 // - Phase 2 (only when the account/service names are set): the worker calls Document
 //   Intelligence and Azure OpenAI embeddings on their accounts and writes the shadow
 //   evidence index. Search RBAC cannot target a single index from ARM, so the assignment is on
@@ -276,6 +277,17 @@ resource opsSearchAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = i
   name: guid(search.id, ops.id, searchServiceContributorRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchServiceContributorRoleId)
+    principalId: ops.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// kg-build reads evidence manifests and units (page-1/2 cover blocks); it never writes them.
+resource opsArtifactReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useOps) {
+  scope: artifactContainer
+  name: guid(artifactContainer.id, ops.id, storageBlobDataReaderRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataReaderRoleId)
     principalId: ops.properties.principalId
     principalType: 'ServicePrincipal'
   }

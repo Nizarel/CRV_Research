@@ -1,4 +1,4 @@
-"""The agent's kg login: execute-only, with pinned session defaults."""
+"""The agent's crv_kg login: execute-only, with pinned session defaults."""
 
 from __future__ import annotations
 
@@ -32,14 +32,14 @@ async def test_grant_reader_makes_an_execute_only_login(pg_pool: Any) -> None:
             await connection.execute(f'DROP ROLE "{LOGIN}"')
     assert first == again
     assert first["session_defaults"] == {"role": True, "read_only": True, "statement_timeout": True}
-    assert (first["can_read_context"], first["can_select_tables"], first["elevated"]) == (
+    assert (first["can_read_documents"], first["can_select_tables"], first["elevated"]) == (
         True,
         False,
         False,
     )
     assert sorted(settings) == [
         "default_transaction_read_only=on",
-        "role=tizert_kg_reader",
+        "role=crv_kg_reader",
         "statement_timeout=2000",
     ]
 

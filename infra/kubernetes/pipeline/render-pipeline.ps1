@@ -45,6 +45,8 @@ param(
     [string] $PoliciesPath = (Join-Path $PSScriptRoot '../../content-understanding/crv-policies.json'),
     [ValidatePattern('^$|^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $RoutingPolicy = 'crv-layout-v1',
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $SearchReleaseId = 'crv-pilot-v1',
+    [ValidateRange(1, 8)] [int] $IoConcurrency = 1,
+    [ValidateRange(1, 32)] [int] $IoMaxReplicas = 8,
     [string] $BillingPath = '',
     [hashtable] $AccountKeySecrets = @{},
     [ValidatePattern('^$|^[A-Za-z0-9-]{3,24}$')] [string] $KeyVaultName = '',
@@ -83,6 +85,8 @@ $values = @{
     CU_EST_TOKENS_PER_PAGE                = $CuEstTokensPerPage.ToString()
     ROUTING_POLICY                        = $RoutingPolicy
     SEARCH_RELEASE_ID                     = $SearchReleaseId
+    IO_CONCURRENCY                        = $IoConcurrency.ToString()
+    IO_MAX_REPLICAS                       = $IoMaxReplicas.ToString()
 }
 
 $text = Get-Content -LiteralPath $template -Raw

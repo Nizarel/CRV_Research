@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "12865654839625329691"
+      "templateHash": "7760725308630934647"
     }
   },
   "parameters": {
@@ -20726,7 +20726,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "4698843511272691164"
+              "templateHash": "18388289010447153440"
             },
             "description": "Creates an Azure Database for PostgreSQL Flexible Server with Microsoft Entra-only authentication, private-endpoint-ready networking, and one or more databases. Used as the ingestion catalog/state store and the agent memory backend (LangGraph Postgres checkpointer + store with pgvector)."
           },
@@ -20816,11 +20816,18 @@
               "metadata": {
                 "description": "Microsoft Entra administrators: array of objects with objectId, principalName, and principalType."
               }
+            },
+            "sharedPreloadLibraries": {
+              "type": "string",
+              "defaultValue": "pg_cron,pg_stat_statements,age",
+              "metadata": {
+                "description": "Libraries preloaded at server start (restart on change). Apache AGE must be preloaded on Azure; keep the server defaults alongside it."
+              }
             }
           },
           "variables": {
             "tenantId": "[tenant().tenantId]",
-            "allowedExtensions": "vector,pg_trgm,unaccent,pg_stat_statements"
+            "allowedExtensions": "vector,pg_trgm,unaccent,pg_stat_statements,age"
           },
           "resources": [
             {
@@ -20866,6 +20873,19 @@
                 "source": "user-override"
               },
               "dependsOn": [
+                "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DBforPostgreSQL/flexibleServers/configurations",
+              "apiVersion": "2024-08-01",
+              "name": "[format('{0}/{1}', parameters('name'), 'shared_preload_libraries')]",
+              "properties": {
+                "value": "[parameters('sharedPreloadLibraries')]",
+                "source": "user-override"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/configurations', parameters('name'), 'azure.extensions')]",
                 "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', parameters('name'))]"
               ]
             },

@@ -324,6 +324,24 @@ The same jobs run the full corpus. A few settings differ:
 `crv-full-v1` uses the same Document Intelligence layout settings as the pilot's
 `crv-layout-v1`, which it supersedes.
 
+For bulk runs, render with `-IoConcurrency 3 -IoMaxReplicas 12` and set
+PostgreSQL `max_connections` to at least 150. The I/O pool handles DI submission,
+embedding and Search verification. That work waits on remote services rather
+than using CPU, so higher parallelism cleared the projection backlog about six
+times faster. Expect HTTP 429 throttling from embeddings at 200K TPM; 600K TPM
+was used during the run and set back to 200K afterwards.
+
+Results of the 2026-10-21 run:
+- **Inputs:** 1,967 blobs, giving 1,929 distinct contents, and 46,584 DI pages,
+  exactly as predicted.
+- **DI spend:** $465.84. This subscription paid $260.00 and `manadry` paid $205.84.
+- **Output:** 145,855 rows in Search release `crv-v1`; 96K of them carry a
+  `printed_header` document code.
+
+The subscription has an external automatic shutdown, around 01:00 local time,
+that stops both AKS and PostgreSQL. After restarting both, the ledger resumes
+without redoing billed pages.
+
 ### Additional Document Intelligence account (full run)
 
 DI spend fills this subscription's `budget_usd` first. After that, it continues
@@ -353,6 +371,172 @@ subscription and $260 on `manadry`, with 8 in-flight requests each. It has this 
 Render with `-BillingPath billing.json -AccountKeySecrets @{ 'di-full' = '<secret-name>' }
 -KeyVaultName kv-awmc6icu2kueq -TenantId <tenant>`. The key is sent only to that
 account's endpoint. The endpoint must be reachable from AKS egress.
+
+## Knowledge graph (KG-1, deterministic tier)
+
+The graph is built from what ingestion recorded, with no model calls:
+- file placements and lineage (`ingest.source_snapshot`);
+- file names: genre, `MM-YYYY` dates, revisions, chapters and annexes;
+- report codes in page headers, on the cover and in file names;
+- CRV cover fields (Emetteur, Projet, Titre, Objet, Domaine, Attribué à) read from page-1/2 DI evidence.
+
+Every vertex and edge carries evidence and the scope keys of that evidence. Sites and organisations come from a **provisional gazetteer**, [crv-gazetteer.json](src/ingestion/ingest_pipeline/data/crv-gazetteer.json). Its review sheet is [Docs/crv-gazetteer-review.csv](Docs/crv-gazetteer-review.csv). Edges derived from it stay `candidate` until experts approve them. The design is in [KNOWLEDGE_GRAPH_DESIGN.md](Docs/KNOWLEDGE_GRAPH_DESIGN.md) §9.1.
+
+1. **Enable Apache AGE once.**
+   - Add `age` to the server's `azure.extensions` and `shared_preload_libraries` parameters. These are in the [Bicep](infra/core/database/postgresql-flexible-server.bicep), and changing them restarts the server.
+   - Run `-Job dbsetup -DbApply`. It applies migrations 0015–0017 and grants the ops identity `crv_kg_writer` and `crv_kg_release`.
+2. **Build.** Run `-Job kg-build -KgDryRun` first and review the coverage report in the job log. Then run `-Job kg-build` to record the run. Re-running on unchanged inputs records nothing. A changed build supersedes facts it no longer reports.
+3. **Release.** `-Job kg-release` freezes the projection, loads AGE graph `crv_research_<hash>`, activates it for `-KgEnvironment` (default `dev`) and prints a `kg-check` smoke test.
+4. **Agent access.** Use `kg-grant-reader --login <identity> --object-id <oid>`. The login gets EXECUTE only on the release-pinned, scope-filtered functions:
+   - `crv_kg.active_release`, `resolve`, `entity`, `neighbors`;
+   - `find_documents` and `document_lineage`.
+
+## Golden-set retrieval evaluation
+
+[golden/crv_golden.jsonl](golden/crv_golden.jsonl) holds the 76 golden questions with categories, atomic key facts and deterministic anchors. Regenerate it with `python -m ingest_pipeline.tools.golden convert --xlsx Docs/QA_REMINEX.xlsx --out golden/crv_golden.jsonl`.
+
+`-Job golden-eval` runs as the worker identity. That identity needs `db-bootstrap --kg-reader`, which the `dbsetup` job passes. The job queries release `-EvalRelease` (default `crv-v1`) in four modes: `bm25`, `hybrid`, `semantic`, and `kg` (steered by `crv_kg.find_documents`).
+
+It scores two things:
+- anchor recall at 10/20/50;
+- LLM-judged key-fact recall at 10, using `-JudgeDeployment` (default `gpt-5.4-mini`; raise its TPM for the run).
+
+It prints a table and the full report between `GOLDEN REPORT` markers. The baseline is in [Docs/evaluation](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md).
+
+## Research backend (development/evaluation)
+
+[src/backend](src/backend) is a separate FastAPI application using LangChain 1.4.5
+and LangGraph 1.2.15. LangChain 1.4.5 was selected because the configured package
+feed did not yet provide 1.4.6. It reads the existing evidence index and KG-1;
+no corpus reindex, external connector, frontend or new model deployment is required.
+
+The package separates domain contracts, ports, research services, graph nodes,
+read-only tools, infrastructure adapters, API and runtime composition. Research
+workers have bounded tool/model calls. Scientific claims retain original source
+quotations and locators; derived values use deterministic decimal calculations.
+Candidate aliases, conflicts and incomplete coverage remain explicit.
+
+Retrieval uses semantic hybrid candidates at depth 50, with soft rank penalties
+matching the [retrieval baseline](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md):
+10 positions for filename-inferred periodic summaries and 20 for a document's
+third/later chunk. These are demotions, not exclusions or hard chunk caps.
+Each facet worker receives a deterministic evidence pack: the first 16 candidates
+(exact report-code matches promoted, otherwise the focused order) as 1,200-character
+query-focused excerpts, plus previews of the other 34. `read_evidence` reads up to
+three batches of four candidates (8,000 characters each). Evidence records the exact
+character spans shown to the model; claims must quote those spans, and the verifier
+receives only them. Citations keep the complete chunk. Truncation and top-k coverage
+remain explicit. Summary roles are filename inferences, not validated KG facts.
+
+Pre-call token reservations estimate UTF-8 bytes ÷ 3. Provider-reported usage
+enforces the hard `CRV_TURN_TOKENS` limit, now 300,000 by default. A local
+50-candidate payload measured about 12k estimated tokens per search and 5k per
+four-chunk read, roughly 20–70k per facet. Facets beyond the budget report gaps.
+Cost, latency and recall effects need live measurement.
+
+KG boosts use Site, ReportCode and **approved** Organisation entities, never
+Projects, while preserving an unrestricted semantic Search leg. Catalogue
+navigation remains broad. KG `content_hash` is passed unchanged to Search,
+including converted PDF hashes; original hashes in `converted_from` are lineage,
+not replacement search keys. The measured focused-semantic gain is modest and
+does not establish a quality improvement for this agent without live evaluation.
+
+**Evidence ACL implementation is intentionally deferred.** This is not a
+shared/production serving release. No public ingress is provided and the
+knowledge source remains deny-all. Entra authentication protects conversation
+ownership, not document permissions. The optional local identity is allowed by
+the CLI only on loopback; never expose a locally configured app via another server.
+
+```powershell
+python -m pip install -e ".\src\backend[dev]"
+python -m crv_agent --help
+```
+
+Configure the variables described in [the environment example](src/backend/.env.example);
+it is a reference, not an automatically loaded secrets file. Supply actual CRV
+deployment names for planner, worker, answer and verifier roles (they may share a
+deployment). Windows native dependencies may require an x64 Python interpreter.
+The CLI selects a psycopg-compatible event loop on Windows.
+
+Before serving:
+
+1. Apply ingestion migrations through `0019_crv_kg_document_page` using the
+   existing migration runner. This adds release-pinned, scope-filtered keyset
+   pagination without changing the existing `find_documents` contract. Its grant
+   flows through `crv_kg_reader`; keep the agent login execute-only.
+2. Provision a **separate** `crv-agent-memory` database
+   ([crv-agent-memory-db.bicep](infra/crv-agent-memory-db.bicep), database only on
+   the existing server). As the migration identity run `crv-agent setup-memory`
+   once, then `crv-agent grant-memory-runtime --login <runtime-login>`. The grant
+   is DML-only on the agent/checkpoint tables and fails if the login can CREATE.
+   Startup never runs DDL.
+3. Use the dedicated runtime identity
+   ([crv-research-agent-identity.bicep](infra/crv-research-agent-identity.bicep)):
+   Search Index Data Reader and Cognitive Services OpenAI User only, federated to
+   `crv/crv-research-agent`. Its PostgreSQL login comes from
+   `crv-pipeline kg-grant-reader` (execute-only `crv_kg_reader`). PostgreSQL TLS is
+   `verify-full`; `CRV_POSTGRES_ROOT_CERT` accepts `system` or an approved CA file.
+4. `crv-agent check [--models]` verifies Search, the KG release, memory tables and
+   least privilege (KG table SELECT and memory DDL must be denied); it exits
+   non-zero on failure.
+5. Run `crv-agent serve` for loopback development. The
+   [backend Dockerfile](src/backend/Dockerfile) is available for internal packaging
+   (`--build-arg PIP_INDEX_URL=...` for an approved mirror; TLS stays verified).
+
+On the private AKS cluster,
+[render-research-agent.ps1](infra/kubernetes/research-agent/render-research-agent.ps1)
+renders one job at a time (`kg-login`, `memory-setup`, `memory-grant`,
+`agent-check`, `retrieval-eval`) with digest-pinned images and applies it through
+`az aks command invoke`. No Service or ingress is created.
+
+The semantic ranker must be on the Standard billing plan: on the Free plan,
+requests fail with a billing error once the monthly allowance is consumed.
+
+The API exposes owned conversations, `/api/v1/chat`, feedback and health.
+Chat requires UUID `thread_id` and `request_id` plus a message. SSE streams
+progress, then a verified, persisted `answer`, then `done`; failures emit `error`,
+never draft answer tokens. Reusing a request ID replays its recorded status/result.
+Client disconnects cancel work. A lost pod's stale run is marked failed on a later
+request rather than silently rerun. Conversation history survives restarts;
+there is no cross-thread personal memory.
+
+```powershell
+python -m pytest .\src\backend\tests -q
+python -m pytest .\src\backend\tests\integration -m integration -q
+python -m ruff check .\src\backend
+python -m mypy --config-file .\src\backend\pyproject.toml .\src\backend\crv_agent
+# Run lint-imports from src\backend.
+```
+
+Integration tests start disposable local PostgreSQL containers. The answer
+evaluator is `python -m crv_agent.evaluation.cli --help`; it requires
+`--confirm-live` before calling a backend and an additional `--allow-heldout` for
+the held-out split. `--judge` scores atomic fact recall; `--gate` fails on missing
+or inadequate metrics. Missing expected sources/numeric tolerances are reported
+as unmeasured, never passed. Proposed sources in the expert review sheet are not
+ground truth until confirmed. Set server-side `CRV_RETRIEVAL_MODE=search` for the
+Search-only ablation and `kg` for KG-steered retrieval; compare identical releases.
+Progress latency and first **verified answer** latency are measured separately.
+These tools do not establish scientific accuracy or production readiness by themselves.
+
+Retrieval-depth experiments use `python -m crv_agent.evaluation.retrieval`. It emits
+the exact context each arm would expose, without judging:
+
+- `A0`/`A1` reproduce golden-eval `semantic`/`semantic_focused` at 10.
+- Pack variants `P12`/`P16`/`P24`/`P16W2000`, caption-anchored `CAP` and LLM-reranked
+  `LLM` are single-query arms.
+- `DEC` is planner decomposition; `KGB` adds the precise KG boost.
+- `CEIL` is the top-50 full-chunk ceiling.
+- `AAR` is the Azure AI Search agentic-retrieval comparator: knowledge source and
+  knowledge base in [infra/search](infra/search), minimal effort with an enforced
+  release filter.
+
+`python -m ingest_pipeline.tools.golden score` scores those contexts with the
+golden-eval anchors and judge. The judge is repeated, with a majority vote per fact,
+and every arm gets paired bootstrap confidence intervals. Tune on `dev`; the
+held-out split needs `--allow-heldout` and is run once for the frozen winner. The
+winning configuration becomes the runtime default through `CRV_EVIDENCE_PACK_SIZE`,
+`CRV_EVIDENCE_EXCERPT_CHARACTERS`, `CRV_EVIDENCE_ANCHOR` and `CRV_EVIDENCE_RERANK`.
 
 ## Pilot acceptance checks
 

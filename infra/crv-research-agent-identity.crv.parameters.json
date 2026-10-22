@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "oidcIssuerUrl": {
+      "value": "https://southcentralus.oic.prod-aks.azure.com/16b3c013-d300-468d-ac64-7eda0820b6d3/2f803b46-c536-48b1-ae5f-4b91bcd456a2/"
+    },
+    "searchServiceName": { "value": "gptkb-awmc6icu2kueq" },
+    "openAiAccountName": { "value": "cog-awmc6icu2kueq" },
+    "tags": { "value": { "workload": "crv-research-agent", "environment": "dev" } }
+  }
+}

@@ -1,6 +1,37 @@
 # CRV Research Assistant — Agentic Layer Architecture (proposal)
 
-Status: **proposal**, October 2026. Builds on the ingestion pipeline in
+Status: **development backend implemented; broader architecture remains a proposal**.
+[src/backend](../src/backend) implements bounded research orchestration, owned
+PostgreSQL conversation persistence, verified-answer SSE, KG/Search retrieval,
+deterministic calculations and CRV evaluation. Runtime versions are LangChain
+1.4.5, LangGraph 1.2.15 and langchain-core 1.6.10, resolved from the available
+package feed. The version discussion below records the original proposal.
+
+The implementation uses the existing `crv-evidence-v1` schema, not the proposed
+v2/doc-card index. KG-2 scientific-result extraction, external literature,
+vision, uploads and cross-thread memory are not implemented. Evidence ACLs
+are explicitly deferred; authentication/owned threads do not authorize corpus
+access for shared deployment. No public ingress or production promotion is included.
+Paid live evaluation and reviewed expected-source mappings remain release gates.
+
+Implemented retrieval follows the
+[measured baseline](evaluation/golden-retrieval-baseline-2026-10-21.md):
+50 semantic-hybrid candidates per leg, soft periodic-summary (+10 positions)
+and third/later-document-chunk (+20) penalties. Each facet gets 16 query-focused
+excerpts (report-code matches promoted) plus 34 previews, with bounded full reads.
+Secondary-summary labels are filename-derived, matching
+the baseline heuristic; the runtime does not require a new KG metadata migration.
+Evidence records the exact character spans shown to the model; only those spans
+can ground claims or reach the verifier. Multi-part questions are decomposed
+into at most six facets within a shared, measured-usage turn budget.
+KG steering is a boost, never a corpus-wide restriction: Site, ReportCode and
+approved Organisation only, with broad entity navigation retained for catalogue
+requests. Document hashes are identical between KG and Search, including converted
+PDF hashes; `converted_from` records original lineage, not a remapping requirement.
+No overall quality improvement is claimed without live agent evaluation.
+Expert-proposed expected sources remain unconfirmed review candidates.
+
+The proposal builds on the ingestion pipeline in
 [src/ingestion](../src/ingestion) and the `crv-evidence-v1` index
 ([crv-evidence-index.json](../infra/search/crv-evidence-index.json)).
 Stack: LangGraph 1.2 / LangChain 1.4 on Azure (Azure OpenAI via Foundry, Azure AI Search,

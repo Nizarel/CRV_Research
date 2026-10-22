@@ -36,8 +36,12 @@ param databaseNames array = []
 @description('Microsoft Entra administrators: array of objects with objectId, principalName, and principalType.')
 param administrators array = []
 
+@description('Libraries preloaded at server start (restart on change). Apache AGE must be preloaded on Azure; keep the server defaults alongside it.')
+param sharedPreloadLibraries string = 'pg_cron,pg_stat_statements,age'
+
 var tenantId = tenant().tenantId
-var allowedExtensions = 'vector,pg_trgm,unaccent,pg_stat_statements'
+// age: Apache AGE graph projection of the CRV knowledge graph (crv_kg, migration 0016).
+var allowedExtensions = 'vector,pg_trgm,unaccent,pg_stat_statements,age'
 
 resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: name
@@ -79,6 +83,19 @@ resource extensionAllowlist 'Microsoft.DBforPostgreSQL/flexibleServers/configura
     value: allowedExtensions
     source: 'user-override'
   }
+}
+
+// Server configurations are applied one at a time.
+resource preloadLibraries 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: server
+  name: 'shared_preload_libraries'
+  properties: {
+    value: sharedPreloadLibraries
+    source: 'user-override'
+  }
+  dependsOn: [
+    extensionAllowlist
+  ]
 }
 
 // Microsoft Entra administrators (required at creation because password auth is disabled).

@@ -1,0 +1,71 @@
+from decimal import Decimal
+from typing import Literal
+
+from crv_agent.domain.planning import Contract
+
+
+class Evidence(Contract):
+    id: str
+    release: str
+    chunk_id: str
+    content_hash: str
+    title: str
+    content: str
+    source_uri: str
+    # Original corpus path (source_uri is content-addressed); used for display and genre.
+    source_path: str = ""
+    document_code: str | None = None
+    pages: list[int]
+    locators: list[str]
+    original_sources: list[str]
+    generated: bool
+    document_class: str
+    citation_basis: str = "source"
+    extraction_route: str = "unknown"
+    original_content_hashes: list[str] = []
+    source_role: Literal["unclassified", "secondary_summary"] = "unclassified"
+    source_role_basis: Literal["filename"] | None = None
+    # Semantic-ranker extractive caption (derived, never quotable; used only to place excerpts).
+    caption: str | None = None
+    # Character spans shown to a model; None means the complete content was supplied.
+    exposed: list[tuple[int, int]] | None = None
+
+
+class Claim(Contract):
+    text: str
+    evidence_ids: list[str]
+    quote: str
+    subject: str
+    quantity: str | None
+    value: Decimal | None
+    unit: str | None
+    date: str | None
+    conditions: str | None
+    scope: str | None
+    calculation_index: int | None = None
+    qualifier: Literal["<", "<=", ">", ">=", "~"] | None = None
+
+
+class WorkerResult(Contract):
+    claims: list[Claim]
+    gaps: list[str]
+
+
+class CandidateRanking(Contract):
+    """Listwise rerank output: candidate IDs, most useful first."""
+
+    ids: list[str]
+
+
+class CalculationRequest(Contract):
+    operation: str
+    input_claims: list[int]
+    target_unit: str | None
+
+
+class Calculation(Contract):
+    operation: str
+    input_claims: list[int]
+    value: Decimal
+    unit: str
+    evidence_ids: list[str]

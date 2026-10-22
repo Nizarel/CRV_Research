@@ -1,0 +1,223 @@
+# CRV research agent (development/evaluation): identity, configuration and one-off jobs.
+# Render with render-research-agent.ps1, which substitutes every dollar-brace placeholder and keeps
+# only the selected job. Apply through `az aks command invoke` (private cluster).
+#
+# Order: kg-login -> memory-setup -> memory-grant -> agent-check -> retrieval-eval.
+# Evidence ACLs are deferred: nothing here exposes a Service or ingress.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crv-research-agent
+  namespace: crv
+  annotations:
+    azure.workload.identity/client-id: ${AGENT_CLIENT_ID}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crv-research-agent
+  namespace: crv
+data:
+  CRV_SEARCH_ENDPOINT: "${SEARCH_ENDPOINT}"
+  CRV_SEARCH_INDEX: crv-evidence-v1
+  CRV_SEARCH_RELEASE: "${SEARCH_RELEASE}"
+  CRV_KG_RELEASE: "${KG_RELEASE}"
+  CRV_POSTGRES_HOST: "${PG_HOST}"
+  CRV_POSTGRES_ROOT_CERT: system
+  CRV_KG_DATABASE: ingestion-catalog
+  CRV_MEMORY_DATABASE: crv-agent-memory
+  # One Entra login per identity: the KG and memory pools use the same runtime role.
+  CRV_POSTGRES_USER: "${AGENT_IDENTITY_NAME}"
+  CRV_MEMORY_USER: "${AGENT_IDENTITY_NAME}"
+  CRV_OPENAI_ENDPOINT: "${OPENAI_ENDPOINT}"
+  CRV_PLANNER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
+  CRV_WORKER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
+  CRV_ANSWER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
+  CRV_VERIFIER_DEPLOYMENT: "${CHAT_DEPLOYMENT}"
+  CRV_TURN_TOKENS: "300000"
+  # Jobs never serve HTTP; this only satisfies settings validation (serve is loopback-only).
+  CRV_LOCAL_OWNER: ops-job
+---
+# JOB kg-login: as the Entra admin, create the agent's Entra login and execute-only KG access.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-agent-kg-login-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-research-agent, crv.agent/job: kg-login}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-agent-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: kg-login
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [kg-grant-reader, --login, "${AGENT_IDENTITY_NAME}", --object-id, "${AGENT_PRINCIPAL_ID}"]
+          env:
+            - {name: TIZ_DB__HOST, value: "${PG_HOST}"}
+            - {name: TIZ_DB__DATABASE, value: ingestion-catalog}
+            - {name: TIZ_DB__USER, value: "${ADMIN_IDENTITY_NAME}"}
+            - {name: TIZ_DB__MAX_POOL_SIZE, value: "1"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB memory-setup: as the Entra admin, create agent-memory tables (never done at runtime).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-agent-memory-setup-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-research-agent, crv.agent/job: memory-setup}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-agent-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: memory-setup
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [crv-agent, setup-memory]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          env:
+            - {name: CRV_MEMORY_USER, value: "${ADMIN_IDENTITY_NAME}"}
+            - {name: CRV_POSTGRES_USER, value: "${ADMIN_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB memory-grant: as the Entra admin, grant the runtime login DML on agent-memory tables only.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-agent-memory-grant-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-research-agent, crv.agent/job: memory-grant}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-agent-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: memory-grant
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [crv-agent, grant-memory-runtime, --login, "${AGENT_IDENTITY_NAME}"]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          env:
+            - {name: CRV_MEMORY_USER, value: "${ADMIN_IDENTITY_NAME}"}
+            - {name: CRV_POSTGRES_USER, value: "${ADMIN_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB agent-check: as the agent identity, readiness plus negative least-privilege probes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-agent-check-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-research-agent, crv.agent/job: agent-check}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-research-agent, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-research-agent
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: agent-check
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [crv-agent, check, --models]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB retrieval-eval: retrieval-depth arms (agent identity) then shared golden scoring.
+# Contexts stay inside the pod (emptyDir); only the score report is printed between markers.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-agent-retrieval-eval-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-research-agent, crv.agent/job: retrieval-eval}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-research-agent-eval, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-research-agent
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      initContainers:
+        - name: contexts
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [python, -m, crv_agent.evaluation.retrieval, --golden, /golden/crv_golden.jsonl,
+                 --split, "${EVAL_SPLIT}", --concurrency, "${EVAL_CONCURRENCY}",
+                 --out, /results/contexts.jsonl, --confirm-live${EVAL_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: golden, mountPath: /golden, readOnly: true}
+            - {name: results, mountPath: /results}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: score
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          command: [python, -m, ingest_pipeline.tools.golden]
+          args: [score, --golden, /golden/crv_golden.jsonl, --contexts, /results/contexts.jsonl,
+                 --judge-deployment, "${JUDGE_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
+                 --repeats, "${JUDGE_REPEATS}", --reference, P16, --reference, A1]
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: golden, mountPath: /golden, readOnly: true}
+            - {name: results, mountPath: /results, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: golden, configMap: {name: crv-golden-agent}}
+        - {name: results, emptyDir: {sizeLimit: 512Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 128Mi}}

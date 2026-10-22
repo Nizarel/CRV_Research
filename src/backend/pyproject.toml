@@ -1,0 +1,91 @@
+[project]
+name = "crv-agent-backend"
+version = "0.1.0"
+description = "Evidence-first CRV research agent backend"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi==0.139.2",
+    "uvicorn[standard]==0.51.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "langchain==1.4.5",
+    "langchain-core==1.6.10",
+    "langgraph==1.2.15",
+    "langchain-openai==1.7.2",
+    "langgraph-checkpoint-postgres==3.1.3",
+    "azure-identity==1.25.3",
+    "azure-search-documents==12.0.0",
+    "aiohttp>=3.12,<4",
+    "psycopg[pool]==3.3.4",
+    "psycopg-pool>=3.3,<4",
+    "psycopg-binary==3.3.4; platform_machine != 'ARM64'",
+    "pyjwt[crypto]>=2.10.1,<3",
+    "opentelemetry-api>=1.43,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "httpx==0.28.1",
+    "ruff==0.15.22",
+    "mypy==2.3.1",
+    "import-linter==2.15",
+    "testcontainers[postgres]==4.15.0",
+]
+
+[project.scripts]
+crv-agent = "crv_agent.__main__:main"
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["crv_agent*"]
+
+[tool.setuptools.package-data]
+"crv_agent.adapters.postgres" = ["*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-m 'not integration and not live'"
+markers = [
+    "integration: requires an explicitly configured PostgreSQL database",
+    "live: requires approved Azure calls",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["crv_agent"]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["azure.search.*", "azure.identity.*"]
+ignore_missing_imports = true
+
+[tool.importlinter]
+root_package = "crv_agent"
+
+[[tool.importlinter.contracts]]
+name = "Core stays independent of infrastructure"
+type = "forbidden"
+source_modules = ["crv_agent.domain", "crv_agent.ports", "crv_agent.services"]
+forbidden_modules = ["crv_agent.adapters", "crv_agent.api", "crv_agent.runtime",
+    "crv_agent.orchestration", "crv_agent.tools"]
+
+[[tool.importlinter.contracts]]
+name = "Orchestration uses ports rather than concrete clients"
+type = "forbidden"
+source_modules = ["crv_agent.orchestration", "crv_agent.tools"]
+forbidden_modules = ["crv_agent.adapters", "crv_agent.api", "crv_agent.runtime"]

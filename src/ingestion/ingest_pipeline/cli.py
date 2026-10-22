@@ -25,8 +25,15 @@ from .adapters.blob.staging import stage_blobs
 from .adapters.local_intake import CorpusIntake, collect_legacy_office
 from .adapters.parsers.office import DocumentConverter, OfficeConverter, PrecomputedOfficeConverter
 from .adapters.pilot import profile_corpus, select, selection_report
-from .adapters.postgres.kg_access import ensure_entra_login, grant_reader, grant_role
-from .adapters.postgres.knowledge import PostgresKnowledgeStore
+from .adapters.postgres.crv_kg import CrvKgStore
+from .adapters.postgres.crv_kg_inputs import load_inputs
+from .adapters.postgres.kg_access import (
+    KG_WRITER_ROLES,
+    READER_ROLE,
+    ensure_entra_login,
+    grant_reader,
+    grant_role,
+)
 from .adapters.postgres.legacy import LegacyCatalog
 from .adapters.postgres.migrations import apply_crv_baseline, apply_migrations, load_migrations
 from .adapters.postgres.pool import create_pool
@@ -38,15 +45,12 @@ from .adapters.telemetry.json_logging import configure_logging
 from .adapters.telemetry.otel import NoopTelemetry, configure_telemetry
 from .config import PipelineSettings, load_billing, load_policies, require
 from .domain import comparison
+from .domain.crv_kg.build import build_run
+from .domain.crv_kg.gazetteer import parse_gazetteer, review_rows
+from .domain.crv_kg.vocab import DEFAULT_RELEASE_STATUSES, STATUS_RANK
 from .domain.evidence import EvidenceDocument, EvidenceUnit
 from .domain.ids import legacy_placement_id, legacy_source_object_id
 from .domain.intake import IntakeLimits
-from .domain.knowledge import (
-    DEFAULT_RELEASE_STATUSES,
-    STATUS_RANK,
-    parse_aliases,
-    parse_registry,
-)
 from .domain.models import JobSpec
 from .domain.states import StageName, WorkerPool
 from .ports.telemetry import Telemetry
@@ -61,6 +65,7 @@ from .stages.snapshot import snapshot_job
 Handler = Callable[[PipelineSettings, Telemetry, argparse.Namespace], Coroutine[Any, Any, int]]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ENQUEUE_CHUNK = 500
+DEFAULT_GAZETTEER = Path(__file__).resolve().parent / "data" / "crv-gazetteer.json"
 
 
 async def _prepare_corpus(
@@ -286,32 +291,56 @@ async def _database(settings: PipelineSettings) -> AsyncIterator[Any]:
             await pool.close()
 
 
-async def _kg_import(settings: PipelineSettings, _: Telemetry, args: argparse.Namespace) -> int:
+async def _kg_build(
+    settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
+) -> int:
+    """KG-1: build the deterministic graph from the ingested evidence of one routing policy."""
+
     started = datetime.now(UTC)
-    batch = parse_registry(await asyncio.to_thread(_read_bytes, args.registry))
-    async with _database(settings) as pool:
-        report = await PostgresKnowledgeStore(pool).import_registry(
-            batch, started_at=started, now=datetime.now(UTC)
+    gazetteer = parse_gazetteer(await asyncio.to_thread(_read_bytes, args.gazetteer))
+    async with azure_runtime(settings, telemetry, bus=False) as runtime:
+        documents, loaded = await load_inputs(
+            runtime.pool, runtime.services.require_artifacts(), policy_version=args.policy
         )
-    _print(
-        {
-            **asdict(report),
-            "input_hash": batch.input_hash,
-            "entities_in_file": len(batch.entities),
-            "assertions_in_file": len(batch.assertions),
-        }
+        run, report = build_run(documents, gazetteer, today=started.date())
+        report["loaded"] = loaded
+        imported = None
+        if not args.dry_run and not report["validation_problem_count"]:
+            imported = asdict(
+                await CrvKgStore(runtime.pool).import_run(
+                    run, started_at=started, now=datetime.now(UTC)
+                )
+            )
+    report["imported"] = imported
+    if args.report == "-":
+        _print(report)
+    elif args.report:
+        _write_json(args.report, report)
+    _print({
+        key: report[key]
+        for key in ("run_id", "documents_in", "documents_in_graph", "genre_and_date_pct",
+                    "entities", "assertions", "assertion_status", "totals", "loaded",
+                    "validation_problem_count", "imported")
+    })
+    return 2 if report["validation_problem_count"] else 0
+
+
+async def _kg_gazetteer_sheet(_: PipelineSettings, __: Telemetry, args: argparse.Namespace) -> int:
+    """Write the expert review sheet of the gazetteer (offline)."""
+
+    import csv
+    import io
+
+    gazetteer = parse_gazetteer(await asyncio.to_thread(_read_bytes, args.gazetteer))
+    rows = review_rows(gazetteer)
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]), lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    await asyncio.to_thread(
+        Path(args.output).write_text, buffer.getvalue(), "utf-8-sig", None, ""
     )
-    return 0
-
-
-async def _kg_aliases(settings: PipelineSettings, _: Telemetry, args: argparse.Namespace) -> int:
-    started = datetime.now(UTC)
-    aliases = parse_aliases(await asyncio.to_thread(_read_bytes, args.aliases))
-    async with _database(settings) as pool:
-        report = await PostgresKnowledgeStore(pool).import_aliases(
-            aliases, started_at=started, now=datetime.now(UTC)
-        )
-    _print({**asdict(report), "input_hash": aliases.input_hash})
+    _print({"entries": len(rows), "version": gazetteer.version, "output": args.output})
     return 0
 
 
@@ -319,7 +348,7 @@ async def _kg_release(settings: PipelineSettings, _: Telemetry, args: argparse.N
     started = datetime.now(UTC)
     statuses = tuple(args.status or DEFAULT_RELEASE_STATUSES)
     async with _database(settings) as pool:
-        store = PostgresKnowledgeStore(pool)
+        store = CrvKgStore(pool)
         release = await store.build_release(
             statuses=statuses, started_at=started, now=datetime.now(UTC)
         )
@@ -333,6 +362,68 @@ async def _kg_release(settings: PipelineSettings, _: Telemetry, args: argparse.N
                 release.release_id, environment=args.activate, now=datetime.now(UTC)
             )
     _print({**asdict(release), "age_graph": graph, "activated": args.activate})
+    return 0
+
+
+async def _kg_check(settings: PipelineSettings, _: Telemetry, args: argparse.Namespace) -> int:
+    """Smoke-test the active release: counts, AGE graph, and the agent's read functions."""
+
+    scopes = args.scope or ["crv:research", "crv:geometallurgy", "crv:environment"]
+    async with _database(settings) as pool:
+        async with pool.acquire() as connection:
+            active = await connection.fetchrow(
+                "SELECT * FROM crv_kg.active_release($1)", args.environment
+            )
+            if active is None:
+                _print({"environment": args.environment, "active": None})
+                return 2
+            release = active["release_id"]
+            vertices = await connection.fetch(
+                "SELECT label, count(*) AS n FROM crv_kg.vertex_projection WHERE release_id = $1"
+                " GROUP BY label ORDER BY label", release,
+            )
+            edges = await connection.fetch(
+                "SELECT label, properties ->> 'status' AS status, count(*) AS n"
+                " FROM crv_kg.edge_projection WHERE release_id = $1 GROUP BY 1, 2 ORDER BY 1, 2",
+                release,
+            )
+            resolved = await connection.fetch(
+                "SELECT iri, kind, name, status, method FROM crv_kg.resolve($1, $2, $3)",
+                release, args.text, scopes,
+            )
+            entities = [row["iri"] for row in resolved] or None
+            documents = await connection.fetch(
+                "SELECT iri, title, genre, date, collection, report_codes"
+                " FROM crv_kg.find_documents($1, $2, $3, p_limit => 5)",
+                release, scopes, entities,
+            )
+            lineage = await connection.fetch(
+                "SELECT l.* FROM (SELECT start_iri FROM crv_kg.edge_projection"
+                " WHERE release_id = $1 AND label = 'SUPERSEDES' ORDER BY start_iri LIMIT 1) AS s,"
+                " crv_kg.document_lineage($1, s.start_iri, $2) AS l", release, scopes,
+            )
+        age: dict[str, Any] = {}
+        if active["graph_name"]:
+            store = CrvKgStore(pool)
+            for label in ("Document", "Site", "Organisation"):
+                rows = await store.cypher(
+                    active["graph_name"], f"MATCH (n:{label}) RETURN count(n)", columns=("n",)
+                )
+                age[label] = rows[0]["n"]
+            age["about_site_paths"] = (await store.cypher(
+                active["graph_name"],
+                "MATCH (:Document)-[:ABOUT_SITE]->(:Site)-[:OPERATED_BY]->(:Organisation)"
+                " RETURN count(*)", columns=("n",),
+            ))[0]["n"]
+    _print({
+        "release": dict(active),
+        "vertices": {row["label"]: row["n"] for row in vertices},
+        "edges": [dict(row) for row in edges],
+        "resolve": [dict(row) for row in resolved],
+        "documents": [dict(row) for row in documents],
+        "lineage_sample": [dict(row) for row in lineage],
+        "age": age,
+    })
     return 0
 
 
@@ -379,6 +470,14 @@ async def _db_bootstrap(
             for login in principals:
                 if await grant_role(connection, login, args.role):
                     report["granted"].append(login)
+            for login in args.kg_principal or ():
+                for role in KG_WRITER_ROLES:
+                    if await grant_role(connection, login, role):
+                        report["granted"].append(f"{login}:{role}")
+            # Membership only (no session defaults): pipeline identities keep their own role.
+            for login in args.kg_reader or ():
+                if await grant_role(connection, login, READER_ROLE):
+                    report["granted"].append(f"{login}:{READER_ROLE}")
         else:
             report["pending_grants"] = [
                 login for login in principals
@@ -781,6 +880,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--principal", action="append", help="LOGIN=ENTRA_OBJECT_ID of a pipeline identity"
     )
     bootstrap.add_argument("--role", default="tizert_ingest_worker")
+    bootstrap.add_argument(
+        "--kg-principal", action="append",
+        help="LOGIN (also given as --principal) granted crv_kg_writer and crv_kg_release",
+    )
+    bootstrap.add_argument(
+        "--kg-reader", action="append",
+        help="LOGIN (also given as --principal) made a member of crv_kg_reader (evaluation)",
+    )
     bootstrap.add_argument("--apply", action="store_true", help="Default is a dry run")
     bootstrap.set_defaults(handler=_db_bootstrap)
 
@@ -843,20 +950,25 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--failures", type=int, default=20, help="Recent problems to list")
     status.set_defaults(handler=_status)
 
-    kg_import = commands.add_parser(
-        "kg-import-registry", help="Record a Phase 1 registry run in the kg system of record"
+    kg_build = commands.add_parser(
+        "kg-build",
+        help="KG-1: build the deterministic CRV graph from ingested evidence and record it",
     )
-    kg_import.add_argument("--registry", required=True, help="registry.jsonl of a registry run")
-    kg_import.set_defaults(handler=_kg_import)
+    kg_build.add_argument("--policy", default="crv-full-v1", help="Routing policy version")
+    kg_build.add_argument("--gazetteer", default=str(DEFAULT_GAZETTEER))
+    kg_build.add_argument("--report", help="Write the coverage report (JSON) here; - prints it")
+    kg_build.add_argument("--dry-run", action="store_true", help="Build and report only")
+    kg_build.set_defaults(handler=_kg_build)
 
-    kg_aliases = commands.add_parser(
-        "kg-import-aliases", help="Make a curated aliases.json the current kg alias set"
+    kg_sheet = commands.add_parser(
+        "kg-gazetteer-sheet", help="Write the gazetteer expert review sheet (CSV, offline)"
     )
-    kg_aliases.add_argument("--aliases", required=True, help="aliases.json ({alias, tag} list)")
-    kg_aliases.set_defaults(handler=_kg_aliases)
+    kg_sheet.add_argument("--gazetteer", default=str(DEFAULT_GAZETTEER))
+    kg_sheet.add_argument("--output", required=True)
+    kg_sheet.set_defaults(handler=_kg_gazetteer_sheet)
 
     kg_release = commands.add_parser(
-        "kg-release", help="Freeze the current kg projection as a release (optionally load AGE)"
+        "kg-release", help="Freeze the current crv_kg projection as a release (optionally AGE)"
     )
     kg_release.add_argument(
         "--status",
@@ -868,9 +980,17 @@ def build_parser() -> argparse.ArgumentParser:
     kg_release.add_argument("--activate", metavar="ENVIRONMENT", help="point ENVIRONMENT at it")
     kg_release.set_defaults(handler=_kg_release)
 
+    kg_check = commands.add_parser(
+        "kg-check", help="Smoke-test the active crv_kg release (counts, AGE, read functions)"
+    )
+    kg_check.add_argument("--environment", default="dev")
+    kg_check.add_argument("--text", default="Pilotage de la flottation à Bleida et Ouanssimi")
+    kg_check.add_argument("--scope", action="append", help="Scope key (repeatable)")
+    kg_check.set_defaults(handler=_kg_check)
+
     kg_grant = commands.add_parser(
         "kg-grant-reader",
-        help="Give an Entra service principal an execute-only kg read login",
+        help="Give an Entra service principal an execute-only crv_kg read login",
     )
     kg_grant.add_argument("--login", required=True, help="Postgres role name (identity name)")
     kg_grant.add_argument("--object-id", required=True, help="Entra object (principal) ID")
@@ -883,7 +1003,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = PipelineSettings()
     telemetry: Telemetry
-    if args.handler in (_prepare_corpus, _collect_office, _select_pilot):
+    if args.handler in (_prepare_corpus, _collect_office, _select_pilot, _kg_gazetteer_sheet):
         configure_logging()
         telemetry = NoopTelemetry()
     else:

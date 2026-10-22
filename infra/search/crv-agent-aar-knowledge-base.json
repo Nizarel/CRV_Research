@@ -1,0 +1,7 @@
+{
+  "name": "crv-agent-aar-kb",
+  "description": "Research-agent retrieval-depth comparator (agentic retrieval, minimal effort via semantic intents). Create for an evaluation run and delete afterwards.",
+  "knowledgeSources": [
+    { "name": "crv-evidence-ks" }
+  ]
+}
