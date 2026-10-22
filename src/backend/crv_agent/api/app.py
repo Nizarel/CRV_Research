@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Annotated
+from typing import Annotated, Any, cast
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -16,10 +16,13 @@ from crv_agent.api.identity import AuthenticationError
 from crv_agent.api.schemas import ChatRequest, FeedbackRequest
 from crv_agent.domain.answers import Answer
 from crv_agent.domain.execution import Budget
+from crv_agent.domain.planning import QueryPlan
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.ports.persistence import Run, Thread, ThreadNotFound, TurnConflict
 
 logger = logging.getLogger(__name__)
+# Custom graph stream events forwarded to clients; anything else stays server-side.
+STREAMED_FINDINGS = frozenset({"facet"})
 
 
 def leaf_types(error: BaseException) -> str:
@@ -137,22 +140,38 @@ def create_app(
                     span.set_attribute("crv.search_release", context.search_release)
                     span.set_attribute("crv.kg_release", context.kg_release)
                     async with asyncio.timeout(context.budget.seconds):
-                        async for update in deps.graph.astream(
+                        async for mode, streamed in deps.graph.astream(
                             {"question": body.message, "history": [
                                 f"User: {previous.question}\nAssistant: "
                                 f"{(previous.result or {}).get('content', '')}"
                                 for previous in history[-7:] if previous.status == "completed"
                             ]},
                             {"configurable": {"thread_id": f"{thread_id}:{run_id}"}},
-                            context=context, stream_mode="updates",
+                            context=context, stream_mode=["updates", "custom"],
                         ):
                             if await request.is_disconnected():
                                 raise asyncio.CancelledError
-                            for step, values in update.items():
+                            chunk = cast(dict[str, Any], streamed)
+                            if mode == "custom":
+                                if chunk.get("event") in STREAMED_FINDINGS:
+                                    yield event(chunk["event"], {
+                                        key: value for key, value in chunk.items()
+                                        if key != "event"
+                                    }, sequence, run_id)
+                                    sequence += 1
+                                continue
+                            for step, values in chunk.items():
                                 if step == "answer":
                                     final = Answer.model_validate(values["answer"])
                                 yield event("progress", {"step": step}, sequence, run_id)
                                 sequence += 1
+                                if step == "understand":
+                                    plan = QueryPlan.model_validate(values["plan"])
+                                    yield event("plan", {
+                                        "intent": plan.intent,
+                                        "facets": [facet.question for facet in plan.facets],
+                                    }, sequence, run_id)
+                                    sequence += 1
                                 if step == "research" and deps.diagnostics:
                                     yield event(
                                         "diagnostics", diagnostics(values or {}), sequence, run_id,

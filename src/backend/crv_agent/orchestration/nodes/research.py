@@ -110,6 +110,8 @@ async def research(
     claims: dict[str, Claim] = {}
 
     async def run(facet: Facet) -> None:
+        accepted: list[Claim] = []
+        status = "completed"
         async with semaphore:
             try:
                 result, found = await context.worker.run(
@@ -126,16 +128,33 @@ async def research(
                 for claim in result.claims:
                     if not claim_errors(claim, evidence_by_id):
                         claims[claim.model_dump_json()] = claim
+                        accepted.append(claim)
                     else:
                         gaps.append("A worker claim failed source/locator/value validation.")
             except BudgetExceeded:
+                status = "budget_exhausted"
                 gaps.append("A research facet exhausted the shared execution budget.")
             except Exception as error:
+                status = "failed"
                 failures.append(error)
                 logger.warning("research_facet_failed error_type=%s", type(error).__name__)
                 gaps.append(
                     f"A research facet failed ({type(error).__name__}); its evidence is missing.",
                 )
+        # Early findings, not a verified answer: every streamed claim's quote is located verbatim.
+        cited = {cid for claim in accepted for cid in claim.evidence_ids}
+        runtime.stream_writer({
+            "event": "facet", "facet": facet.question, "status": status,
+            "claims": [claim.model_dump(mode="json") for claim in accepted],
+            "sources": [
+                {
+                    "id": item.id, "title": item.title,
+                    "source": item.source_path or item.source_uri, "pages": item.pages,
+                    "document_code": item.document_code, "source_role": item.source_role,
+                } for item in sorted(evidence_by_id.values(), key=lambda e: e.id)
+                if item.id in cited
+            ],
+        })
     failures: list[Exception] = []
     async with asyncio.TaskGroup() as group:
         for facet in facets:

@@ -102,7 +102,7 @@ async def probe_model(chat_model: ChatOpenAI, schema: type[BaseModel]) -> dict[s
         ok=result.get("parsed") is not None, seconds=round(time.monotonic() - started, 3),
         served_model=raw.response_metadata.get("model_name") if isinstance(raw, AIMessage)
         else None,
-        reasoning_tokens=(usage or {}).get("output_token_details", {}).get("reasoning"),
+        reasoning_tokens=usage.get("output_token_details", {}).get("reasoning") if usage else None,
     )
     if not report["ok"]:
         report["error"] = str(result.get("parsing_error"))[:300]

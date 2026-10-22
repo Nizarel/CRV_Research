@@ -196,6 +196,29 @@ def test_diagnostics_event_streams_ledger_and_exposed_text_only_when_enabled(
     }]
 
 
+def test_plan_and_facet_findings_stream_before_the_verified_answer() -> None:
+    with TestClient(create_app(services())) as client:
+        thread = client.post("/api/v1/conversations").json()
+        response = client.post("/api/v1/chat", json={
+            "thread_id": thread["id"], "request_id": str(uuid4()), "message": "Recovery?",
+        })
+    blocks = [block.splitlines() for block in response.text.strip().split("\n\n")]
+    names = [lines[1].removeprefix("event: ") for lines in blocks]
+    payloads = {
+        lines[1].removeprefix("event: "): json.loads(lines[2].removeprefix("data: "))
+        for lines in blocks
+    }
+    assert names.index("plan") < names.index("facet") < names.index("answer")
+    assert payloads["plan"]["intent"] == "lookup" and payloads["plan"]["facets"] == ["Recovery?"]
+    facet = payloads["facet"]
+    assert facet["status"] == "completed" and facet["facet"] == "Recovery?"
+    assert facet["claims"] == [CLAIM.model_dump(mode="json")]
+    assert facet["sources"] == [{
+        "id": "S1", "title": SOURCE.title, "source": SOURCE.source_uri, "pages": [4],
+        "document_code": None, "source_role": "unclassified",
+    }]
+
+
 def test_blank_reasoning_effort_is_unset_and_diagnostics_need_a_local_owner(monkeypatch) -> None:
     import os
 

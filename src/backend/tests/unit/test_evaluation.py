@@ -176,6 +176,7 @@ async def test_labelled_arm_exports_answer_exposed_and_ledger_stages_with_role_u
             key_facts=[KeyFact(text="Recovery 87.5 %")],
         )], emit=answers.append, arm="R1", emit_stages=stages.extend)
     assert report["arm"] == "R1"
+    assert report["first_finding_seconds_p50"] is not None
     assert set(report["step_seconds_p50"]) == {  # type: ignore[arg-type]
         "understand", "research", "reconcile", "answer",
     }
@@ -185,6 +186,7 @@ async def test_labelled_arm_exports_answer_exposed_and_ledger_stages_with_role_u
     }}
     [answer] = answers
     assert answer["arm"] == "R1" and "diagnostics" not in answer
+    assert answer["first_finding_seconds"] is not None
     assert answer["role_usage"]["answer"]["calls"] == 1  # type: ignore[index]
     assert [s["arm"] for s in stages] == ["R1", "R1-EXPOSED", "R1-LEDGER"]
     exposed, ledger = stages[1], stages[2]

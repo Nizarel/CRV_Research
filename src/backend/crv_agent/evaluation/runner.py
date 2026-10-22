@@ -27,6 +27,7 @@ from crv_agent.evaluation.scoring import score
 async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
     started = time.monotonic()
     first_progress: float | None = None
+    first_finding: float | None = None
     first_answer: float | None = None
     answer: Answer | None = None
     error: str | None = None
@@ -53,6 +54,8 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
                         progress.append((str(data.get("step")), elapsed))
                     elif event == "diagnostics":
                         diagnostics = {"ledger": data["ledger"], "exposed": data["exposed"]}
+                    elif event == "facet" and data.get("claims"):
+                        first_finding = first_finding or time.monotonic() - started
                     elif event == "answer":
                         first_answer = time.monotonic() - started
                         answer = Answer.model_validate({
@@ -68,7 +71,8 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
     return {
         "answer": answer, "error": error, "steps": steps,
         "step_seconds": step_durations(progress), "diagnostics": diagnostics,
-        "first_progress_seconds": first_progress, "first_answer_seconds": first_answer,
+        "first_progress_seconds": first_progress, "first_finding_seconds": first_finding,
+        "first_answer_seconds": first_answer,
         "total_seconds": time.monotonic() - started,
     }
 
@@ -98,6 +102,7 @@ def compact(
         "turn_error": result["error"], "status": answer.status if answer else "error",
         "seconds": round(result["first_answer_seconds"] or result["total_seconds"], 3),
         "first_progress_seconds": result["first_progress_seconds"],
+        "first_finding_seconds": result["first_finding_seconds"],
         "step_seconds": result["step_seconds"],
         "usage": answer.usage if answer else {},
         "role_usage": {
@@ -151,7 +156,7 @@ def stage_records(
     found: dict[str, Any] | None = result.get("diagnostics")
     if found is None:
         return []
-    base = {
+    base: dict[str, Any] = {
         "id": question.id, "category": question.category, "split": question.split,
         "passage_mode": "split", "error": None, "seconds": None, "usage": {},
         "secondary_share": None, "dossier_cu_share": None,
@@ -214,6 +219,7 @@ async def evaluate(
     records: list[dict[str, Any]] = []
     measurements: dict[str, list[float | bool | None]] = defaultdict(list)
     latencies: list[float] = []
+    finding_latencies: list[float] = []
 
     async def one(question: GoldenQuestion) -> None:
         async with gate:
@@ -253,6 +259,11 @@ async def evaluate(
             measurements[metric].append(value)
         # Failed turns count with the full elapsed time; they are not dropped from latency.
         latencies.append(result["first_answer_seconds"] or result["total_seconds"])
+        # Without a streamed finding, the first useful content is the answer itself.
+        finding_latencies.append(
+            result["first_finding_seconds"] or result["first_answer_seconds"]
+            or result["total_seconds"],
+        )
         records.append({
             "id": question.id, "category": question.category, "split": question.split,
             "scores": scores, "answer_status": answer.status if answer else "error",
@@ -264,6 +275,7 @@ async def evaluate(
             } if answer else {},
             "step_seconds": result["step_seconds"],
             "first_progress_seconds": result["first_progress_seconds"],
+            "first_finding_seconds": result["first_finding_seconds"],
             "first_answer_seconds": result["first_answer_seconds"],
             "total_seconds": result["total_seconds"],
         })
@@ -294,12 +306,19 @@ async def evaluate(
             for error in sorted({str(r["turn_error"]) for r in records if r["turn_error"]})
         },
         "first_answer_seconds_p50": p50, "first_answer_seconds_p95": p95,
+        "first_finding_seconds_p50": percentile(finding_latencies, 0.5),
+        "first_finding_seconds_p95": percentile(finding_latencies, 0.95),
         "step_seconds_p50": {
             step: round(median(values), 3) for step, values in sorted(durations.items())
         },
         "role_usage_mean": role_summary(records),
         "gate_failures": failures, "gates_passed": not failures,
     }
+
+
+def percentile(values: list[float], share: float) -> float | None:
+    ordered = sorted(values)
+    return ordered[max(0, ceil(len(ordered) * share) - 1)] if ordered else None
 
 
 def measured_rate(values: list[float | bool | None]) -> dict[str, object]:

@@ -6,9 +6,6 @@ import type { Answer, ProgressStep, Run, Thread } from '../types'
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const API = `${API_BASE}/api/v1`
 
-export const WAF_REJECTED =
-  'Texte refusé par le pare-feu du site : reformulez votre question, puis réessayez.'
-
 export class ApiError extends Error {
   status: number
 
@@ -24,7 +21,7 @@ function failureMessage(status: number): string {
     case 401:
       return 'Authentification requise : reconnectez-vous puis réessayez.'
     case 403:
-      return WAF_REJECTED
+      return 'Accès refusé : votre demande a été rejetée par le serveur.'
     case 404:
       return 'Conversation introuvable.'
     case 409:
@@ -63,10 +60,7 @@ export async function postFeedback(
     body: JSON.stringify({ thread_id: threadId, request_id: runId, rating, comment: comment ?? '' }),
   })
   if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      response.status === 403 ? WAF_REJECTED : `Envoi de l'avis impossible (statut ${response.status}).`,
-    )
+    throw new ApiError(response.status, `Envoi de l'avis impossible (statut ${response.status}).`)
   }
 }
 
