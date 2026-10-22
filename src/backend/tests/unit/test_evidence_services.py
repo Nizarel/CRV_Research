@@ -134,3 +134,159 @@ async def test_catalogue_walks_beyond_two_hundred_documents() -> None:
     documents, coverage = await enumerate_documents(Catalogue(), [], "r1", Budget())
     assert len(documents) == coverage.matched == coverage.enumerated == 405
     assert coverage.catalogue_complete
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("23,8", Decimal("23.8")), ("87.5", Decimal("87.5")), ("1 234,5", Decimal("1234.5")),
+    (12, Decimal(12)), ("2.7 à 2.8", None), ("deux", None), (None, None),
+])
+def test_claim_values_normalize_decimal_commas_and_keep_ranges_qualitative(
+    raw: object, expected: Decimal | None,
+) -> None:
+    assert claim(value=raw).value == expected
+
+
+def test_one_unparsable_value_does_not_reject_the_worker_result() -> None:
+    from crv_agent.domain.evidence import WorkerResult
+
+    result = WorkerResult.model_validate({"claims": [
+        claim().model_dump(mode="json") | {"value": "2.7 à 2.8"},
+        claim().model_dump(mode="json") | {"value": "23,8"},
+    ], "gaps": []})
+    assert [c.value for c in result.claims] == [None, Decimal("23.8")]
+
+
+def test_structured_output_schemas_have_no_regex_patterns() -> None:
+    """Strict provider structured outputs reject lookaround patterns (e.g. Pydantic Decimal)."""
+    import json
+
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.domain.evidence import CandidateRanking, WorkerResult
+    from crv_agent.domain.planning import QueryPlan
+    from crv_agent.evaluation.judge import FactGrades
+    from crv_agent.orchestration.extraction import Extraction
+
+    for model in (
+        QueryPlan, AnswerDraft, Verdict, CalculationRequest, CandidateRanking, WorkerResult,
+        Extraction, FactGrades,
+    ):
+        assert '"pattern"' not in json.dumps(model.model_json_schema()), model.__name__
+
+
+@pytest.mark.asyncio
+async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_numbers() -> None:
+    from crv_agent.adapters.models import LangChainModels
+    from crv_agent.domain.answers import ComposedAnswer
+
+    class Models(LangChainModels):
+        def __init__(self) -> None:
+            self.output_tokens, self.answer = 10, None
+
+        async def _invoke(self, model, schema, system, data, budget):  # type: ignore[no-untyped-def]
+            assert schema is ComposedAnswer and '"number": 1' in data and '"cite": ["S1"]' in data
+            assert '"evidence_ids"' not in data
+            return ComposedAnswer(content="87.5 % [S1] [S9]", claim_numbers=[1, 1, 7, -1],
+                                  insufficient=False, conflicts=[])
+
+    ledger = [
+        claim(value="80", evidence_ids=["long-opaque-id"]),
+        claim(evidence_ids=["long-opaque-id"]),
+    ]
+    draft = await Models().compose("Q?", ledger, "{}", Budget())
+    assert draft.claims == [ledger[1]]
+    assert draft.content == "87.5 % [long-opaque-id] [S9]"  # unknown handle kept, then rejected
+    evidence = [source(id="long-opaque-id")]
+    assert "Answer contains unknown citation markers" in verify_draft(draft, evidence, "r1")
+    fixed = draft.model_copy(update={"content": "87.5 % [long-opaque-id]"})
+    assert verify_draft(fixed, evidence, "r1") == []
+
+
+@pytest.mark.asyncio
+async def test_composer_conflicts_need_two_selected_claims_that_differ() -> None:
+    from crv_agent.adapters.models import LangChainModels
+    from crv_agent.domain.answers import ComposedAnswer, ComposedConflict
+
+    class Models(LangChainModels):
+        def __init__(self, conflicts: list[ComposedConflict]) -> None:
+            self.output_tokens, self.answer, self.conflicts = 10, None, conflicts
+
+        async def _invoke(self, model, schema, system, data, budget):  # type: ignore[no-untyped-def]
+            return ComposedAnswer(content="[S1]", claim_numbers=[0, 1, 2], insufficient=False,
+                                  conflicts=self.conflicts)
+
+    ledger = [claim(), claim(value="80", quote="Recovery 80 % at pilot scale."), claim()]
+    differing = ComposedConflict(subject="sample A", quantity="recovery", claim_numbers=[0, 1])
+    same = ComposedConflict(subject="sample A", quantity="recovery", claim_numbers=[0, 2])
+    unknown = ComposedConflict(subject="x", quantity="y", claim_numbers=[0, 9])
+    draft = await Models([differing, same, unknown]).compose("Q?", ledger, "{}", Budget())
+    assert [c.claim_indices for c in draft.conflicts] == [[0, 1]]
+
+
+@pytest.mark.asyncio
+async def test_research_reservations_keep_answer_headroom() -> None:
+    budget = Budget(token_limit=100, model_limit=5)
+    await budget.reserve(model=1, tokens=50, headroom=40)
+    with pytest.raises(BudgetExceeded):
+        await budget.reserve(model=1, tokens=20, headroom=40)  # would eat the answer reserve
+    await budget.reserve(model=1, tokens=45)  # the answer stage may use the headroom
+    calls = Budget(model_limit=3)
+    await calls.reserve(model=1, headroom=1)
+    with pytest.raises(BudgetExceeded):
+        await calls.reserve(model=1, headroom=1)  # two model calls stay for answering
+    await calls.reserve(model=2)
+
+
+def test_answer_numbers_must_come_from_claims_or_deterministic_calculations() -> None:
+    from crv_agent.domain.evidence import Calculation
+    from crv_agent.services.verification import ungrounded_numbers
+
+    feed = claim(value="2.78", unit="% Cu", quote="8800 T à 2,78% Cu")
+    concentrate = claim(value="24.6", unit="% Cu", quote="840 T de concentré à 24,6% Cu")
+    llm_math = "Récupération = (840 × 0,246) / (8800 × 0,0278) = 84,47 %, soit 84,5 % [S1]."
+    assert ungrounded_numbers(llm_math, [feed, concentrate], []) == [
+        "0,246", "0,0278", "84,47", "84,5",
+    ]
+    calc = Calculation(operation="weighted_recovery", input_claims=[0, 1],
+                       value=Decimal("84.4708"), unit="%", evidence_ids=["S1"])
+    assert ungrounded_numbers("Récupération dérivée : 84,47 % (≈ 84,5 %) [S1].",
+                              [feed, concentrate], [calc]) == []
+    assert ungrounded_numbers("Teneur 2,78 % Cu en 2015, 12 échantillons [S1].", [feed], []) == []
+    draft = AnswerDraft(content=llm_math, claims=[claim()], insufficient=False)
+    assert any("not in cited claims" in e for e in verify_draft(draft, [source()], "r1"))
+
+
+@pytest.mark.asyncio
+async def test_sentences_with_llm_arithmetic_are_pruned_deterministically() -> None:
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from crv_agent.adapters.postgres.memory import serializer
+    from crv_agent.domain.answers import Verdict
+    from crv_agent.orchestration.context import ResearchContext
+    from crv_agent.orchestration.graph import build_graph
+    from tests.fakes import FakeKnowledge, FakeModels, FakeWorker
+
+    class Models(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            await budget.reserve(model=1, tokens=10)
+            return AnswerDraft(
+                content="Recovery was 87.5 % at pilot scale [S1].\nImplied loss is 12.5 % [S1].",
+                claims=list(claims)[:1], insufficient=False,
+            )
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            await budget.reserve(model=1, tokens=10)
+            return Verdict(supported=True, reasons=[])
+
+    from uuid import uuid4
+
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=Models(), knowledge=FakeKnowledge(), worker=FakeWorker(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    answer = result["answer"]
+    assert answer.status == "partial"
+    assert answer.content == "Recovery was 87.5 % at pilot scale [S1]."

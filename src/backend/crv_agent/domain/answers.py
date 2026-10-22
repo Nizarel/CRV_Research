@@ -4,21 +4,42 @@ from crv_agent.domain.evidence import Calculation, Claim, Evidence
 from crv_agent.domain.planning import Contract
 
 
+class Conflict(Contract):
+    subject: str
+    quantity: str
+    claim_indices: list[int]
+
+
 class AnswerDraft(Contract):
     content: str
     claims: list[Claim]
     insufficient: bool
+    # Indices into claims; validated deterministically before reaching the answer.
+    conflicts: list[Conflict] = []
+
+
+class ComposedConflict(Contract):
+    subject: str
+    quantity: str
+    claim_numbers: list[int]
+
+
+class ComposedAnswer(Contract):
+    """Composer output: answer text plus ledger claim numbers (claims are never re-typed)."""
+
+    content: str
+    claim_numbers: list[int]
+    insufficient: bool
+    conflicts: list[ComposedConflict]
 
 
 class Verdict(Contract):
     supported: bool
     reasons: list[str]
-
-
-class Conflict(Contract):
-    subject: str
-    quantity: str
-    claim_indices: list[int]
+    # Indices into draft.claims that the sources do not support (dropped before repair).
+    unsupported_claims: list[int] = []
+    # Verbatim content sentences that are unsupported (pruned if the final draft fails).
+    unsupported_sentences: list[str] = []
 
 
 class Coverage(Contract):

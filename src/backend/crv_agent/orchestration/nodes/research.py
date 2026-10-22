@@ -105,7 +105,7 @@ async def research(
         }
     facets = plan.facets or [Facet(question=state["question"])]
     gaps.append("Top-k evidence retrieval is not an exhaustive corpus review.")
-    semaphore = asyncio.Semaphore(3)
+    semaphore = asyncio.Semaphore(context.facet_concurrency)
     evidence_by_id: dict[str, Evidence] = {}
     claims: dict[str, Claim] = {}
 
@@ -130,9 +130,19 @@ async def research(
                         gaps.append("A worker claim failed source/locator/value validation.")
             except BudgetExceeded:
                 gaps.append("A research facet exhausted the shared execution budget.")
+            except Exception as error:
+                failures.append(error)
+                logger.warning("research_facet_failed error_type=%s", type(error).__name__)
+                gaps.append(
+                    f"A research facet failed ({type(error).__name__}); its evidence is missing.",
+                )
+    failures: list[Exception] = []
     async with asyncio.TaskGroup() as group:
         for facet in facets:
             group.create_task(run(facet))
+    if failures and len(failures) == len(facets):
+        # Every facet failed: a provider/tool failure, never an absence-of-evidence answer.
+        raise failures[0]
     visited = len({e.content_hash for e in evidence_by_id.values()})
     if coverage.matched > visited:
         gaps.append("Evidence retrieval did not inspect every enumerated document.")

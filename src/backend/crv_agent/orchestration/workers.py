@@ -1,7 +1,12 @@
 from typing import Protocol
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, AgentState
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    AgentState,
+    ClearToolUsesEdit,
+    ContextEditingMiddleware,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
@@ -41,6 +46,13 @@ class WorkerBudget(AgentMiddleware[AgentState[WorkerResult], None]):
         )
 
 
+# Full-chunk tool results are large and are resent on every later model call. Above this
+# approximate size only the newest tool results stay verbatim; the exposure ledger still
+# records every shown span, so verification is unaffected.
+CONTEXT_TRIGGER_TOKENS = 40_000
+KEEP_TOOL_RESULTS = 2
+
+
 class EvidenceWorker:
     def __init__(
         self, model: BaseChatModel, retrieval: Retrieval, output_tokens: int,
@@ -59,7 +71,13 @@ class EvidenceWorker:
         agent = create_agent(
             self.model, tools=tools, system_prompt=WORKER_RULES,
             response_format=WorkerResult,
-            middleware=[WorkerBudget(budget, self.output_tokens)],
+            middleware=[
+                ContextEditingMiddleware(edits=[ClearToolUsesEdit(
+                    trigger=CONTEXT_TRIGGER_TOKENS, keep=KEEP_TOOL_RESULTS,
+                    placeholder="[earlier tool result cleared to save context]",
+                )]),
+                WorkerBudget(budget, self.output_tokens),
+            ],
         )
         output = await budget.wait(agent.ainvoke(
             {"messages": [HumanMessage(content=question)]},

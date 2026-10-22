@@ -33,13 +33,15 @@ from crv_agent.services.retrieval import Retrieval, focus, identifiers
 PassageMode = Literal["truncate", "split"]
 BEGIN, END = "=== AGENT CONTEXTS BEGIN ===", "=== AGENT CONTEXTS END ==="
 
+P16 = EvidencePolicy(pack_size=16, excerpt_characters=1200)
 POLICIES: dict[str, EvidencePolicy] = {
-    "P16": EvidencePolicy(),
-    "P12": EvidencePolicy(pack_size=12),
-    "P24": EvidencePolicy(pack_size=24),
-    "P16W2000": EvidencePolicy(excerpt_characters=2000),
-    "CAP": EvidencePolicy(anchor="caption"),
-    "LLM": EvidencePolicy(rerank="llm"),
+    "P16": P16,
+    "P12": EvidencePolicy(pack_size=12, excerpt_characters=1200),
+    "P24": EvidencePolicy(pack_size=24, excerpt_characters=1200),
+    "P16W2000": EvidencePolicy(pack_size=16, excerpt_characters=2000),
+    "CAP": EvidencePolicy(pack_size=16, excerpt_characters=1200, anchor="caption"),
+    "LLM": EvidencePolicy(pack_size=16, excerpt_characters=1200, rerank="llm"),
+    "FULL50": EvidencePolicy(),
 }
 ARMS = ("A0", "A1", *POLICIES, "DEC", "KGB", "CEIL", "AAR")
 
@@ -157,7 +159,7 @@ class Arms:
                     )
                     hashes = sorted({d.content_hash for d in documents if d.content_hash})
                 notes["kg_documents"] = len(hashes)
-            contexts = await self.pack(queries, question, EvidencePolicy(), hashes, budget)
+            contexts = await self.pack(queries, question, P16, hashes, budget)
             return ArmOutput(contexts, "split", notes)
         if arm == "AAR":
             if self.knowledge_base is None:
@@ -290,7 +292,7 @@ async def _knowledge_base(
                 contexts.append(Context(
                     str(data.get("projection_id") or reference.get("docKey")),
                     str(data.get("content_hash") or ""), str(data.get("title") or ""),
-                    str(data.get("source_uri") or ""),
+                    str(data.get("source_path") or data.get("source_uri") or ""),
                     list(data.get("original_page_numbers") or []),
                     str(data.get("content") or ""),
                 ))

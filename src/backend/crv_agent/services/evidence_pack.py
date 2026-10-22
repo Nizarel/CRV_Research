@@ -14,8 +14,10 @@ from typing import Literal
 
 from crv_agent.domain.evidence import Evidence
 
-PACK_SIZE = 16
-EXCERPT_CHARACTERS = 1200
+# Measured winner (Docs/evaluation/agent-retrieval-depth-2026-10-21.md): expose all 50 focused
+# candidates as full chunks (chunks are shorter than EXCERPT_CHARACTERS).
+PACK_SIZE = 50
+EXCERPT_CHARACTERS = 8000
 READ_CHARACTERS = 8000
 PREVIEW_CHARACTERS = 160
 _WORD = re.compile(r"\w+")
@@ -202,6 +204,21 @@ def exposed_text(evidence: Evidence) -> list[str]:
 
 def expose(evidence: Evidence, span: tuple[int, int]) -> Evidence:
     return evidence.model_copy(update={"exposed": merge_spans([span])})
+
+
+def quote_windows(evidence: Evidence, quotes: list[str], margin: int = 800) -> list[str]:
+    """Exposed text around each quote (merged); the whole exposure if no quote is found."""
+    spans = []
+    for start, end in exposed_spans(evidence):
+        shown = evidence.content[start:end]
+        for quote in quotes:
+            if quote and (at := shown.find(quote)) >= 0:
+                spans.append((
+                    start + max(0, at - margin), start + min(len(shown), at + len(quote) + margin),
+                ))
+    if not spans:
+        return exposed_text(evidence)
+    return [evidence.content[a:b] for a, b in merge_spans(spans)]
 
 
 def merge_exposure(left: Evidence, right: Evidence) -> Evidence:

@@ -26,4 +26,6 @@ class AppServices:
     ready: Callable[[], Awaitable[None]]
     model_calls: int = 24
     turn_tokens: int = 300_000
+    turn_seconds: float = 120
+    facet_concurrency: int = 4
     retrieval_mode: Literal["kg", "search"] = "kg"

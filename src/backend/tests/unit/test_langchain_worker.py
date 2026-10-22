@@ -15,6 +15,7 @@ from pydantic import PrivateAttr
 from crv_agent.domain.evidence import Evidence, WorkerResult
 from crv_agent.domain.execution import Budget
 from crv_agent.orchestration.workers import EvidenceWorker
+from crv_agent.services.evidence_pack import EvidencePolicy
 from crv_agent.services.retrieval import Retrieval
 from tests.fakes import CLAIM, SOURCE
 
@@ -105,9 +106,60 @@ async def test_real_create_agent_reads_a_deep_candidate_before_claiming() -> Non
             return None
 
     budget = Budget()
-    worker = EvidenceWorker(ToolModel(deep_read=True), Retrieval(Search()), 1024)
+    worker = EvidenceWorker(
+        ToolModel(deep_read=True), Retrieval(Search()), 1024,
+        EvidencePolicy(pack_size=16, excerpt_characters=1200),
+    )
     result, evidence = await worker.run("Recovery?", "r1", [], budget)
     assert result.claims[0].evidence_ids == ["S49"]
     assert SOURCE.content in next(hit.content for hit in evidence if hit.id == "S49")
     assert budget.model_calls == 3
     assert budget.retrieval_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_clears_older_tool_results_but_keeps_exposure_ledger(monkeypatch) -> None:
+    from langchain_core.messages import ToolMessage
+
+    from crv_agent.orchestration import workers
+
+    monkeypatch.setattr(workers, "CONTEXT_TRIGGER_TOKENS", 1000)
+    monkeypatch.setattr(workers, "KEEP_TOOL_RESULTS", 1)
+    seen: list[list[str]] = []
+
+    class ThreeSearches(ToolModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[no-untyped-def]
+            seen.append([str(m.content)[:60] for m in messages if isinstance(m, ToolMessage)])
+            self._calls += 1
+            if self._calls <= 3:
+                call = {"name": "search_evidence", "args": {"query": f"q{self._calls}"},
+                        "id": f"c{self._calls}", "type": "tool_call"}
+            else:
+                call = {"name": "WorkerResult", "args": WorkerResult(
+                    claims=[CLAIM.model_copy(update={"evidence_ids": ["S0"]})], gaps=[],
+                ).model_dump(mode="json"), "id": "final", "type": "tool_call"}
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(
+                content="", tool_calls=[call],
+            ))])
+
+    class Search:
+        async def query(
+            self, text: str, release: str, mode: str, hashes: list[str], top: int = 50,
+            captions: bool = False,
+        ) -> list[Evidence]:
+            return [SOURCE.model_copy(update={
+                "id": f"S{i}", "chunk_id": f"c{i}", "content_hash": f"{i:064x}",
+                "content": "x" * 400 + SOURCE.content,
+            }) for i in range(20)]
+
+        async def ready(self) -> None:
+            return None
+
+    budget = Budget()
+    result, evidence = await EvidenceWorker(
+        ThreeSearches(), Retrieval(Search()), 1024,
+    ).run("Recovery?", "r1", [], budget)
+    final_view = seen[-1]
+    assert len(final_view) == 3
+    assert sum("cleared" in text for text in final_view) == 2  # only the newest stays verbatim
+    assert len(evidence) == 20 and result.claims  # ledger keeps every exposed span

@@ -38,13 +38,16 @@ class Budget:
     def remaining(self) -> float:
         return max(0, self.seconds - (time.monotonic() - self.started))
 
-    async def reserve(self, *, retrieval: int = 0, model: int = 0, tokens: int = 0) -> None:
+    async def reserve(
+        self, *, retrieval: int = 0, model: int = 0, tokens: int = 0, headroom: int = 0,
+    ) -> None:
+        """Reserve atomically; headroom keeps tokens (and 2 model calls) for later stages."""
         async with self._lock:
             if (
                 self.remaining <= 0
                 or self.retrieval_calls + retrieval > self.retrieval_limit
-                or self.model_calls + model > self.model_limit
-                or self.reserved_tokens + tokens > self.token_limit
+                or self.model_calls + model > self.model_limit - (2 if headroom else 0)
+                or self.reserved_tokens + tokens > self.token_limit - headroom
             ):
                 raise BudgetExceeded("Turn execution budget exhausted")
             self.retrieval_calls += retrieval

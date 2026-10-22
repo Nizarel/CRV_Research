@@ -22,6 +22,13 @@ from crv_agent.ports.persistence import Run, Thread, ThreadNotFound, TurnConflic
 logger = logging.getLogger(__name__)
 
 
+def leaf_types(error: BaseException) -> str:
+    """Innermost exception class names (TaskGroup wraps failures in ExceptionGroups)."""
+    if isinstance(error, BaseExceptionGroup):
+        return ",".join(sorted({leaf_types(inner) for inner in error.exceptions}))
+    return type(error).__name__
+
+
 def create_app(
     services: AppServices | None = None,
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
@@ -111,9 +118,13 @@ def create_app(
                 return
             context = ResearchContext(
                 models=deps.models, knowledge=deps.knowledge, worker=deps.worker,
-                budget=Budget(model_limit=deps.model_calls, token_limit=deps.turn_tokens),
+                budget=Budget(
+                    model_limit=deps.model_calls, token_limit=deps.turn_tokens,
+                    seconds=deps.turn_seconds,
+                ),
                 search_release=thread.search_release, kg_release=thread.kg_release,
                 trace_id=str(uuid4()), retrieval_mode=deps.retrieval_mode,
+                facet_concurrency=deps.facet_concurrency,
             )
             final: Answer | None = None
             persisted = False
@@ -160,7 +171,7 @@ def create_app(
             except Exception as error:
                 logger.error(
                     "research_turn_failed run_id=%s error_type=%s",
-                    run_id, type(error).__name__,
+                    run_id, leaf_types(error),
                 )
                 try:
                     await deps.persistence.finish_run(
@@ -172,7 +183,8 @@ def create_app(
                         run_id, type(persistence_error).__name__,
                     )
                 yield event("error", {
-                    "error": "research_failed", "trace_id": context.trace_id,
+                    "error": "research_failed", "error_type": leaf_types(error),
+                    "trace_id": context.trace_id,
                 }, sequence, run_id)
         return StreamingResponse(
             stream(), media_type="text/event-stream",

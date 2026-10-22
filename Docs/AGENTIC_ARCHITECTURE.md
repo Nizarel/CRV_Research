@@ -17,8 +17,10 @@ Paid live evaluation and reviewed expected-source mappings remain release gates.
 Implemented retrieval follows the
 [measured baseline](evaluation/golden-retrieval-baseline-2026-10-21.md):
 50 semantic-hybrid candidates per leg, soft periodic-summary (+10 positions)
-and third/later-document-chunk (+20) penalties. Each facet gets 16 query-focused
-excerpts (report-code matches promoted) plus 34 previews, with bounded full reads.
+and third/later-document-chunk (+20) penalties. Each facet exposes all 50 focused
+candidates as full chunks, the measured winner in
+[agent-retrieval-depth-2026-10-21](evaluation/agent-retrieval-depth-2026-10-21.md).
+Bounded full reads remain for truncated chunks.
 Secondary-summary labels are filename-derived, matching
 the baseline heuristic; the runtime does not require a new KG metadata migration.
 Evidence records the exact character spans shown to the model; only those spans
@@ -30,6 +32,9 @@ requests. Document hashes are identical between KG and Search, including convert
 PDF hashes; `converted_from` records original lineage, not a remapping requirement.
 No overall quality improvement is claimed without live agent evaluation.
 Expert-proposed expected sources remain unconfirmed review candidates.
+End-to-end answer results (dev split), the retrieve-then-extract worker and the answer
+contract (claims selected by number, number grounding, verbatim pruning) are in
+[agent-answers-2026-10-21](evaluation/agent-answers-2026-10-21.md).
 
 The proposal builds on the ingestion pipeline in
 [src/ingestion](../src/ingestion) and the `crv-evidence-v1` index

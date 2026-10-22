@@ -17,3 +17,4 @@ class ResearchContext:
     kg_release: str
     trace_id: str
     retrieval_mode: Literal["kg", "search"] = "kg"
+    facet_concurrency: int = 4

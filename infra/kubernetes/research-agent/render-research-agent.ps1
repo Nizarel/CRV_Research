@@ -5,13 +5,13 @@ Render (and optionally apply) one CRV research-agent job from research-agent.yam
 .DESCRIPTION
 Shared objects (service account, ConfigMap) are always rendered; exactly one job is kept with -Job,
 so the steps run in order: kg-login -> memory-setup -> memory-grant -> agent-check ->
-retrieval-eval (dev split; the held-out split needs -AllowHeldout and is run once).
+retrieval-eval / answer-eval (dev split; the held-out split needs -AllowHeldout and is run once).
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest. The cluster is private: -Invoke uses `az aks command invoke`.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('kg-login', 'memory-setup', 'memory-grant', 'agent-check', 'retrieval-eval')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('kg-login', 'memory-setup', 'memory-grant', 'agent-check', 'retrieval-eval', 'answer-eval')] [string] $Job,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $AgentDigest = '',
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest = '',
     [guid] $AgentClientId = 'd965e54c-3f16-4521-b384-bd6924b98dd4',
@@ -28,7 +28,7 @@ param(
     [ValidatePattern('^[a-z0-9]{1,12}$')] [string] $RunId = (Get-Date -Format 'MMddHHmm'),
     [string] $ResourceGroup = 'rg-CRV-southcentralus',
     [string] $Cluster = 'aks-crv-southcentralus',
-    [ValidateSet('A0', 'A1', 'P16', 'P12', 'P24', 'P16W2000', 'CAP', 'LLM', 'DEC', 'KGB', 'CEIL', 'AAR')] [string[]] $Arm = @(),
+    [ValidateSet('A0', 'A1', 'P16', 'P12', 'P24', 'P16W2000', 'CAP', 'LLM', 'FULL50', 'DEC', 'KGB', 'CEIL', 'AAR')] [string[]] $Arm = @(),
     [ValidateSet('dev', 'heldout')] [string] $Split = 'dev',
     [switch] $AllowHeldout,
     [ValidatePattern('^[A-Za-z0-9]{1,8}$')] [string[]] $Only = @(),
@@ -37,6 +37,7 @@ param(
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $JudgeDeployment = 'gpt-5.4-mini',
     [ValidateRange(1, 5)] [int] $JudgeRepeats = 3,
     [ValidateRange(900, 86400)] [int] $DeadlineSeconds = 14400,
+    [ValidateRange(30, 600)] [int] $TurnSeconds = 180,
     [string] $GoldenPath = (Join-Path $PSScriptRoot '../../../golden/crv_golden.jsonl'),
     [string] $RenderPath = '',
     [switch] $Invoke
@@ -45,13 +46,16 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Job -eq 'kg-login' -and -not $PipelineDigest) { throw '-Job kg-login needs -PipelineDigest.' }
 if ($Job -ne 'kg-login' -and -not $AgentDigest) { throw "-Job $Job needs -AgentDigest." }
-if ($Job -eq 'retrieval-eval' -and -not $PipelineDigest) { throw '-Job retrieval-eval needs -PipelineDigest (scorer).' }
+if ($Job -in 'retrieval-eval', 'answer-eval' -and -not $PipelineDigest) { throw "-Job $Job needs -PipelineDigest (scorer)." }
 if ($Split -eq 'heldout' -and -not $AllowHeldout) { throw 'The held-out split needs -AllowHeldout (run once, for the frozen winner).' }
 $evalArgs = ''
 foreach ($item in $Arm) { $evalArgs += ", --arm, $item" }
 foreach ($item in $Only) { $evalArgs += ", --only, $item" }
 if ($KnowledgeBase) { $evalArgs += ", --knowledge-base, $KnowledgeBase" }
 if ($Split -eq 'heldout') { $evalArgs += ', --allow-heldout' }
+$answerArgs = ''
+foreach ($item in $Only) { $answerArgs += ", --question-id, $item" }
+if ($Split -eq 'heldout') { $answerArgs += ', --allow-heldout' }
 $zero = 'sha256:' + ('0' * 64)
 $values = [ordered]@{
     AGENT_CLIENT_ID     = $AgentClientId.ToString()
@@ -71,6 +75,8 @@ $values = [ordered]@{
     EVAL_SPLIT          = $Split
     EVAL_CONCURRENCY    = $Concurrency.ToString()
     EVAL_ARGS           = $evalArgs
+    ANSWER_ARGS         = $answerArgs
+    TURN_SECONDS        = $TurnSeconds.ToString()
     JUDGE_DEPLOYMENT    = $JudgeDeployment
     JUDGE_REPEATS       = $JudgeRepeats.ToString()
     DEADLINE_SECONDS    = $DeadlineSeconds.ToString()
@@ -92,7 +98,7 @@ $selected = $documents | Where-Object {
 }
 if (@($selected | Where-Object { $_ -match '(?m)^kind:\s*Job\s*$' }).Count -ne 1) { throw "Job $Job not found." }
 $rendered = (($selected | ForEach-Object { $_.Trim() }) -join "`n---`n") + "`n"
-if ($Job -eq 'retrieval-eval') {
+if ($Job -in 'retrieval-eval', 'answer-eval') {
     $golden = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $GoldenPath).Path, [Text.UTF8Encoding]::new($false))
     $configMap = [ordered]@{
         apiVersion = 'v1'; kind = 'ConfigMap'

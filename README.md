@@ -420,19 +420,47 @@ Retrieval uses semantic hybrid candidates at depth 50, with soft rank penalties
 matching the [retrieval baseline](Docs/evaluation/golden-retrieval-baseline-2026-10-21.md):
 10 positions for filename-inferred periodic summaries and 20 for a document's
 third/later chunk. These are demotions, not exclusions or hard chunk caps.
-Each facet worker receives a deterministic evidence pack: the first 16 candidates
-(exact report-code matches promoted, otherwise the focused order) as 1,200-character
-query-focused excerpts, plus previews of the other 34. `read_evidence` reads up to
-three batches of four candidates (8,000 characters each). Evidence records the exact
+Periodic detection and report-code promotion use the original corpus path
+(`source_path`) and `document_code`; `source_uri` is a content-addressed blob path.
+
+By default each facet worker sees **all 50 focused candidates as full chunks**.
+This was measured in the
+[retrieval-depth evaluation](Docs/evaluation/agent-retrieval-depth-2026-10-21.md):
+- Held-out judged key-fact recall rose from 0.439 (top 10 full chunks) to 0.553.
+- The earlier 16 × 1,200-character excerpt pack was worse than plain top 10.
+
+`CRV_EVIDENCE_*` settings select other measured policies. Evidence records the exact
 character spans shown to the model; claims must quote those spans, and the verifier
-receives only them. Citations keep the complete chunk. Truncation and top-k coverage
-remain explicit. Summary roles are filename inferences, not validated KG facts.
+receives only them. Citations keep the complete chunk. Top-k coverage remains
+explicit. Summary roles are filename inferences, not validated KG facts.
+
+The default worker (`CRV_WORKER_MODE=extract`) uses bounded **retrieve-then-extract**:
+1. Retrieve the facet's candidates.
+2. Make one structured LangChain extraction call that returns claims, gaps and an
+   optional rewrite query.
+3. Run one rewrite round only if nothing was found; it shows only new candidates.
+
+Each passage reaches the model once. `CRV_WORKER_MODE=agent` keeps the tool-calling
+LangChain worker, with context editing of older tool results. Live, that worker
+resent full-chunk results on every call: about 160k input tokens per facet, which
+exhausted the turn budget and hit the 100k TPM rate limit.
+
+Answering is designed so the model selects and cites evidence, but never re-types or
+computes it:
+- The composer selects ledger claims by number and cites them with short `[S1]`
+  handles. These are rewritten deterministically to evidence IDs.
+- Any decimal or percentage in the answer must match a cited claim or a
+  deterministic calculation. LLM arithmetic fails verification.
+- The verifier names unsupported claims and sentences. The single repair drops them;
+  a final failing draft is pruned verbatim rather than discarded.
+- One failed facet becomes a coverage gap. A turn fails only if every facet fails, so
+  provider failure is never reported as absent evidence.
+- Research keeps 60k tokens of headroom for answering.
 
 Pre-call token reservations estimate UTF-8 bytes ÷ 3. Provider-reported usage
-enforces the hard `CRV_TURN_TOKENS` limit, now 300,000 by default. A local
-50-candidate payload measured about 12k estimated tokens per search and 5k per
-four-chunk read, roughly 20–70k per facet. Facets beyond the budget report gaps.
-Cost, latency and recall effects need live measurement.
+enforces the hard `CRV_TURN_TOKENS` limit, 300,000 by default. Measured end-to-end
+quality, cost and latency are in
+[the answer evaluation](Docs/evaluation/agent-answers-2026-10-21.md).
 
 KG boosts use Site, ReportCode and **approved** Organisation entities, never
 Projects, while preserving an unrestricted semantic Search leg. Catalogue
@@ -517,6 +545,14 @@ as unmeasured, never passed. Proposed sources in the expert review sheet are not
 ground truth until confirmed. Set server-side `CRV_RETRIEVAL_MODE=search` for the
 Search-only ablation and `kg` for KG-steered retrieval; compare identical releases.
 Progress latency and first **verified answer** latency are measured separately.
+Failed turns and judge failures are recorded per question. A failed turn counts as a
+miss; a question whose judging failed counts as unmeasured. Neither aborts the run.
+`--answers-out` exports answers, with claims and citations but no source text, in the
+shared golden `score` format for a second, repeated judge.
+
+On AKS, the `answer-eval` job runs the backend in the same pod, bound to loopback
+(native sidecar, local owner, agent identity, no Service or ingress). It evaluates
+it, then cross-scores the answers with the shared golden judge.
 These tools do not establish scientific accuracy or production readiness by themselves.
 
 Retrieval-depth experiments use `python -m crv_agent.evaluation.retrieval`. It emits

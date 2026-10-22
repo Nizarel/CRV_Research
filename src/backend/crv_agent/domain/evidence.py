@@ -1,7 +1,18 @@
+import re
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import WithJsonSchema, field_validator
 
 from crv_agent.domain.planning import Contract
+
+_DECIMAL = re.compile(r"[+-]?\d+(?:[.,]\d+)?")
+# Strict structured outputs reject Pydantic's Decimal pattern (regex lookaround), so the
+# published schema is a plain union; numeric_value_or_none parses and normalizes.
+ModelDecimal = Annotated[
+    Decimal | None,
+    WithJsonSchema({"anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]}),
+]
 
 
 class Evidence(Contract):
@@ -37,13 +48,27 @@ class Claim(Contract):
     quote: str
     subject: str
     quantity: str | None
-    value: Decimal | None
+    value: ModelDecimal
     unit: str | None
     date: str | None
     conditions: str | None
     scope: str | None
     calculation_index: int | None = None
     qualifier: Literal["<", "<=", ">", ">=", "~"] | None = None
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def numeric_value_or_none(cls, value: object) -> object:
+        """Accept decimal commas; ranges and words stay qualitative (value None, exact quote).
+
+        One unparsable value must not invalidate a worker's whole structured result.
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip().replace("\u202f", "").replace("\u00a0", "").replace(" ", "")
+        if _DECIMAL.fullmatch(text):
+            return text.replace(",", ".")
+        return None
 
 
 class WorkerResult(Contract):

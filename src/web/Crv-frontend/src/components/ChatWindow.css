@@ -1,0 +1,23 @@
+.chat-window {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.chat-window-inner {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 24px 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-error-banner {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  color: #7a271a;
+  font-size: 13.5px;
+}

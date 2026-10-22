@@ -198,3 +198,175 @@ async def test_async_token_provider_models_close_without_sync_client() -> None:
     assert model.root_client is None and model.root_async_client is not None
     async with AsyncExitStack() as stack:
         close_clients(stack, model)
+
+
+@pytest.mark.asyncio
+async def test_one_failed_facet_becomes_a_gap_but_all_failed_facets_fail_the_turn() -> None:
+    from crv_agent.domain.evidence import WorkerResult
+    from crv_agent.domain.planning import Facet
+
+    class TwoFacets(FakeModels):
+        async def plan(self, question: str, history: list[str], budget: Budget):
+            result = await super().plan(question, history, budget)
+            return result.model_copy(update={
+                "intent": "comparison", "facets": [Facet(question="ok"), Facet(question="bad")],
+            })
+
+    class Partial(FakeWorker):
+        def __init__(self, fail_all: bool) -> None:
+            self.fail_all = fail_all
+
+        async def run(self, question: str, release: str, hashes: list[str], budget: Budget):
+            if self.fail_all or question.startswith("bad"):
+                raise ValueError("Failed to parse structured output")
+            return WorkerResult(claims=[CLAIM], gaps=[]), [SOURCE]
+
+    def context(fail_all: bool) -> ResearchContext:
+        return ResearchContext(
+            models=TwoFacets(), knowledge=FakeKnowledge(), worker=Partial(fail_all),
+            budget=Budget(), search_release="r1", kg_release="kg1", trace_id="t",
+        )
+
+    graph = build_graph(InMemorySaver(serde=serializer()))
+    result = await graph.ainvoke(
+        {"question": "Compare", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}}, context=context(False),
+    )
+    assert result["answer"].status == "partial"
+    assert any("facet failed (ValueError)" in g for g in result["answer"].coverage.gaps)
+    with pytest.raises(ValueError):
+        await graph.ainvoke(
+            {"question": "Compare", "history": []},
+            {"configurable": {"thread_id": str(uuid4())}}, context=context(True),
+        )
+
+
+def test_error_events_report_innermost_exception_types() -> None:
+    from crv_agent.api.app import leaf_types
+
+    nested = ExceptionGroup("g", [ValueError("x"), ExceptionGroup("h", [KeyError("y")])])
+    assert leaf_types(nested) == "KeyError,ValueError"
+    assert leaf_types(RuntimeError()) == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_repair_drops_only_verifier_rejected_claims() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+
+    good = CLAIM
+    bad = CLAIM.model_copy(update={"text": "Recovery dated wrongly", "date": "2015"})
+
+    class Models(FakeModels):
+        def __init__(self) -> None:
+            super().__init__(intent="synthesis")
+            self.ledgers: list[list[object]] = []
+
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.ledgers.append(list(claims))
+            await budget.reserve(model=1, tokens=10)
+            return AnswerDraft(content="Recovery 87.5 % [S1]", claims=list(claims),
+                               insufficient=False)
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            await budget.reserve(model=1, tokens=10)
+            if bad in draft.claims:
+                return Verdict(supported=False, reasons=["date not supported"],
+                               unsupported_claims=[draft.claims.index(bad)])
+            return Verdict(supported=True, reasons=[])
+
+    class TwoClaims(FakeWorker):
+        async def run(self, question: str, release: str, hashes: list[str], budget: Budget):
+            from crv_agent.domain.evidence import WorkerResult
+
+            await budget.reserve(retrieval=1)
+            return WorkerResult(claims=[good, bad], gaps=[]), [SOURCE]
+
+    models = Models()
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=models, knowledge=FakeKnowledge(), worker=TwoClaims(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    assert len(models.ledgers) == 2 and bad not in models.ledgers[1]
+    assert result["answer"].claims == [good]
+
+
+def test_prune_removes_only_verbatim_unsupported_sentences_and_keeps_cited_claims() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.orchestration.nodes.answer import prune
+
+    other = CLAIM.model_copy(update={"evidence_ids": ["S2"], "text": "Pilot dedicated to talc"})
+    draft = AnswerDraft(
+        content="Recovery was 87.5 % [S1]. The pilot was dedicated to talc [S2].",
+        claims=[CLAIM, other], insufficient=False,
+    )
+    pruned = prune(draft, Verdict(
+        supported=False, reasons=["overstated"],
+        unsupported_sentences=["The pilot was dedicated to talc [S2]."],
+    ))
+    assert pruned is not None
+    assert pruned.content == "Recovery was 87.5 % [S1]."
+    assert pruned.claims == [CLAIM]  # S2 marker removed with its sentence
+    assert prune(draft, Verdict(supported=False, reasons=["x"])) is None
+    assert prune(draft, Verdict(
+        supported=False, reasons=["x"], unsupported_sentences=["not in content"],
+    )) is None
+    everything = prune(draft, Verdict(
+        supported=False, reasons=["x"], unsupported_sentences=[draft.content],
+    ))
+    assert everything is None
+
+
+@pytest.mark.asyncio
+async def test_failed_final_draft_is_pruned_to_a_partial_verified_answer() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+
+    class Models(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.compositions += 1
+            await budget.reserve(model=1, tokens=10)
+            return AnswerDraft(
+                content="Recovery was 87.5 % [S1]. It is the best result ever.",
+                claims=list(claims)[:1], insufficient=False,
+            )
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            await budget.reserve(model=1, tokens=10)
+            return Verdict(supported=False, reasons=["unsupported superlative"],
+                           unsupported_sentences=["It is the best result ever."])
+
+    models = Models()
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=models, knowledge=FakeKnowledge(), worker=FakeWorker(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    answer = result["answer"]
+    assert models.compositions == 2
+    assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
+    assert answer.citations == [SOURCE]
+    assert answer.reasons == ["Statements the verifier found unsupported were removed."]
+
+
+def test_markers_must_bind_to_selected_claims_and_orphans_are_pruned() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.orchestration.nodes.answer import prune
+    from crv_agent.services.verification import verify_draft
+
+    other = SOURCE.model_copy(update={"id": "S2", "content": "Other fact."})
+    draft = AnswerDraft(
+        content="Recovery was 87.5 % [S1]. Other fact [S2].", claims=[CLAIM], insufficient=False,
+    )
+    assert "Answer cites evidence not bound to a selected claim" in verify_draft(
+        draft, [SOURCE, other], "r1",
+    )
+    pruned = prune(draft, Verdict(supported=False, reasons=["x"], unsupported_claims=[]
+                                  ) .model_copy(update={"unsupported_sentences": ["nothing"]}))
+    assert pruned is not None and pruned.content == "Recovery was 87.5 % [S1]."
+    assert verify_draft(pruned, [SOURCE, other], "r1") == []

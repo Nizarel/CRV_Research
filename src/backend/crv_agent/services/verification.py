@@ -71,4 +71,44 @@ def verify_draft(
     cited = {cid for claim in draft.claims for cid in claim.evidence_ids}
     if cited - markers:
         errors.append("Every claim needs a visible citation marker")
+    if markers - cited:
+        # Citations must resolve to returned claims, not just to some retrieved evidence.
+        errors.append("Answer cites evidence not bound to a selected claim")
+    if loose := ungrounded_numbers(draft.content, draft.claims, calculations or []):
+        errors.append(UNGROUNDED + ", ".join(loose))
     return sorted(set(errors))
+
+
+UNGROUNDED = "Answer states numbers not in cited claims or deterministic calculations: "
+# Measurement-like numbers: decimals or percentages. Plain integers (years, counts, sample
+# names, page numbers) are not checked; they rarely carry derived arithmetic.
+_MEASURE = re.compile(r"(?<![\w.,])(\d+[.,]\d+|\d+(?=\s?%))(?![\d])")
+
+
+def ungrounded_numbers(
+    content: str, claims: list[Claim], calculations: list[Calculation],
+) -> list[str]:
+    """Decimals/percentages in the answer that no selected claim or calculation supports.
+
+    The language model never does arithmetic: derived values must come from the
+    deterministic calculator. A stated number matches a supported one exactly or as its
+    rounding to the stated precision.
+    """
+    from decimal import Decimal
+
+    text = re.sub(r"\[[^\[\]]+\]", " ", content)
+    supported: list[Decimal] = [c.value for c in claims if c.value is not None]
+    supported += [calculation.value for calculation in calculations]
+    for claim in claims:
+        supported += [
+            Decimal(m["number"].replace(",", ".")) for m in _NUMBER.finditer(claim.quote)
+        ]
+    loose = []
+    for match in _MEASURE.finditer(text):
+        raw = match.group(1)
+        stated = Decimal(raw.replace(",", "."))
+        places = len(raw.replace(",", ".").partition(".")[2])
+        tolerance = Decimal(5) / Decimal(10) ** (places + 1)
+        if not any(abs(stated - value) <= tolerance for value in supported):
+            loose.append(raw)
+    return list(dict.fromkeys(loose))

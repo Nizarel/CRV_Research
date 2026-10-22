@@ -15,6 +15,7 @@ from crv_agent.domain.planning import DocumentPage, Entity, Facet, QueryPlan
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.orchestration.graph import build_graph
 from crv_agent.services.evidence_pack import (
+    EvidencePolicy,
     best_window,
     expose,
     exposed_text,
@@ -122,6 +123,7 @@ async def test_pack_focuses_excerpts_and_never_grounds_in_unseen_text() -> None:
     found: dict[str, Evidence] = {}
     search_tool, read_tool = evidence_tools(
         Retrieval(search), "r1", [], budget, found, "CR-AR-PE-01-15 recovery?",
+        EvidencePolicy(pack_size=16, excerpt_characters=1200),
     )
     listing = json.loads(await search_tool.ainvoke({"query": "pilot recovery"}))
     assert len(listing["evidence"]) == 16
@@ -285,3 +287,15 @@ async def test_no_precise_entities_never_enumerates_whole_corpus_as_a_boost() ->
     ]
     assert result["answer"].status in {"answered", "partial"}
     assert result["answer"].citations[0].exposed == result["evidence"][0].exposed
+
+
+@pytest.mark.asyncio
+async def test_default_policy_exposes_all_fifty_full_chunks() -> None:
+    long_text = "contexte " * 400 + SOURCE.content
+    hits = [hit.model_copy(update={"content": long_text}) for hit in candidates()]
+    found: dict[str, Evidence] = {}
+    search_tool, _ = evidence_tools(Retrieval(Search(hits)), "r1", [], Budget(), found, "Q?")
+    listing = json.loads(await search_tool.ainvoke({"query": "recovery"}))
+    assert len(listing["evidence"]) == 50 and listing["more_candidates"] == []
+    assert all(not item["truncated"] and item["text"] == long_text for item in listing["evidence"])
+    assert not claim_errors(CLAIM.model_copy(update={"evidence_ids": ["S49"]}), found)

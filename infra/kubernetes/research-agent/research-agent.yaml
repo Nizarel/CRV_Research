@@ -221,3 +221,77 @@ spec:
         - {name: golden, configMap: {name: crv-golden-agent}}
         - {name: results, emptyDir: {sizeLimit: 512Mi}}
         - {name: tmp, emptyDir: {sizeLimit: 128Mi}}
+---
+# JOB answer-eval: end-to-end verified answers. The backend runs in the same pod on loopback
+# (native sidecar, local owner, agent identity, no Service/ingress); the evaluator calls it,
+# grades key facts with the judge, then the shared golden scorer re-judges the answer text.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-agent-answer-eval-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-research-agent, crv.agent/job: answer-eval}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-research-agent-eval, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-research-agent
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      initContainers:
+        - name: backend
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          restartPolicy: Always
+          args: [crv-agent, serve, --host, 127.0.0.1, --port, "8000"]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          env:
+            - {name: CRV_TURN_SECONDS, value: "${TURN_SECONDS}"}
+          # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
+          startupProbe:
+            exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]}
+            timeoutSeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 3Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+        - name: answers
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [python, -m, crv_agent.evaluation.cli, --base-url, "http://127.0.0.1:8000",
+                 --dataset, /golden/crv_golden.jsonl, --split, "${EVAL_SPLIT}",
+                 --concurrency, "${EVAL_CONCURRENCY}", --wait-ready, "300", --judge,
+                 --output, /results/report.json, --answers-out, /results/answers.jsonl,
+                 --print-answers, --confirm-live${ANSWER_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          env:
+            - {name: CRV_EVAL_JUDGE_DEPLOYMENT, value: "${JUDGE_DEPLOYMENT}"}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: golden, mountPath: /golden, readOnly: true}
+            - {name: results, mountPath: /results}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: score
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          command: [python, -m, ingest_pipeline.tools.golden]
+          args: [score, --golden, /golden/crv_golden.jsonl, --contexts, /results/answers.jsonl,
+                 --judge-deployment, "${JUDGE_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
+                 --repeats, "${JUDGE_REPEATS}"]
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: golden, mountPath: /golden, readOnly: true}
+            - {name: results, mountPath: /results, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: golden, configMap: {name: crv-golden-agent}}
+        - {name: results, emptyDir: {sizeLimit: 512Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}

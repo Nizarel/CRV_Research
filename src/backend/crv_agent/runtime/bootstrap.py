@@ -13,6 +13,7 @@ from crv_agent.adapters.postgres.persistence import PostgresPersistence
 from crv_agent.api.app import create_app
 from crv_agent.api.dependencies import AppServices
 from crv_agent.api.identity import EntraIdentity, Identity, LocalIdentity
+from crv_agent.orchestration.extraction import ExtractionWorker
 from crv_agent.orchestration.graph import build_graph
 from crv_agent.orchestration.workers import EvidenceWorker
 from crv_agent.runtime.infrastructure import infrastructure
@@ -53,13 +54,14 @@ def application(settings: Settings) -> FastAPI:
             app.state.services = AppServices(
                 persistence=PostgresPersistence(memory_pool), identity=identity,
                 models=language_models,
-                worker=EvidenceWorker(
-                    models["worker"], Retrieval(infra.search), settings.output_tokens,
+                worker=(ExtractionWorker if settings.worker_mode == "extract" else EvidenceWorker)(
+                    models["worker"], Retrieval(infra.search), settings.worker_output_tokens,
                     policy, reranker,
                 ),
                 knowledge=infra.knowledge, graph=build_graph(checkpointer(memory_pool)),
                 search_release=settings.search_release, kg_release=settings.kg_release,
                 ready=ready, model_calls=settings.model_calls, turn_tokens=settings.turn_tokens,
+                turn_seconds=settings.turn_seconds, facet_concurrency=settings.facet_concurrency,
                 retrieval_mode=settings.retrieval_mode,
             )
             yield

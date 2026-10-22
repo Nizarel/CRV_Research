@@ -68,8 +68,10 @@ async def infrastructure(
         ):
             chat_model = ChatOpenAI(
                 model=deployment, base_url=endpoint + "/", api_key=token_provider,
-                max_completion_tokens=settings.output_tokens,
-                max_retries=0, timeout=30, include_response_headers=False,
+                max_completion_tokens=(
+                    settings.worker_output_tokens if role == "worker" else settings.output_tokens
+                ),
+                max_retries=settings.model_retries, timeout=60, include_response_headers=False,
             )
             close_clients(stack, chat_model)
             models[role] = chat_model

@@ -64,7 +64,8 @@ def test_policy_bounds() -> None:
         EvidencePolicy(pack_size=0)
     with pytest.raises(ValueError):
         EvidencePolicy(excerpt_characters=9000, read_characters=8000)
-    assert EvidencePolicy().pack_size == 16
+    default = EvidencePolicy()
+    assert (default.pack_size, default.excerpt_characters) == (50, 8000)
 
 
 @pytest.mark.parametrize(("size", "excerpt_chars"), [(12, 1200), (24, 1200), (16, 2000)])
@@ -195,3 +196,14 @@ def test_identifier_promotion_uses_document_code() -> None:
 
     coded = SOURCE.model_copy(update={"document_code": "CR/AR/PE/01/15", "content": "x"})
     assert identifier_rank(coded, ["CR/AR/PE/01/15"]) == -2
+
+
+def test_verifier_windows_focus_on_quotes_within_exposed_text() -> None:
+    from crv_agent.services.evidence_pack import expose, quote_windows
+
+    content = "a" * 5000 + "Recovery 87.5 % at pilot scale." + "b" * 5000
+    hit = expose(SOURCE.model_copy(update={"content": content}), (0, len(content)))
+    [window] = quote_windows(hit, ["Recovery 87.5 % at pilot scale."], margin=100)
+    assert window == "a" * 100 + "Recovery 87.5 % at pilot scale." + "b" * 100
+    unseen = expose(SOURCE.model_copy(update={"content": content}), (0, 4000))
+    assert quote_windows(unseen, ["Recovery 87.5 % at pilot scale."]) == [content[:4000]]

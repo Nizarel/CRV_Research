@@ -1,18 +1,19 @@
 import json
 import os
+import re
 from typing import TypeVar
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from crv_agent.domain.answers import AnswerDraft, Verdict
+from crv_agent.domain.answers import AnswerDraft, ComposedAnswer, Conflict, Verdict
 from crv_agent.domain.evidence import CalculationRequest, CandidateRanking, Claim, Evidence
 from crv_agent.domain.execution import Budget, estimate_tokens
 from crv_agent.domain.planning import QueryPlan
 from crv_agent.orchestration.middleware import UsageRecorder
 from crv_agent.orchestration.prompts import COMPOSE_RULES, PLAN_RULES, RERANK_RULES, VERIFY_RULES
-from crv_agent.services.evidence_pack import exposed_text
+from crv_agent.services.evidence_pack import quote_windows
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -59,12 +60,52 @@ class LangChainModels:
     async def compose(
         self, question: str, claims: list[Claim], context: str, budget: Budget,
     ) -> AnswerDraft:
-        return await self._invoke(
-            self.answer, AnswerDraft, COMPOSE_RULES,
+        # Short citation handles: long opaque evidence IDs are error-prone to copy.
+        handles = {
+            evidence_id: f"S{n}" for n, evidence_id in enumerate(
+                dict.fromkeys(e for c in claims for e in c.evidence_ids), 1,
+            )
+        }
+        composed = await self._invoke(
+            self.answer, ComposedAnswer, COMPOSE_RULES,
             json.dumps({
-                "question": question, "claims": [c.model_dump(mode="json") for c in claims],
+                "question": question,
+                "claims": [
+                    {
+                        "number": n, "cite": [handles[e] for e in c.evidence_ids],
+                        **c.model_dump(mode="json", exclude_none=True, exclude={"evidence_ids"}),
+                    } for n, c in enumerate(claims)
+                ],
                 "context": context,
             }, ensure_ascii=False), budget,
+        )
+        evidence_ids = {handle: evidence_id for evidence_id, handle in handles.items()}
+        content = re.sub(
+            r"\[(S\d+)\]", lambda m: f"[{evidence_ids.get(m.group(1), m.group(1))}]",
+            composed.content,
+        )
+        # Unknown numbers are dropped here; deterministic verification then rejects any
+        # citation marker or number not backed by a selected ledger claim.
+        selected = [
+            claims[n] for n in dict.fromkeys(composed.claim_numbers) if 0 <= n < len(claims)
+        ]
+        position = {id(claim): n for n, claim in enumerate(selected)}
+        conflicts = []
+        for item in composed.conflicts:
+            indices = sorted({
+                position[id(claims[n])] for n in item.claim_numbers
+                if 0 <= n < len(claims) and id(claims[n]) in position
+            })
+            # A conflict needs two selected claims that actually differ.
+            if len(indices) >= 2 and len({
+                (selected[i].value, selected[i].unit, selected[i].quote) for i in indices
+            }) >= 2:
+                conflicts.append(Conflict(
+                    subject=item.subject, quantity=item.quantity, claim_indices=indices,
+                ))
+        return AnswerDraft(
+            content=content, claims=selected, insufficient=composed.insufficient,
+            conflicts=conflicts,
         )
 
     async def verify(
@@ -74,10 +115,16 @@ class LangChainModels:
             self.verifier, Verdict, VERIFY_RULES,
             json.dumps({
                 "draft": draft.model_dump(mode="json"),
+                # Focused windows around each claim quote: enough to check bindings without
+                # resending whole chunks (the deterministic contract checks quotes exactly).
                 "sources": [
                     {
-                        **e.model_dump(mode="json", exclude={"content", "exposed"}),
-                        "shown_text": exposed_text(e),
+                        **e.model_dump(
+                            mode="json", exclude={"content", "exposed", "caption"},
+                        ),
+                        "shown_text": quote_windows(e, [
+                            c.quote for c in draft.claims if e.id in c.evidence_ids
+                        ]),
                     } for e in evidence
                 ],
                 "calculation_and_coverage_context": context,
