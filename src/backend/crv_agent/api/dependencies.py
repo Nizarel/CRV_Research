@@ -31,3 +31,4 @@ class AppServices:
     retrieval_mode: Literal["kg", "search"] = "kg"
     # Evaluation only (loopback local owner): stream ledger and exposed passages per turn.
     diagnostics: bool = False
+    repair_mode: Literal["recompose", "prune"] = "recompose"

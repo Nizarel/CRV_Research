@@ -4,7 +4,7 @@ import re
 from langgraph.runtime import Runtime
 
 from crv_agent.domain.answers import Answer, AnswerDraft, Conflict, Verdict
-from crv_agent.domain.evidence import Claim
+from crv_agent.domain.evidence import Calculation, Claim
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.orchestration.state import ResearchState
 from crv_agent.services.verification import ungrounded_numbers, verify_draft
@@ -48,7 +48,7 @@ async def answer(
         draft: AnswerDraft | None = None
         verdict: Verdict | None = None
         pruned = False
-        for _ in range(2):
+        for round_number in range(2):
             draft = await context.models.compose(
                 state["question"], claims, details + "\n" + "\n".join(reasons), context.budget,
             )
@@ -62,6 +62,13 @@ async def answer(
             reasons.extend(verdict.reasons if not verdict.supported else [])
             if not reasons:
                 break
+            if context.repair_mode == "prune" and round_number == 0:
+                candidate = prune_ungrounded(draft, verdict, state["calculations"])
+                if candidate is not None and not verify_draft(
+                    candidate, evidence, context.search_release, state["calculations"],
+                ):
+                    draft, reasons, pruned = candidate, [], True
+                    break
             # Converge on the single repair: drop exactly the claims the verifier rejected,
             # rather than asking the composer to rewrite a mis-bound claim it cannot edit.
             rejected = [
@@ -72,12 +79,7 @@ async def answer(
             if not claims:
                 break
         if reasons and draft is not None and verdict is not None:
-            loose = ungrounded_numbers(draft.content, draft.claims, state["calculations"])
-            verdict = verdict.model_copy(update={"unsupported_sentences": [
-                *verdict.unsupported_sentences,
-                *(s for s in sentences(draft.content) if any(n in s for n in loose)),
-            ]})
-            candidate = prune(draft, verdict)
+            candidate = prune_ungrounded(draft, verdict, state["calculations"])
             if candidate is not None and not verify_draft(
                 candidate, evidence, context.search_release, state["calculations"],
             ):
@@ -111,6 +113,17 @@ async def answer(
 
 
 _MARKER = re.compile(r"\[([^\[\]]+)\]")
+
+
+def prune_ungrounded(
+    draft: AnswerDraft, verdict: Verdict, calculations: list[Calculation],
+) -> AnswerDraft | None:
+    """Prune verifier-rejected content plus sentences carrying numbers no claim grounds."""
+    loose = ungrounded_numbers(draft.content, draft.claims, calculations)
+    return prune(draft, verdict.model_copy(update={"unsupported_sentences": [
+        *verdict.unsupported_sentences,
+        *(s for s in sentences(draft.content) if any(n in s for n in loose)),
+    ]}))
 
 
 def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:

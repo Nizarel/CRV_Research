@@ -88,6 +88,32 @@ def test_calculator_units_and_invalid_inputs() -> None:
         )
 
 
+def test_calculator_accepts_unit_spellings_but_not_different_grades_or_dimensions() -> None:
+    # Q65 shape: concentrate 840 T at 24,6 % Cu; feed 8 800 t at 2,78 %.
+    ledger = [
+        claim(value="840", unit="T"), claim(value="24.6", unit="% Cu"),
+        claim(value="8.8", unit="kt"), claim(value="2.78", unit="%"),
+    ]
+    request = CalculationRequest(
+        operation="weighted_recovery", input_claims=[0, 1, 2, 3], target_unit=None,
+    )
+    result = calculate(request, ledger)
+    assert result.unit == "%" and round(result.value, 2) == Decimal("84.47")
+    ratio = CalculationRequest(operation="ratio", input_claims=[0, 1], target_unit=None)
+    assert calculate(ratio, [claim(value="44.46", unit="tonne"), claim(
+        value="46.63", unit="Tonnes",
+    )]).unit == "fraction"
+    total = CalculationRequest(operation="sum", input_claims=[0, 1], target_unit=None)
+    summed = calculate(total, [claim(value="1", unit="kt"), claim(value="500", unit="t")])
+    assert (summed.value, summed.unit) == (Decimal("1.5"), "kt")
+    with pytest.raises(ValueError, match="matching"):
+        calculate(request, [*ledger[:3], claim(value="2.78", unit="% Zn")])
+    with pytest.raises(ValueError, match="compatible"):
+        calculate(ratio, [claim(value="840", unit="t"), claim(value="24.6", unit="%")])
+    with pytest.raises(ValueError, match="compatible"):
+        calculate(ratio, [claim(value="840", unit="tons"), claim(value="800", unit="t")])
+
+
 def test_fusion_deduplicates_chunks_not_versions() -> None:
     other = source(id="S2", chunk_id="c2", content_hash="hash2")
     assert {item.id for item in fuse([[source(), other], [source()]])} == {"S1", "S2"}

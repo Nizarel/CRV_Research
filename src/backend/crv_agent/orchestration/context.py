@@ -18,3 +18,5 @@ class ResearchContext:
     trace_id: str
     retrieval_mode: Literal["kg", "search"] = "kg"
     facet_concurrency: int = 4
+    # prune: delete verifier-rejected text after the first verification before re-composing.
+    repair_mode: Literal["recompose", "prune"] = "recompose"

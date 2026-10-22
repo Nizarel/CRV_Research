@@ -18,7 +18,9 @@ export function EvidenceModal({ evidence, answer, number, onClose }: EvidenceMod
   const segments = highlightSegments(evidence.content, quotes)
   const title = sourceTitle(evidence)
   const meta = sourceMeta(evidence).join(' · ')
-  const location = evidence.locators.join(' · ')
+  const location =
+    evidence.locators.slice(0, 3).join(' · ') +
+    (evidence.locators.length > 3 ? ` · +${evidence.locators.length - 3} autres` : '')
 
   useEffect(() => {
     const dialog = dialogRef.current

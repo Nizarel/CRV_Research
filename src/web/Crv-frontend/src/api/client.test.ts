@@ -118,6 +118,7 @@ describe('base path', () => {
     await createConversation()
 
     expect(fetchMock.mock.calls[0][0]).toBe('/crv/api/v1/conversations')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', body: '{}' })
     vi.unstubAllEnvs()
   })
 })

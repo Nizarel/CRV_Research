@@ -15,7 +15,7 @@ from crv_agent.api.dependencies import AppServices
 from crv_agent.api.identity import EntraIdentity, Identity, LocalIdentity
 from crv_agent.orchestration.extraction import ExtractionWorker
 from crv_agent.orchestration.graph import build_graph
-from crv_agent.orchestration.workers import EvidenceWorker
+from crv_agent.orchestration.workers import EvidenceWorker, Worker
 from crv_agent.runtime.infrastructure import infrastructure
 from crv_agent.runtime.operations import memory_ready
 from crv_agent.runtime.settings import Settings, evidence_policy
@@ -51,18 +51,22 @@ def application(settings: Settings) -> FastAPI:
                 LangChainReranker(language_models, models["worker"])
                 if policy.rerank == "llm" else None
             )
+            retrieval = Retrieval(infra.search)
+            worker: Worker = ExtractionWorker(
+                models["worker"], retrieval, settings.worker_output_tokens, policy, reranker,
+                settings.worker_max_claims,
+            ) if settings.worker_mode == "extract" else EvidenceWorker(
+                models["worker"], retrieval, settings.worker_output_tokens, policy, reranker,
+            )
             app.state.services = AppServices(
                 persistence=PostgresPersistence(memory_pool), identity=identity,
-                models=language_models,
-                worker=(ExtractionWorker if settings.worker_mode == "extract" else EvidenceWorker)(
-                    models["worker"], Retrieval(infra.search), settings.worker_output_tokens,
-                    policy, reranker,
-                ),
+                models=language_models, worker=worker,
                 knowledge=infra.knowledge, graph=build_graph(checkpointer(memory_pool)),
                 search_release=settings.search_release, kg_release=settings.kg_release,
                 ready=ready, model_calls=settings.model_calls, turn_tokens=settings.turn_tokens,
                 turn_seconds=settings.turn_seconds, facet_concurrency=settings.facet_concurrency,
                 retrieval_mode=settings.retrieval_mode, diagnostics=settings.eval_diagnostics,
+                repair_mode=settings.repair_mode,
             )
             yield
     return create_app(lifespan=lifespan)

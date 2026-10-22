@@ -127,7 +127,7 @@ def create_app(
                 ),
                 search_release=thread.search_release, kg_release=thread.kg_release,
                 trace_id=str(uuid4()), retrieval_mode=deps.retrieval_mode,
-                facet_concurrency=deps.facet_concurrency,
+                facet_concurrency=deps.facet_concurrency, repair_mode=deps.repair_mode,
             )
             final: Answer | None = None
             persisted = False

@@ -1,12 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { createConversation, fetchHistory, streamChatTurn } from '../api/client'
+import { newId } from '../ids'
 import type { Answer, ChatMessage, Run } from '../types'
-
-function newId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
 
 function isAnswer(result: Run['result']): result is Answer {
   return result !== null && 'status' in result && 'content' in result

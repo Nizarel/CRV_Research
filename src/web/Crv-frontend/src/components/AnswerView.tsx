@@ -31,7 +31,7 @@ export function AnswerView({ answer, onOpenEvidence }: AnswerViewProps) {
   const numbers = citationNumbers(answer)
   const byId = new Map(answer.citations.map((citation) => [citation.id, citation]))
   const notice = STATUS_NOTICE[answer.status]
-  const limits = [...answer.coverage.gaps, ...answer.reasons]
+  const limits = [...new Set([...answer.coverage.gaps, ...answer.reasons])]
 
   const chip = (evidence: Evidence, key: string) => (
     <button

@@ -13,17 +13,19 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Deploy')] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $WebDigest,
     [Parameter(Mandatory, ParameterSetName = 'Deploy')] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $AgentDigest,
     [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $ChatDeployment = 'gpt-6.1-sol',
+    # Role defaults = adopted R3w (2026-10-22 dev eval): extraction on model-router, efforts low/low/medium/low.
     [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $PlannerDeployment = '',
-    [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $WorkerDeployment = '',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $WorkerDeployment = 'model-router',
     [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $AnswerDeployment = '',
     [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $VerifierDeployment = '',
-    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $PlannerEffort = '',
-    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $WorkerEffort = '',
-    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $AnswerEffort = '',
-    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $VerifierEffort = '',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $PlannerEffort = 'low',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $WorkerEffort = 'low',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $AnswerEffort = 'medium',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $VerifierEffort = 'low',
     [Parameter(ParameterSetName = 'Deploy')] [ValidateRange(1, 6)] [int] $FacetConcurrency = 4,
     [Parameter(ParameterSetName = 'Deploy')] [ValidateRange(30, 280)] [int] $TurnSeconds = 180,
     [Parameter(ParameterSetName = 'Deploy')] [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\.Network/ApplicationGatewayWebApplicationFirewallPolicies/[A-Za-z0-9._-]+$')] [string] $ChatWafPolicyId = '/subscriptions/b6e08f96-9a62-46d0-b276-8dc80e6bc02a/resourceGroups/rg-CRV-southcentralus/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/agw-crv-southcentralus-chat-waf',
     [Parameter(ParameterSetName = 'Deploy')] [string] $RenderPath = '',
     [Parameter(Mandatory, ParameterSetName = 'Remove')] [switch] $Remove,
     [string] $ResourceGroup = 'rg-CRV-southcentralus',
@@ -54,6 +56,7 @@ $values = [ordered]@{
     ACR_LOGIN_SERVER    = $AcrLoginServer
     WEB_DIGEST          = $WebDigest
     AGENT_DIGEST        = $AgentDigest
+    CHAT_WAF_POLICY_ID  = $ChatWafPolicyId
     PLANNER_DEPLOYMENT  = if ($PlannerDeployment) { $PlannerDeployment } else { $chat }
     WORKER_DEPLOYMENT   = if ($WorkerDeployment) { $WorkerDeployment } else { $chat }
     ANSWER_DEPLOYMENT   = if ($AnswerDeployment) { $AnswerDeployment } else { $chat }

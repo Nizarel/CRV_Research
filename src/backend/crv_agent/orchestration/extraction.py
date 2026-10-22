@@ -37,9 +37,11 @@ class ExtractionWorker:
     def __init__(
         self, model: BaseChatModel, retrieval: Retrieval, output_tokens: int,
         policy: EvidencePolicy | None = None, reranker: Reranker | None = None,
+        max_claims: int = 8,
     ) -> None:
         self.model, self.retrieval, self.output_tokens = model, retrieval, output_tokens
         self.policy, self.reranker = policy or EvidencePolicy(), reranker
+        self.max_claims = max_claims
         self.schema = json.dumps(Extraction.model_json_schema())
 
     async def run(
@@ -74,7 +76,7 @@ class ExtractionWorker:
                     "text": hit.content[span[0]:span[1]],
                 })
             extraction = await self.extract(question, passages, round_number, claims, budget)
-            claims.extend(extraction.claims)
+            claims.extend(extraction.claims[:self.max_claims])
             gaps.extend(extraction.gaps)
             # Rewrite only when nothing usable was found: a second sequential round costs
             # another full model call on the critical path.
@@ -90,6 +92,7 @@ class ExtractionWorker:
     ) -> Extraction:
         data = json.dumps({
             "facet": question, "round": round_number + 1, "max_rounds": MAX_ROUNDS,
+            "max_claims": self.max_claims,
             "claims_already_found": [c.text for c in previous], "passages": passages,
         }, ensure_ascii=False)
         await budget.reserve(model=1, tokens=(

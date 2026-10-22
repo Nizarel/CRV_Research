@@ -409,6 +409,49 @@ async def test_repair_drops_only_verifier_rejected_claims() -> None:
     assert result["answer"].claims == [good]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mode", "rounds"), [("recompose", 2), ("prune", 1)])
+async def test_prune_repair_mode_skips_the_second_compose_and_verify(
+    mode: str, rounds: int,
+) -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+
+    unsupported = "It is the best result ever recorded."
+
+    class Models(FakeModels):
+        def __init__(self) -> None:
+            super().__init__()
+            self.verifications = 0
+
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.compositions += 1
+            return AnswerDraft(
+                content=f"Recovery was 87.5 % [S1]. {unsupported}", claims=claims[:1],
+                insufficient=False,
+            )
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            self.verifications += 1
+            return Verdict(
+                supported=False, reasons=["unsupported superlative"],
+                unsupported_sentences=[unsupported],
+            )
+
+    models = Models()
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=models, knowledge=FakeKnowledge(), worker=FakeWorker(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t", repair_mode=mode,  # type: ignore[arg-type]
+        ),
+    )
+    answer = result["answer"]
+    assert (models.compositions, models.verifications) == (rounds, rounds)
+    assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
+    assert answer.claims == [CLAIM]
+
+
 def test_prune_removes_only_verbatim_unsupported_sentences_and_keeps_cited_claims() -> None:
     from crv_agent.domain.answers import AnswerDraft, Verdict
     from crv_agent.orchestration.nodes.answer import prune

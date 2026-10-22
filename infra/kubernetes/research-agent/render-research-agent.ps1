@@ -22,17 +22,19 @@ param(
     [string] $SearchEndpoint = 'https://gptkb-awmc6icu2kueq.search.windows.net',
     [string] $OpenAiEndpoint = 'https://cog-awmc6icu2kueq.cognitiveservices.azure.com/',
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $ChatDeployment = 'gpt-6.1-sol',
-    # Per-role overrides; empty uses -ChatDeployment.
+    # Per-role overrides; empty uses -ChatDeployment. Defaults = adopted R3w (2026-10-22 dev eval).
     [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $PlannerDeployment = '',
-    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $WorkerDeployment = '',
+    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $WorkerDeployment = 'model-router',
     [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $AnswerDeployment = '',
     [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $VerifierDeployment = '',
     # Per-role reasoning effort; empty sends none (deployment default).
-    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $PlannerEffort = '',
-    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $WorkerEffort = '',
-    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $AnswerEffort = '',
-    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $VerifierEffort = '',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $PlannerEffort = 'low',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $WorkerEffort = 'low',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $AnswerEffort = 'medium',
+    [ValidateSet('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh')] [string] $VerifierEffort = 'low',
     [ValidateRange(1, 6)] [int] $FacetConcurrency = 4,
+    [ValidateRange(1, 24)] [int] $WorkerMaxClaims = 8,
+    [ValidateSet('recompose', 'prune')] [string] $RepairMode = 'recompose',
     # answer-eval: scorer arm label of this configuration, and the exposed/ledger funnel arms.
     [ValidatePattern('^[A-Za-z0-9_-]{1,32}$')] [string] $AnswerArm = 'AGENT',
     [switch] $Diagnostics,
@@ -50,6 +52,8 @@ param(
     [ValidateRange(1, 8)] [int] $Concurrency = 3,
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $JudgeDeployment = 'gpt-5.4-mini',
     [ValidateRange(1, 5)] [int] $JudgeRepeats = 3,
+    # Judge calls in flight; exposed-passage contexts (~50K tokens each) need 1-2 under 504K TPM.
+    [ValidateRange(1, 8)] [int] $ScoreConcurrency = 6,
     [ValidateRange(900, 86400)] [int] $DeadlineSeconds = 14400,
     [ValidateRange(30, 600)] [int] $TurnSeconds = 180,
     [string] $GoldenPath = (Join-Path $PSScriptRoot '../../../golden/crv_golden.jsonl'),
@@ -89,6 +93,8 @@ $values = [ordered]@{
     ANSWER_EFFORT       = $AnswerEffort
     VERIFIER_EFFORT     = $VerifierEffort
     FACET_CONCURRENCY   = $FacetConcurrency.ToString()
+    WORKER_MAX_CLAIMS   = $WorkerMaxClaims.ToString()
+    REPAIR_MODE         = $RepairMode
     ANSWER_ARM          = $AnswerArm
     EVAL_DIAGNOSTICS    = if ($Diagnostics) { 'true' } else { 'false' }
     SCORE_CONTEXTS      = if ($Diagnostics) { '/results/stages.jsonl' } else { '/results/answers.jsonl' }
@@ -105,6 +111,7 @@ $values = [ordered]@{
     TURN_SECONDS        = $TurnSeconds.ToString()
     JUDGE_DEPLOYMENT    = $JudgeDeployment
     JUDGE_REPEATS       = $JudgeRepeats.ToString()
+    SCORE_CONCURRENCY   = $ScoreConcurrency.ToString()
     DEADLINE_SECONDS    = $DeadlineSeconds.ToString()
 }
 foreach ($login in $AgentIdentityName, $AdminIdentityName) {

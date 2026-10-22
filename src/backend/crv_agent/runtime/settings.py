@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     worker_output_tokens: int = Field(default=8192, ge=1024, le=32768)
     # extract: bounded retrieve-then-extract (default); agent: LangChain tool-loop worker.
     worker_mode: Literal["extract", "agent"] = "extract"
+    # Claims kept per facet and extraction round (extract mode).
+    worker_max_claims: int = Field(default=8, ge=1, le=24)
+    # prune: after a failed verification, delete rejected text before composing a second draft.
+    repair_mode: Literal["recompose", "prune"] = "recompose"
     facet_concurrency: int = Field(default=4, ge=1, le=6)
     turn_tokens: int = Field(default=300_000, ge=8192, le=1_000_000)
     model_calls: int = Field(default=24, ge=4, le=40)

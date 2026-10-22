@@ -40,7 +40,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function createConversation(): Promise<Thread> {
-  return request<Thread>('/conversations', { method: 'POST' })
+  // The gateway WAF rejects a body-less POST (403); the backend ignores this empty object.
+  return request<Thread>('/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  })
 }
 
 export function fetchHistory(threadId: string): Promise<Run[]> {

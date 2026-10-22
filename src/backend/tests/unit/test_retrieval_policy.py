@@ -183,6 +183,30 @@ async def test_read_and_rewrite_limits_remain_bounded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_extraction_claim_cap_is_configurable_and_enforced() -> None:
+    from crv_agent.orchestration.extraction import Extraction, ExtractionWorker
+
+    class Model:
+        def __init__(self) -> None:
+            self.data: dict[str, object] = {}
+
+        def with_structured_output(self, *args: object, **kwargs: object) -> "Model":
+            return self
+
+        async def ainvoke(self, messages: list[object], config: object = None) -> Extraction:
+            self.data = json.loads(messages[1].content)  # type: ignore[attr-defined]
+            return Extraction(claims=[CLAIM] * 5, gaps=[], rewrite=None)
+
+    model = Model()
+    worker = ExtractionWorker(
+        model, Retrieval(Search()), 1024, max_claims=3,  # type: ignore[arg-type]
+    )
+    result, _ = await worker.run("Recovery?", "r1", [], Budget())
+    assert model.data["max_claims"] == 3
+    assert len(result.claims) == 3
+
+
+@pytest.mark.asyncio
 async def test_parallel_retrieval_reserves_the_whole_budget_before_search() -> None:
     search = Search()
     with pytest.raises(BudgetExceeded):

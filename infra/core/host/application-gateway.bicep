@@ -95,6 +95,45 @@ resource telemetryWafPolicyAgicContributor 'Microsoft.Authorization/roleAssignme
   }
 }
 
+// Free-text question and comment fields trip OWASP SQL-injection signatures. Attached by AGIC to
+// the research API path only; the two body fields are excluded, every other field stays inspected.
+resource chatWafPolicy 'Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies@2024-05-01' = {
+  name: '${name}-chat-waf'
+  location: location
+  tags: tags
+  properties: {
+    policySettings: {
+      state: 'Enabled'
+      mode: 'Prevention'
+      requestBodyCheck: true
+      maxRequestBodySizeInKb: 128
+      fileUploadLimitInMb: 100
+    }
+    managedRules: {
+      managedRuleSets: [
+        {
+          ruleSetType: 'OWASP'
+          ruleSetVersion: '3.2'
+        }
+      ]
+      exclusions: [
+        { matchVariable: 'RequestArgNames', selectorMatchOperator: 'Equals', selector: 'message' }
+        { matchVariable: 'RequestArgNames', selectorMatchOperator: 'Equals', selector: 'comment' }
+      ]
+    }
+  }
+}
+
+resource chatWafPolicyAgicContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(chatWafPolicy.id, agicPrincipalId, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  scope: chatWafPolicy
+  properties: {
+    principalId: agicPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
+  }
+}
+
 resource gateway 'Microsoft.Network/applicationGateways@2024-05-01' = {
   name: name
   location: location

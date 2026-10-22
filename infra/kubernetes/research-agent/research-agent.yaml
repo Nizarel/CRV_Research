@@ -216,7 +216,8 @@ spec:
           command: [python, -m, ingest_pipeline.tools.golden]
           args: [score, --golden, /golden/crv_golden.jsonl, --contexts, /results/contexts.jsonl,
                  --judge-deployment, "${JUDGE_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
-                 --repeats, "${JUDGE_REPEATS}", --reference, P16, --reference, A1]
+                 --repeats, "${JUDGE_REPEATS}", --concurrency, "${SCORE_CONCURRENCY}",
+                 --reference, P16, --reference, A1]
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
@@ -268,6 +269,8 @@ spec:
             - {name: CRV_ANSWER_REASONING_EFFORT, value: "${ANSWER_EFFORT}"}
             - {name: CRV_VERIFIER_REASONING_EFFORT, value: "${VERIFIER_EFFORT}"}
             - {name: CRV_FACET_CONCURRENCY, value: "${FACET_CONCURRENCY}"}
+            - {name: CRV_WORKER_MAX_CLAIMS, value: "${WORKER_MAX_CLAIMS}"}
+            - {name: CRV_REPAIR_MODE, value: "${REPAIR_MODE}"}
           # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:
             exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]}
@@ -303,7 +306,8 @@ spec:
           # With -Diagnostics the contexts also hold the exposed and ledger arms (funnel).
           args: [score, --golden, /golden/crv_golden.jsonl, --contexts, "${SCORE_CONTEXTS}",
                  --judge-deployment, "${JUDGE_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
-                 --repeats, "${JUDGE_REPEATS}", --reference, "${ANSWER_ARM}"]
+                 --repeats, "${JUDGE_REPEATS}", --concurrency, "${SCORE_CONCURRENCY}",
+                 --reference, "${ANSWER_ARM}"]
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:

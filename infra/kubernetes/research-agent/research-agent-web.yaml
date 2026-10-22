@@ -129,3 +129,31 @@ spec:
           - path: /crv
             pathType: Exact
             backend: {service: {name: crv-research-web, port: {name: http}}}
+          # Bare gateway address; assets and API calls still use the /crv/ base path.
+          - path: /
+            pathType: Exact
+            backend: {service: {name: crv-research-web, port: {name: http}}}
+---
+# Free-text question and comment fields trip OWASP SQL-injection signatures (15 of 79 golden
+# questions got 403). AGIC applies a WAF policy to every path of an Ingress, so the API has its own
+# Ingress and a policy that excludes only the `message` and `comment` body fields.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crv-research-api
+  namespace: crv
+  labels: {app.kubernetes.io/name: crv-research-web, app.kubernetes.io/part-of: crv-research-agent}
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: http
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/api/v1/"
+    appgw.ingress.kubernetes.io/request-timeout: "300"
+    appgw.ingress.kubernetes.io/health-probe-path: "/healthz"
+    appgw.ingress.kubernetes.io/waf-policy-for-path: "${CHAT_WAF_POLICY_ID}"
+spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /crv/api/v1/
+            pathType: Prefix
+            backend: {service: {name: crv-research-web, port: {name: http}}}
