@@ -76,6 +76,21 @@ class WorkerResult(Contract):
     gaps: list[str]
 
 
+class ExtractionRound(Contract):
+    """One extraction round, traced for evaluation diagnostics (never a model schema)."""
+
+    query: str
+    passage_ids: list[str]
+    returned: list[Claim]
+    capped: list[Claim]
+    gaps: list[str]
+    rewrite: str | None
+
+
+class TracedWorkerResult(WorkerResult):
+    rounds: list[ExtractionRound] = []
+
+
 class CandidateRanking(Contract):
     """Listwise rerank output: candidate IDs, most useful first."""
 

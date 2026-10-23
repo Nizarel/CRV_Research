@@ -23,7 +23,14 @@ from ...domain.crv_kg.model import (
     Projection,
     build_projection,
 )
-from ...domain.crv_kg.vocab import PROJECTION_VERSION, TOOL, TOOL_VERSION, fold
+from ...domain.crv_kg.vocab import (
+    EXTRACTED_KINDS,
+    EXTRACTED_METHODS,
+    PROJECTION_VERSION,
+    TOOL,
+    TOOL_VERSION,
+    fold,
+)
 from ...domain.errors import IntegrityError, InvalidInputError
 from .pool import PgConnection, PgPool
 
@@ -146,12 +153,15 @@ class CrvKgStore:
                 " review_status, label, attributes, recorded_at)"
                 f" SELECT latest.entity_iri, $2, 'superseded', latest.label, latest.attributes, $3"
                 f" FROM ({_LATEST_RECORDS}) AS latest"
+                " JOIN crv_kg.entity AS entity ON entity.iri = latest.entity_iri"
                 " WHERE latest.review_status <> 'superseded'"
+                " AND NOT (entity.kind = ANY ($4::text[]))"
                 " AND NOT (latest.entity_iri = ANY ($1::text[])) RETURNING 1)"
                 " SELECT count(*) FROM rows",
                 [item.iri for item in entities],
                 run_id,
                 now,
+                sorted(EXTRACTED_KINDS),
             )
             keys = sorted({
                 (entity.iri, scheme, value, _normalized(scheme, value))
@@ -197,7 +207,11 @@ class CrvKgStore:
             current = {
                 row["assertion_iri"]: (row["status"], row["decision_id"])
                 for row in await connection.fetch(
-                    "SELECT assertion_iri, status, decision_id FROM crv_kg.assertion_current"
+                    "SELECT current.assertion_iri, current.status, current.decision_id"
+                    " FROM crv_kg.assertion_current AS current"
+                    " JOIN crv_kg.assertion AS assertion ON assertion.iri = current.assertion_iri"
+                    " WHERE NOT (assertion.method = ANY ($1::text[]))",
+                    sorted(EXTRACTED_METHODS),
                 )
             }
             # An expert decision is never overwritten by a build.
@@ -283,6 +297,10 @@ class CrvKgStore:
             support = await connection.fetch(
                 "SELECT assertion_iri, evidence_iri FROM crv_kg.assertion_evidence"
             )
+            observations = await connection.fetch(
+                "SELECT item.iri, item.document_iri, state.status FROM crv_kg.observation AS item"
+                " JOIN crv_kg.observation_current AS state ON state.observation_iri = item.iri"
+            )
         entity_scopes = _scopes(entity_links, "entity_iri", scope_of)
         assertion_scopes = _scopes(support, "assertion_iri", scope_of)
         entities = [
@@ -301,7 +319,10 @@ class CrvKgStore:
             for row in assertion_rows
             if row["iri"] in status_of
         ]
-        return build_projection(entities, assertions, statuses=statuses, inputs=inputs)
+        return build_projection(
+            entities, assertions, statuses=statuses, inputs=inputs,
+            observations=[(r["iri"], r["document_iri"], r["status"]) for r in observations],
+        )
 
     async def build_release(
         self, *, statuses: tuple[str, ...], started_at: datetime, now: datetime
@@ -370,6 +391,13 @@ class CrvKgStore:
                 [json.dumps({**e.properties, "release_id": release_id}) for e in projection.edges],
                 [_text_array(e.scope_keys) for e in projection.edges],
                 [_text_array(e.assertion_iris) for e in projection.edges],
+            )
+            await connection.execute(
+                "INSERT INTO crv_kg.release_observation (release_id, observation_iri, status)"
+                " SELECT $1, x.iri, x.status FROM unnest($2::text[], $3::text[]) AS x(iri, status)",
+                release_id,
+                [iri for iri, _ in projection.observations],
+                [status for _, status in projection.observations],
             )
         return ReleaseRef(release_id, manifest, projection.graph_name, len(projection.vertices),
                           len(projection.edges), created=True)

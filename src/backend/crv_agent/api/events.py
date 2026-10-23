@@ -25,4 +25,5 @@ def diagnostics(research: Mapping[str, Any]) -> dict[str, object]:
                 "text": "\n…\n".join(exposed_text(item)),
             } for item in evidence
         ],
+        "audit": list(research.get("audit") or []),
     }

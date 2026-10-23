@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from crv_agent.domain.answers import Answer, Conflict, Coverage
 from crv_agent.domain.evidence import Calculation, Claim, Evidence
@@ -18,3 +18,5 @@ class ResearchState(ResearchInput):
     calculations: list[Calculation]
     coverage: Coverage
     answer: Answer
+    # Evaluation diagnostics only (see ResearchContext.diagnostics).
+    audit: list[dict[str, Any]]

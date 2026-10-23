@@ -34,6 +34,7 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
     steps: list[str] = []
     progress: list[tuple[str, float]] = []
     diagnostics: dict[str, Any] | None = None
+    plan: dict[str, Any] | None = None
     try:
         created = await client.post("/api/v1/conversations")
         created.raise_for_status()
@@ -53,7 +54,12 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
                         steps.append(str(data.get("step")))
                         progress.append((str(data.get("step")), elapsed))
                     elif event == "diagnostics":
-                        diagnostics = {"ledger": data["ledger"], "exposed": data["exposed"]}
+                        diagnostics = {
+                            "ledger": data["ledger"], "exposed": data["exposed"],
+                            "audit": data.get("audit") or [],
+                        }
+                    elif event == "plan":
+                        plan = {"intent": data.get("intent"), "facets": data.get("facets") or []}
                     elif event == "facet" and data.get("claims"):
                         first_finding = first_finding or time.monotonic() - started
                     elif event == "answer":
@@ -70,7 +76,7 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
         error = f"{type(exc).__name__}"
     return {
         "answer": answer, "error": error, "steps": steps,
-        "step_seconds": step_durations(progress), "diagnostics": diagnostics,
+        "step_seconds": step_durations(progress), "diagnostics": diagnostics, "plan": plan,
         "first_progress_seconds": first_progress, "first_finding_seconds": first_finding,
         "first_answer_seconds": first_answer,
         "total_seconds": time.monotonic() - started,
@@ -117,6 +123,9 @@ def compact(
             sum("dossier cu" in s.casefold() for s in sources) / len(sources), 3,
         ) if sources else None,
         "steps": result["steps"],
+        "plan": result.get("plan"),
+        # Extraction audit (diagnostics runs only): claims with outcomes, passage IDs, no text.
+        "audit": (result.get("diagnostics") or {}).get("audit"),
         "answer": {
             "content": content,
             "claims": [

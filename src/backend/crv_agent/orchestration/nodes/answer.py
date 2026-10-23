@@ -123,6 +123,41 @@ async def answer(
 
 
 _MARKER = re.compile(r"\[([^\[\]]+)\]")
+_TRAILING_MARKERS = r"(?:[ \t]*\[[^\[\]\n]+\])*"
+_CITATIONS_ONLY = re.compile(r"[\s.,;:-]*(?:\[[^\[\]\n]+\][\s.,;:-]*)+")
+_EMPTY_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s*")
+_HEADING = re.compile(r"(#{1,6})\s+\S.*|\*\*[^*\n]+\*\*\s*[:.]?")
+
+
+def heading_level(line: str) -> int | None:
+    """Markdown heading depth; a bold-only line is the deepest level (7)."""
+    match = _HEADING.fullmatch(line.strip())
+    if match is None:
+        return None
+    return len(match.group(1)) if match.group(1) else 7
+
+
+def tidy(content: str) -> str:
+    """Drop citation-only lines, empty list items and headings that pruning left bodiless."""
+    lines = [
+        line for line in content.split("\n")
+        if not _CITATIONS_ONLY.fullmatch(line) and not _EMPTY_ITEM.fullmatch(line)
+    ]
+    while True:
+        kept = []
+        for n, line in enumerate(lines):
+            level = heading_level(line)
+            following = next((later for later in lines[n + 1:] if later.strip()), None)
+            if level is not None and (
+                following is None
+                or ((deeper := heading_level(following)) is not None and deeper <= level)
+            ):
+                continue
+            kept.append(line)
+        if kept == lines:
+            break
+        lines = kept
+    return re.sub(r"[ \t]+\n", "\n", re.sub(r"\n{3,}", "\n\n", "\n".join(lines))).strip()
 
 
 def prune_ungrounded(
@@ -147,8 +182,8 @@ def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
     content = draft.content
     for sentence in verdict.unsupported_sentences:
         if sentence.strip() and sentence.strip() in content:
-            content = content.replace(sentence.strip(), "")
-    content = re.sub(r"[ \t]+\n", "\n", re.sub(r"\n{3,}", "\n\n", content)).strip()
+            content = re.sub(re.escape(sentence.strip()) + _TRAILING_MARKERS, "", content)
+    content = tidy(content)
     rejected = {n for n in verdict.unsupported_claims if 0 <= n < len(draft.claims)}
     while True:
         markers = set(re.findall(r"\[([^\[\]]+)\]", content))
@@ -162,7 +197,7 @@ def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
             break
         for sentence in orphans:
             content = content.replace(sentence, "")
-        content = content.strip()
+        content = tidy(content)
     if not content or not claims or content == draft.content.strip():
         return None
     kept = {id(claim): n for n, claim in enumerate(claims)}

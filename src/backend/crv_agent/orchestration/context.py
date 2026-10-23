@@ -20,3 +20,7 @@ class ResearchContext:
     facet_concurrency: int = 4
     # prune: delete verifier-rejected text after the first verification before re-composing.
     repair_mode: Literal["recompose", "prune"] = "recompose"
+    # Evaluation only: record a per-facet extraction audit in the graph state.
+    diagnostics: bool = False
+    # KG-2: add one facet steered by released observations (synthesis/timeline/comparison).
+    kg_results: bool = False

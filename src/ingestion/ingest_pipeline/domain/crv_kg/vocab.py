@@ -21,6 +21,9 @@ ENTITY_KINDS = frozenset(
         "Project",
         "Collection",
         "Folder",
+        # KG-2 pilot (domain/crv_kg/study.py); always candidates until reviewed.
+        "Study",
+        "Sample",
     }
 )
 EDGE_LABELS: Mapping[str, str] = {
@@ -37,11 +40,22 @@ EDGE_LABELS: Mapping[str, str] = {
     "duplicateOf": "DUPLICATE_OF",
     "partOf": "PART_OF",
     "operatedBy": "OPERATED_BY",
+    "reports": "REPORTS",
+    "uses": "USES",
+    "performedAt": "PERFORMED_AT",
+    "performedBy": "PERFORMED_BY",
+    "commissionedBy": "COMMISSIONED_BY",
+    "follows": "FOLLOWS",
+    "validates": "VALIDATES",
 }
 METHODS = frozenset(
-    {"path", "filename", "cover", "header_code", "printed_code", "title", "revision", "gazetteer"}
+    {"path", "filename", "cover", "header_code", "printed_code", "title", "revision", "gazetteer",
+     "llm", "table"}
 )
 STATUSES = frozenset({"observed", "candidate", "approved", "rejected", "superseded"})
+# KG-2 extraction records: a KG-1 build never supersedes them (it does not report them).
+EXTRACTED_KINDS = frozenset({"Study", "Sample"})
+EXTRACTED_METHODS = frozenset({"llm", "table"})
 # Higher wins when several assertions back one edge.
 STATUS_RANK: Mapping[str, int] = {
     "rejected": 0,

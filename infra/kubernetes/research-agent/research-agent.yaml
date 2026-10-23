@@ -272,6 +272,7 @@ spec:
             - {name: CRV_WORKER_MAX_CLAIMS, value: "${WORKER_MAX_CLAIMS}"}
             - {name: CRV_EXTRACT_BATCHES, value: "${EXTRACT_BATCHES}"}
             - {name: CRV_REPAIR_MODE, value: "${REPAIR_MODE}"}
+            - {name: CRV_KG_RESULTS, value: "${KG_RESULTS}"}
           # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:
             exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]}

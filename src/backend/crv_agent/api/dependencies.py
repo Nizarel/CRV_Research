@@ -32,3 +32,4 @@ class AppServices:
     # Evaluation only (loopback local owner): stream ledger and exposed passages per turn.
     diagnostics: bool = False
     repair_mode: Literal["recompose", "prune"] = "recompose"
+    kg_results: bool = False

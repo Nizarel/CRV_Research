@@ -36,9 +36,13 @@ param(
     [ValidateRange(1, 24)] [int] $WorkerMaxClaims = 8,
     [ValidateRange(1, 4)] [int] $ExtractBatches = 1,
     [ValidateSet('recompose', 'prune')] [string] $RepairMode = 'recompose',
+    # KG-2 pilot: steer one facet with released observations (needs migration 0021 + a release).
+    [switch] $KgResults,
     # answer-eval: scorer arm label of this configuration, and the exposed/ledger funnel arms.
     [ValidatePattern('^[A-Za-z0-9_-]{1,32}$')] [string] $AnswerArm = 'AGENT',
     [switch] $Diagnostics,
+    # Also print the stages file (exposed source text, gzip+base64) to the pod log for a local audit.
+    [switch] $ExportStages,
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $SearchRelease = 'crv-v1',
     [ValidatePattern('^crvkg-[0-9]{8}-[a-f0-9]{12}$')] [string] $KgRelease = 'crvkg-20261021-adb13a21c7da',
     [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
@@ -76,6 +80,10 @@ $answerArgs = ''
 foreach ($item in $Only) { $answerArgs += ", --question-id, $item" }
 if ($Split -eq 'heldout') { $answerArgs += ', --allow-heldout' }
 if ($Diagnostics) { $answerArgs += ', --stages-out, /results/stages.jsonl' }
+if ($ExportStages) {
+    if (-not $Diagnostics) { throw '-ExportStages needs -Diagnostics.' }
+    $answerArgs += ', --print-stages'
+}
 $zero = 'sha256:' + ('0' * 64)
 $values = [ordered]@{
     AGENT_CLIENT_ID     = $AgentClientId.ToString()
@@ -97,6 +105,7 @@ $values = [ordered]@{
     WORKER_MAX_CLAIMS   = $WorkerMaxClaims.ToString()
     EXTRACT_BATCHES     = $ExtractBatches.ToString()
     REPAIR_MODE         = $RepairMode
+    KG_RESULTS          = if ($KgResults) { 'true' } else { 'false' }
     ANSWER_ARM          = $AnswerArm
     EVAL_DIAGNOSTICS    = if ($Diagnostics) { 'true' } else { 'false' }
     SCORE_CONTEXTS      = if ($Diagnostics) { '/results/stages.jsonl' } else { '/results/answers.jsonl' }

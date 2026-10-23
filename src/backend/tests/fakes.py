@@ -4,7 +4,15 @@ from uuid import uuid4
 from crv_agent.domain.answers import AnswerDraft, Verdict
 from crv_agent.domain.evidence import CalculationRequest, Claim, Evidence, WorkerResult
 from crv_agent.domain.execution import Budget
-from crv_agent.domain.planning import Document, DocumentPage, Entity, Facet, QueryPlan
+from crv_agent.domain.planning import (
+    Document,
+    DocumentPage,
+    Entity,
+    Facet,
+    ObservationRef,
+    QueryPlan,
+    StudyRef,
+)
 from crv_agent.ports.persistence import Run, RunStatus, Thread, ThreadNotFound, TurnConflict
 
 SOURCE = Evidence(
@@ -69,6 +77,14 @@ class FakeKnowledge:
         )
 
     async def lineage(self, iri: str, release: str) -> list[dict[str, object]]:
+        return []
+
+    async def studies(self, entities: list[str], release: str) -> list[StudyRef]:
+        return []
+
+    async def observations(
+        self, entities: list[str], properties: list[str] | None, release: str,
+    ) -> list[ObservationRef]:
         return []
 
     async def ready(self, release: str) -> None:

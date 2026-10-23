@@ -10,13 +10,16 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from ...domain.crv_kg.build import DocumentInput, Placement
 from ...domain.crv_kg.cover import CoverLine
+from ...domain.crv_kg.study import StudyDocument, study_pages
+from ...domain.crv_kg.table_rules import table_observation
 from ...domain.evidence import BlockKind, EvidenceDocument, EvidenceUnit
 from ...domain.models import ArtifactRef
+from ...domain.observations import numeric_observations
 from ...ports.storage import ArtifactStore
 from .pool import PgPool
 
@@ -41,11 +44,17 @@ ORDER BY content_hash, coalesce(provenance ->> 'source_path', blob_name), observ
 def cover_lines(units: Sequence[EvidenceUnit]) -> tuple[CoverLine, ...]:
     """Lines of pages 1-2 in reading order: paragraph lines, then table rows as joined cells."""
 
+    return page_lines(units, COVER_PAGES)
+
+
+def page_lines(units: Sequence[EvidenceUnit], pages: Collection[int]) -> tuple[CoverLine, ...]:
+    """Lines of the given pages in reading order: text lines, then table rows as joined cells."""
+
     lines: list[CoverLine] = []
     for unit in units:
         for block in unit.blocks:
             page = min(block.pages) if block.pages else None
-            if page not in COVER_PAGES:
+            if page is None or page not in pages:
                 continue
             if block.kind in _TEXT_KINDS:
                 lines.extend(
@@ -122,3 +131,62 @@ async def load_inputs(
     loaded = await asyncio.gather(*(one(row) for row in rows))
     counters["evidence_documents"] = len(rows)
     return [item for item in loaded if item is not None], dict(counters)
+
+
+async def load_study_inputs(
+    pool: PgPool,
+    artifacts: ArtifactStore,
+    *,
+    policy_version: str,
+    folder: str,
+    statuses: tuple[str, ...] = ("embedded",),
+    concurrency: int = 16,
+    tables: bool = False,
+) -> list[StudyDocument]:
+    """KG-2 inputs: documents placed under ``folder`` (case-insensitive path segment) with the
+    text of their ``study_pages``; with ``tables``, every unit is read for typed table cells."""
+
+    segment = folder.casefold()
+    async with pool.acquire() as connection:
+        rows = await connection.fetch(_DOCUMENTS, policy_version, list(statuses))
+        paths: dict[str, list[str]] = defaultdict(list)
+        for row in await connection.fetch(_PLACEMENTS, [r["content_hash"] for r in rows]):
+            paths[row["content_hash"]].append(_placement(row).source_path)
+    selected = [
+        row for row in rows
+        if any(segment in part.casefold() for path in paths[row["content_hash"]]
+               for part in path.split("/")[:-1])
+    ]
+    gate = asyncio.Semaphore(concurrency)
+
+    async def one(row: Any) -> StudyDocument:
+        async with gate:
+            manifest = EvidenceDocument.model_validate_json(
+                await artifacts.get(ArtifactRef.model_validate(row["manifest"]))
+            )
+            wanted = study_pages(manifest.page_count or 0)
+            units = [
+                EvidenceUnit.model_validate_json(await artifacts.get(summary.evidence))
+                for summary in manifest.units
+                if summary.evidence is not None
+                and (tables or not summary.pages or set(summary.pages) & set(wanted))
+            ]
+        text: dict[int, list[str]] = defaultdict(list)
+        for line in page_lines(units, wanted):
+            text[line.page].append(line.text)
+        cells = [
+            (page, typed)
+            for unit in units if tables
+            for cell in numeric_observations(unit)
+            if (page := next((loc.page for loc in cell.locators if loc.page), None)) is not None
+            and (typed := table_observation(cell)) is not None
+        ]
+        return StudyDocument(
+            content_hash=row["content_hash"],
+            source_path=sorted(paths[row["content_hash"]])[0],
+            page_count=manifest.page_count or 0,
+            pages={page: "\n".join(lines) for page, lines in sorted(text.items())},
+            tables=tuple(cells),
+        )
+
+    return list(await asyncio.gather(*(one(row) for row in selected)))

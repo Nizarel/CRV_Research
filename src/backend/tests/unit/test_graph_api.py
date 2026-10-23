@@ -194,6 +194,30 @@ def test_diagnostics_event_streams_ledger_and_exposed_text_only_when_enabled(
         "id": "S1", "content_hash": SOURCE.content_hash, "title": SOURCE.title,
         "source": SOURCE.source_uri, "pages": [4], "text": SOURCE.content,
     }]
+    [facet] = payload["audit"]
+    assert (facet["facet"], facet["status"], facet["rounds"]) == ("Recovery?", "completed", [])
+    assert [(c["outcome"], c["errors"]) for c in facet["claims"]] == [("accepted", [])]
+
+
+def test_facet_audit_records_rejection_reasons_and_claims_cut_by_the_cap() -> None:
+    from crv_agent.domain.evidence import ExtractionRound, TracedWorkerResult
+    from crv_agent.orchestration.nodes.research import facet_audit
+
+    spaced = CLAIM.model_copy(update={"quote": "Recovery 87.5 % at full scale."})
+    spare = CLAIM.model_copy(update={"text": "Pilot recovery"})
+    result = TracedWorkerResult(claims=[CLAIM, spaced], gaps=[], rounds=[ExtractionRound(
+        query="Recovery?", passage_ids=["S1"], returned=[CLAIM, spaced], capped=[spare],
+        gaps=["No 2019 value"], rewrite=None,
+    )])
+    entry = facet_audit("Recovery?", "completed", result, {"S1": SOURCE})
+    assert entry["rounds"] == [{
+        "query": "Recovery?", "passage_ids": ["S1"], "gaps": ["No 2019 value"], "rewrite": None,
+    }]
+    assert [(c["outcome"], c["errors"]) for c in entry["claims"]] == [  # type: ignore[attr-defined]
+        ("accepted", []),
+        ("rejected", ["Claim requires an exact quotation from source text shown to the model"]),
+        ("capped", []),
+    ]
 
 
 def test_plan_and_facet_findings_stream_before_the_verified_answer() -> None:
@@ -509,6 +533,22 @@ def test_prune_removes_only_verbatim_unsupported_sentences_and_keeps_cited_claim
     assert pruned is not None
     assert pruned.content == "Recovery was 87.5 % [S1]."
     assert pruned.claims == [CLAIM]  # S2 marker removed with its sentence
+
+
+def test_prune_leaves_no_citation_only_lines_or_bodiless_headings() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.orchestration.nodes.answer import prune
+
+    draft = AnswerDraft(
+        content="It is the best ever. [S1]\n\n## Results\n**Pilot.**\nRecovery was 87.5 % [S1]."
+        "\n\n**DLQ5.**\nIt is the best collector. [S1]\n\n**Limits.**\n- It is unmatched.",
+        claims=[CLAIM], insufficient=False,
+    )
+    pruned = prune(draft, Verdict(supported=False, reasons=["overstated"], unsupported_sentences=[
+        "It is the best ever.", "It is the best collector.", "It is unmatched.",
+    ]))
+    assert pruned is not None
+    assert pruned.content == "## Results\n**Pilot.**\nRecovery was 87.5 % [S1]."
     assert prune(draft, Verdict(supported=False, reasons=["x"])) is None
     assert prune(draft, Verdict(
         supported=False, reasons=["x"], unsupported_sentences=["not in content"],

@@ -5,14 +5,23 @@ import logging
 from langgraph.runtime import Runtime
 
 from crv_agent.domain.answers import Coverage
-from crv_agent.domain.evidence import Calculation, CalculationRequest, Claim, Evidence
+from crv_agent.domain.evidence import (
+    Calculation,
+    CalculationRequest,
+    Claim,
+    Evidence,
+    TracedWorkerResult,
+    WorkerResult,
+)
 from crv_agent.domain.execution import BudgetExceeded
 from crv_agent.domain.planning import Document, Facet, QueryPlan
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.orchestration.state import ResearchState
+from crv_agent.services.anchoring import anchor_claim
 from crv_agent.services.calculation import calculate
 from crv_agent.services.catalogue import enumerate_documents
 from crv_agent.services.evidence_pack import merge_exposure
+from crv_agent.services.kg_guidance import KG_INTENTS, kg_facet
 from crv_agent.services.navigation import steering_entities
 from crv_agent.services.policy import hazardous_instructions
 from crv_agent.services.reconciliation import conflicts
@@ -104,20 +113,38 @@ async def research(
             "coverage": coverage.model_copy(update={"visited": len(items), "gaps": gaps}),
         }
     facets = plan.facets or [Facet(question=state["question"])]
+    scoped: dict[str, list[str]] = {}
+    if (
+        context.kg_results and context.retrieval_mode == "kg" and navigation
+        and plan.intent in KG_INTENTS
+    ):
+        try:
+            await context.budget.reserve(retrieval=1)
+            reported = await context.budget.wait(context.knowledge.observations(
+                [e.iri for e in navigation], None, context.kg_release,
+            ))
+        except BudgetExceeded:
+            reported = []
+        if (guided := kg_facet(reported)) is not None:
+            facets = [*facets, guided[0]]
+            scoped[guided[0].question] = guided[1]
+            gaps.append("KG-2 candidate observations steered one search; cited text only.")
     gaps.append("Top-k evidence retrieval is not an exhaustive corpus review.")
     semaphore = asyncio.Semaphore(context.facet_concurrency)
     evidence_by_id: dict[str, Evidence] = {}
     claims: dict[str, Claim] = {}
+    audit: list[dict[str, object]] = []
 
     async def run(facet: Facet) -> None:
         accepted: list[Claim] = []
         status = "completed"
+        result: WorkerResult | None = None
         async with semaphore:
             try:
                 result, found = await context.worker.run(
                     facet.question + "\nOriginal question: " + state["question"]
                     + "\nPremises to verify: " + "; ".join(plan.premises),
-                    context.search_release, hashes, context.budget,
+                    context.search_release, scoped.get(facet.question, hashes), context.budget,
                 )
                 for item in found:
                     previous = evidence_by_id.get(item.id)
@@ -125,7 +152,7 @@ async def research(
                         item if previous is None else merge_exposure(previous, item)
                     )
                 gaps.extend(result.gaps)
-                for claim in result.claims:
+                for claim in (anchor_claim(raw, found) for raw in result.claims):
                     if not claim_errors(claim, evidence_by_id):
                         claims[claim.model_dump_json()] = claim
                         accepted.append(claim)
@@ -141,6 +168,8 @@ async def research(
                 gaps.append(
                     f"A research facet failed ({type(error).__name__}); its evidence is missing.",
                 )
+        if context.diagnostics:
+            audit.append(facet_audit(facet.question, status, result, evidence_by_id))
         # Early findings, not a verified answer: every streamed claim's quote is located verbatim.
         cited = {cid for claim in accepted for cid in claim.evidence_ids}
         runtime.stream_writer({
@@ -169,6 +198,40 @@ async def research(
         "evidence": sorted(evidence_by_id.values(), key=lambda e: e.id),
         "claims": [claims[key] for key in sorted(claims)],
         "coverage": coverage.model_copy(update={"visited": visited, "gaps": sorted(set(gaps))}),
+        **({"audit": audit} if context.diagnostics else {}),
+    }
+
+
+def facet_audit(
+    facet: str, status: str, result: WorkerResult | None, evidence: dict[str, Evidence],
+) -> dict[str, object]:
+    """Every claim a facet's worker returned, with its outcome and validation errors."""
+    rounds = result.rounds if isinstance(result, TracedWorkerResult) else []
+    seen = {pid for extraction in rounds for pid in extraction.passage_ids}
+    shown = [item for pid, item in evidence.items() if pid in seen or not rounds]
+    returned = [
+        (n, claim, "capped" if capped else "") for n, extraction in enumerate(rounds)
+        for capped, group in ((False, extraction.returned), (True, extraction.capped))
+        for claim in group
+    ] if rounds else [(0, claim, "") for claim in (result.claims if result else [])]
+    entries = []
+    for round_number, raw, outcome in returned:
+        claim = anchor_claim(raw, shown)
+        errors = claim_errors(claim, evidence)
+        entries.append({
+            **claim.model_dump(mode="json"), "round": round_number, "errors": errors,
+            "anchored": claim != raw,
+            "outcome": outcome or ("rejected" if errors else "accepted"),
+        })
+    return {
+        "facet": facet, "status": status,
+        "rounds": [
+            {
+                "query": extraction.query, "passage_ids": extraction.passage_ids,
+                "gaps": extraction.gaps, "rewrite": extraction.rewrite,
+            } for extraction in rounds
+        ],
+        "claims": entries,
     }
 
 

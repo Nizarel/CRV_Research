@@ -26,7 +26,7 @@ from .adapters.local_intake import CorpusIntake, collect_legacy_office
 from .adapters.parsers.office import DocumentConverter, OfficeConverter, PrecomputedOfficeConverter
 from .adapters.pilot import profile_corpus, select, selection_report
 from .adapters.postgres.crv_kg import CrvKgStore
-from .adapters.postgres.crv_kg_inputs import load_inputs
+from .adapters.postgres.crv_kg_inputs import load_inputs, load_study_inputs
 from .adapters.postgres.kg_access import (
     KG_WRITER_ROLES,
     READER_ROLE,
@@ -323,6 +323,121 @@ async def _kg_build(
                     "validation_problem_count", "imported")
     })
     return 2 if report["validation_problem_count"] else 0
+
+
+async def _kg_extract(
+    settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
+) -> int:
+    """KG-2 pilot: extract and ground studies/observations of one folder (JSONL; with
+    ``--import``, also record them as candidates)."""
+
+    from azure.identity.aio import DefaultAzureCredential
+
+    from .adapters.azure_ai.embeddings import create_openai_client
+    from .adapters.azure_ai.study_extractor import StudyExtractor
+    from .domain.crv_kg.study import Grounding, StudyDocument, ground
+
+    endpoint = args.openai_endpoint or require(settings.embeddings.endpoint,
+                                               "TIZ_EMBEDDINGS__ENDPOINT")
+    started = datetime.now(UTC)
+    async with azure_runtime(settings, telemetry, bus=False) as runtime:
+        documents = await load_study_inputs(
+            runtime.pool, runtime.services.require_artifacts(), policy_version=args.policy,
+            folder=args.folder, tables=args.tables,
+        )
+        documents = sorted(documents, key=lambda d: d.source_path)[: args.limit or None]
+        async with DefaultAzureCredential() as credential:
+            extractor = StudyExtractor(
+                create_openai_client(endpoint, credential, api_version=args.api_version),
+                deployment=args.deployment, concurrency=args.concurrency, effort=args.effort,
+            )
+
+            async def one(document: StudyDocument) -> tuple[StudyDocument, Grounding | None]:
+                try:
+                    return document, ground(await extractor.extract(document), document.pages)
+                except Exception:  # one failed document never stops the run
+                    return document, None
+
+            extracted = await asyncio.gather(*(one(document) for document in documents))
+        imported = await _import_extractions(runtime.pool, extracted, started) if (
+            args.import_records
+        ) else None
+    results: list[dict[str, Any]] = [
+        {
+            "content_hash": document.content_hash, "source_path": document.source_path,
+            "pages": sorted(document.pages), "tables": len(document.tables),
+            "error": None if grounded else "extraction_failed",
+            "studies": [s.model_dump(mode="json") for s in grounded.studies] if grounded else [],
+            "observations": [
+                {**o.observation.model_dump(mode="json"),
+                 "value_num": str(o.value_num) if o.value_num is not None else None}
+                for o in grounded.observations
+            ] if grounded else [],
+            "rejected": grounded.rejected if grounded else [],
+        }
+        for document, grounded in extracted
+    ]
+    await asyncio.to_thread(
+        Path(args.output).write_text,
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in results), "utf-8",
+    )
+    _print({
+        "documents": len(results),
+        "errors": sum(1 for r in results if r["error"]),
+        "studies": sum(len(r["studies"]) for r in results),
+        "observations": sum(len(r["observations"]) for r in results),
+        "table_observations": sum(r["tables"] for r in results),
+        "rejected": sum(len(r["rejected"]) for r in results),
+        "imported": imported,
+        "output": args.output,
+    })
+    return 0
+
+
+async def _import_extractions(
+    pool: Any, extracted: list[tuple[Any, Any]], started: datetime
+) -> dict[str, Any]:
+    """One candidate run for the documents KG-1 holds; failed extractions are left out so their
+    previous records are not superseded."""
+
+    from .adapters.postgres.crv_kg_extract import import_extraction
+    from .domain.crv_kg.build import document_iri
+    from .domain.crv_kg.records import ExtractRecords, document_scope, extraction_records
+
+    async with pool.acquire() as connection:
+        held = {
+            row["iri"] for row in await connection.fetch(
+                "SELECT iri FROM crv_kg.entity WHERE iri = ANY ($1::text[])",
+                [document_iri(document.content_hash) for document, _ in extracted],
+            )
+        }
+    merged = ExtractRecords()
+    kept: list[str] = []
+    skipped: Counter[str] = Counter()
+    for document, grounded in extracted:
+        scope = document_scope(document.source_path)
+        iri = document_iri(document.content_hash)
+        if grounded is None or scope is None or iri not in held:
+            skipped["failed" if grounded is None else "excluded" if scope is None
+                    else "not_in_kg1"] += 1
+            continue
+        records = extraction_records(
+            document.content_hash, document.source_path, scope, grounded, document.tables,
+        )
+        merged.entities.extend(records.entities)
+        merged.assertions.extend(records.assertions)
+        merged.evidence.extend(records.evidence)
+        merged.observations.extend(records.observations)
+        kept.append(iri)
+    # A model can repeat one sample or value; one row per IRI.
+    merged.entities = list({e.iri: e for e in reversed(merged.entities)}.values())
+    merged.assertions = list({a.iri: a for a in reversed(merged.assertions)}.values())
+    merged.evidence = list({e.iri: e for e in reversed(merged.evidence)}.values())
+    merged.observations = list({o.iri: o for o in reversed(merged.observations)}.values())
+    report = await import_extraction(
+        pool, kept, merged, started_at=started, now=datetime.now(UTC),
+    )
+    return {**asdict(report), "documents": len(kept), "skipped": dict(skipped)}
 
 
 async def _kg_gazetteer_sheet(_: PipelineSettings, __: Telemetry, args: argparse.Namespace) -> int:
@@ -959,6 +1074,26 @@ def build_parser() -> argparse.ArgumentParser:
     kg_build.add_argument("--report", help="Write the coverage report (JSON) here; - prints it")
     kg_build.add_argument("--dry-run", action="store_true", help="Build and report only")
     kg_build.set_defaults(handler=_kg_build)
+
+    kg_extract = commands.add_parser(
+        "kg-extract",
+        help="KG-2 pilot: extract grounded studies/observations of one folder to JSONL",
+    )
+    kg_extract.add_argument("--policy", default="crv-full-v1", help="Routing policy version")
+    kg_extract.add_argument("--folder", default="Dossier Cu", help="Path segment to select")
+    kg_extract.add_argument("--deployment", required=True, help="Chat model deployment")
+    kg_extract.add_argument("--openai-endpoint", default="",
+                            help="Defaults to the embeddings endpoint")
+    kg_extract.add_argument("--api-version", default="2025-04-01-preview")
+    kg_extract.add_argument("--effort", default="low", choices=["low", "medium", "high"])
+    kg_extract.add_argument("--concurrency", type=int, default=4)
+    kg_extract.add_argument("--limit", type=int, default=0, help="First N documents (0 = all)")
+    kg_extract.add_argument("--tables", action="store_true",
+                            help="Also type numeric table cells (reads every page)")
+    kg_extract.add_argument("--import", dest="import_records", action="store_true",
+                            help="Record the grounded extractions as candidates in crv_kg")
+    kg_extract.add_argument("--output", required=True, help="JSONL of grounded extractions")
+    kg_extract.set_defaults(handler=_kg_extract)
 
     kg_sheet = commands.add_parser(
         "kg-gazetteer-sheet", help="Write the gazetteer expert review sheet (CSV, offline)"

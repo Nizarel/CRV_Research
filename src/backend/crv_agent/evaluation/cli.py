@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import base64
+import gzip
 import json
 import os
 import re
@@ -20,6 +22,7 @@ from crv_agent.evaluation.runner import evaluate
 
 ANSWERS_BEGIN, ANSWERS_END = "=== AGENT ANSWERS BEGIN ===", "=== AGENT ANSWERS END ==="
 REPORT_BEGIN, REPORT_END = "=== AGENT EVAL REPORT BEGIN ===", "=== AGENT EVAL REPORT END ==="
+STAGES_BEGIN, STAGES_END = "=== AGENT STAGES GZIP BEGIN ===", "=== AGENT STAGES GZIP END ==="
 
 
 async def wait_ready(client: httpx.AsyncClient, seconds: float) -> None:
@@ -52,6 +55,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stages-out", type=Path,
                         help="JSONL answer, exposed-passage and claim-ledger arms per question "
                         "(needs a backend with CRV_EVAL_DIAGNOSTICS=true; contains source text)")
+    parser.add_argument("--print-stages", action="store_true",
+                        help="Also print the stages file gzip+base64 between markers "
+                        "(puts exposed source text in the pod log; opt-in for audits)")
     parser.add_argument("--split", choices=["dev", "heldout"], default="dev")
     parser.add_argument("--allow-heldout", action="store_true")
     parser.add_argument("--confirm-live", action="store_true")
@@ -145,6 +151,10 @@ def main(argv: list[str] | None = None) -> None:
         print(ANSWERS_BEGIN)
         sys.stdout.write(args.answers_out.read_text(encoding="utf-8"))
         print(ANSWERS_END)
+    if args.print_stages and args.stages_out:
+        print(STAGES_BEGIN)
+        print(base64.b64encode(gzip.compress(args.stages_out.read_bytes())).decode("ascii"))
+        print(STAGES_END)
     sys.stdout.flush()
     if args.gate and not report["gates_passed"]:
         raise SystemExit(1)

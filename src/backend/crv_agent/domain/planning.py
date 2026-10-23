@@ -43,3 +43,35 @@ class DocumentPage(Contract):
     documents: list[Document]
     next_cursor: str | None
     total: int
+
+
+class StudyRef(Contract):
+    """A KG-2 study (candidate unless reviewed): steers retrieval, never cited directly."""
+
+    iri: str
+    label: str
+    scale: str | None
+    period: str | None
+    facility: str | None
+    status: str
+    content_hash: str | None
+    source_paths: list[str]
+    pages: list[int]
+
+
+class ObservationRef(Contract):
+    """A KG-2 observation with its page and quote; the agent re-reads the source to cite it."""
+
+    property: str
+    element: str | None
+    stream: str | None
+    value_text: str
+    unit: str | None
+    status: str
+    subject: str | None
+    study: str | None
+    period: str | None
+    content_hash: str | None
+    source_paths: list[str]
+    page: int | None
+    quote: str

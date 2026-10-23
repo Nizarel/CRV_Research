@@ -7,10 +7,10 @@ never the expected answer as a whole, and must name the passage that supports ea
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Sequence
 from typing import Any
 
+from ...adapters.azure_ai.structured import structured
 from .dataset import GoldenQuestion
 from .retrieval import Hit
 
@@ -64,30 +64,15 @@ class Judge:
         if not question.key_facts:
             return []
         async with self._gate:
-            for attempt in range(6):
-                try:
-                    response = await self._client.chat.completions.create(
-                        model=self._deployment,
-                        messages=[
-                            {"role": "system", "content": _INSTRUCTIONS},
-                            {"role": "user", "content": prompt(question, hits)},
-                        ],
-                        response_format={
-                            "type": "json_schema",
-                            "json_schema": {"name": "fact_support", "strict": True,
-                                            "schema": _SCHEMA},
-                        },
-                        max_completion_tokens=4000,
-                        reasoning_effort="low",
-                    )
-                    break
-                except Exception as error:  # throttling and transient service errors
-                    status = getattr(error, "status_code", None)
-                    if status not in (429, 500, 502, 503, 504) or attempt == 5:
-                        raise
-                    await asyncio.sleep(min(60, 4 * 2**attempt))
-        content = response.choices[0].message.content or "{}"
-        verdicts = {int(item["index"]): item for item in json.loads(content).get("facts", [])}
+            parsed = await structured(
+                self._client,
+                self._deployment,
+                _INSTRUCTIONS,
+                prompt(question, hits),
+                "fact_support",
+                _SCHEMA,
+            )
+        verdicts = {int(item["index"]): item for item in parsed.get("facts", [])}
         known = {hit.chunk_id for hit in hits}
         return [
             {

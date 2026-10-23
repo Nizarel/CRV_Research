@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from crv_agent.adapters.postgres.memory import serializer
 from crv_agent.adapters.search import AzureSearch
-from crv_agent.domain.evidence import Evidence, WorkerResult
+from crv_agent.domain.evidence import Evidence, TracedWorkerResult, WorkerResult
 from crv_agent.domain.execution import Budget, BudgetExceeded
 from crv_agent.domain.planning import DocumentPage, Entity, Facet, QueryPlan
 from crv_agent.orchestration.context import ResearchContext
@@ -206,6 +206,10 @@ async def test_extraction_claim_cap_is_configurable_and_enforced() -> None:
     result, _ = await worker.run("Recovery?", "r1", [], Budget())
     assert model.data["max_claims"] == 3
     assert len(result.claims) == 3
+    assert isinstance(result, TracedWorkerResult)
+    [traced] = result.rounds
+    assert (len(traced.returned), len(traced.capped)) == (3, 2)
+    assert traced.passage_ids == [p["id"] for p in model.data["passages"]]  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

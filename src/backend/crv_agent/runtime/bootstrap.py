@@ -66,7 +66,7 @@ def application(settings: Settings) -> FastAPI:
                 ready=ready, model_calls=settings.model_calls, turn_tokens=settings.turn_tokens,
                 turn_seconds=settings.turn_seconds, facet_concurrency=settings.facet_concurrency,
                 retrieval_mode=settings.retrieval_mode, diagnostics=settings.eval_diagnostics,
-                repair_mode=settings.repair_mode,
+                repair_mode=settings.repair_mode, kg_results=settings.kg_results,
             )
             yield
     return create_app(lifespan=lifespan)

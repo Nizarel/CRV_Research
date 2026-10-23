@@ -7,7 +7,8 @@ Render one CRV pilot operations job (crv-pilot-jobs.yaml) and optionally apply i
 Shared objects (ops service account, converter service account, work disk, isolation policy and
 pilot list) are always rendered; exactly one job is selected with -Job, so stages run in order:
 verify-raw, dbsetup, index (setup, dry runs by default) then stage -> convert -> intake ->
-(review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-release.
+(review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-extract (KG-2 pilot,
+-KgImport to record candidates) -> kg-release.
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest.
 
@@ -17,7 +18,7 @@ Images are referenced only by digest.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-release', 'golden-eval')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-release', 'golden-eval')] [string] $Job,
     [Parameter(Mandatory)] [guid] $OpsClientId,
     [Parameter(Mandatory)] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $ConverterDigest = '',
@@ -44,6 +45,11 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $KgPolicy = 'crv-full-v1',
     [ValidatePattern('^[a-z][a-z0-9-]{0,30}$')] [string] $KgEnvironment = 'dev',
     [switch] $KgDryRun,
+    # kg-extract (KG-2 pilot): folder segment, chat deployment, document limit, candidate import.
+    [ValidatePattern('^[\w .&-]{1,80}$')] [string] $KgFolder = 'Dossier Cu',
+    [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $KgDeployment = 'gpt-6.1-sol',
+    [ValidateRange(0, 5000)] [int] $KgLimit = 0,
+    [switch] $KgImport,
     [string] $WorkerIdentityName = 'id-crv-pipeline-worker',
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $EvalRelease = 'crv-v1',
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $JudgeDeployment = 'gpt-5.4-mini',
@@ -98,6 +104,9 @@ $values = [ordered]@{
     KG_POLICY             = $KgPolicy
     KG_ENVIRONMENT        = $KgEnvironment
     KG_ARGS               = if ($KgDryRun) { ', --dry-run' } else { '' }
+    KG_FOLDER             = $KgFolder
+    KG_DEPLOYMENT         = $KgDeployment
+    KG_EXTRACT_ARGS       = $(if ($KgLimit) { ", --limit, $KgLimit" } else { '' }) + $(if ($KgImport) { ', --import' } else { '' })
     WORKER_IDENTITY_NAME  = $WorkerIdentityName
     EVAL_RELEASE          = $EvalRelease
     JUDGE_DEPLOYMENT      = $JudgeDeployment

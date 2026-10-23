@@ -377,6 +377,45 @@ spec:
         - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
         - {name: cu-config, configMap: {name: crv-pipeline-cu}}
 ---
+# JOB kg-extract: KG-2 pilot. Extracts studies/observations of KG_FOLDER with KG_DEPLOYMENT,
+# grounds every item on its cited page and (with -KgImport) records them as candidates in crv_kg
+# (crv_kg_writer; needs migrations 0020-0021 and Azure OpenAI access for the ops identity).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-kg-extract-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: kg-extract}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: kg-extract
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [kg-extract, --policy, "${KG_POLICY}", --folder, "${KG_FOLDER}",
+                 --deployment, "${KG_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
+                 --tables, --output, /tmp/kg-extract.jsonl${KG_EXTRACT_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "1", memory: 3Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
+---
 # JOB kg-release: freeze the crv_kg projection, load it into its own AGE graph and point the
 # KG_ENVIRONMENT at it. Runs as the Entra admin: creating an AGE graph creates a schema.
 apiVersion: batch/v1

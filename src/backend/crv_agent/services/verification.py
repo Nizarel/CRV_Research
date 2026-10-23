@@ -7,6 +7,42 @@ from crv_agent.services.evidence_pack import exposed_text
 _NUMBER = re.compile(
     r"(?<!\w)(?P<qualifier><=|>=|≤|≥|<|>|~|≈)?\s*(?P<number>[+-]?\d+(?:[.,]\d+)?)",
 )
+_GROUPED = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
+_SYMBOLS = {"≤": "<=", "≥": ">=", "≈": "~"}
+# Qualifiers printed as words just before the number (French and English reports).
+_WORDS = {
+    qualifier: re.compile(
+        rf"\b(?:{'|'.join(words)})(?:\s+(?:de|d'|à|a|of|than|to))?\s*$", re.IGNORECASE,
+    )
+    for qualifier, words in {
+        "~": ("environ", "autour", "aux alentours", "approximativement", "près", "pres",
+              "de l'ordre", "about", "around", "approximately", "roughly", "circa"),
+        ">=": ("au moins", "au minimum", "pas moins", "at least", "minimum"),
+        "<=": ("au plus", "au maximum", "pas plus", "at most", "maximum"),
+        ">": (r"(?<!au )(?<!pas )plus", r"supérieure?s?", r"superieure?s?", "au-delà",
+              "dépassant", "more", "over", "above", "greater", "exceeding"),
+        "<": (r"(?<!au )(?<!pas )moins", r"inférieure?s?", r"inferieure?s?", "en dessous",
+              "less", "below", "under"),
+    }.items()
+}
+
+
+def value_stated(quote: str, value: object, qualifier: str | None) -> bool:
+    """Whether the quote prints ``value`` with ``qualifier`` (as a symbol or as words).
+
+    Grouped thousands (``8 800``) are read both joined and as separate numbers.
+    """
+    for text in dict.fromkeys((quote, _GROUPED.sub("", quote))):
+        for match in _NUMBER.finditer(text):
+            if not _decimal_equal(match["number"].replace(",", "."), str(value)):
+                continue
+            printed = _SYMBOLS.get(match["qualifier"], match["qualifier"])
+            if printed == qualifier or (
+                printed is None and qualifier is not None
+                and _WORDS[qualifier].search(text[max(0, match.start() - 40):match.start()])
+            ):
+                return True
+    return False
 
 
 def claim_errors(
@@ -33,16 +69,7 @@ def claim_errors(
             ):
                 errors.append("Derived claim differs from the deterministic calculation")
     elif claim.value is not None:
-        numbers = [
-            (match["number"].replace(",", "."), {
-                "≤": "<=", "≥": ">=", "≈": "~",
-            }.get(match["qualifier"], match["qualifier"]))
-            for match in _NUMBER.finditer(claim.quote)
-        ]
-        if not any(
-            _decimal_equal(number, str(claim.value)) and qualifier == claim.qualifier
-            for number, qualifier in numbers
-        ):
+        if not value_stated(claim.quote, claim.value, claim.qualifier):
             errors.append("Claim numeric value/qualifier does not occur in its quotation")
     if any(not item.pages and not item.locators for item in selected):
         errors.append("Claim evidence has no original locator")

@@ -172,23 +172,25 @@ class Projection:
     edges: tuple[Edge, ...]
     members: Mapping[str, str] = field(default_factory=dict)
     inputs: tuple[str, ...] = ()
+    observations: tuple[tuple[str, str], ...] = ()
+    """``(observation IRI, status)`` frozen with the release (KG-2); relational, not projected."""
 
     @property
     def manifest_sha256(self) -> str:
-        return fingerprint(
-            PROJECTION_VERSION,
-            {
-                "statuses": list(self.statuses),
-                "inputs": list(self.inputs),
-                "vertices": [
-                    [v.iri, v.label, dict(v.properties), list(v.scope_keys)] for v in self.vertices
-                ],
-                "edges": [
-                    [e.label, e.start, e.end, dict(e.properties), list(e.scope_keys)]
-                    for e in self.edges
-                ],
-            },
-        )
+        payload: dict[str, Any] = {
+            "statuses": list(self.statuses),
+            "inputs": list(self.inputs),
+            "vertices": [
+                [v.iri, v.label, dict(v.properties), list(v.scope_keys)] for v in self.vertices
+            ],
+            "edges": [
+                [e.label, e.start, e.end, dict(e.properties), list(e.scope_keys)]
+                for e in self.edges
+            ],
+        }
+        if self.observations:  # KG-1-only releases keep their manifests and IDs
+            payload["observations"] = [list(item) for item in self.observations]
+        return fingerprint(PROJECTION_VERSION, payload)
 
     def release_id(self, built_at: datetime) -> str:
         return f"crvkg-{built_at:%Y%m%d}-{self.manifest_sha256[:12]}"
@@ -204,9 +206,12 @@ def build_projection(
     *,
     statuses: Iterable[str],
     inputs: Iterable[str] = (),
+    observations: Iterable[tuple[str, str, str]] = (),
 ) -> Projection:
     """One edge per (label, start, end) over assertions in ``statuses``; vertices for entities
-    in ``statuses`` and every edge endpoint. The best backing status labels the edge."""
+    in ``statuses`` and every edge endpoint. The best backing status labels the edge.
+    ``observations`` are ``(iri, document IRI, status)``: kept in ``statuses`` when their
+    document is a vertex of the release."""
 
     allowed = tuple(sorted(set(statuses)))
     if not allowed or any(status not in STATUS_RANK for status in allowed):
@@ -244,4 +249,10 @@ def build_projection(
         properties = {**entity.properties, "iri": iri, "name": entity.label,
                       "status": entity.status}
         vertices.append(Vertex(iri, entity.kind, properties, tuple(sorted(entity.scope_keys))))
-    return Projection(allowed, tuple(vertices), tuple(edges), members, tuple(sorted(set(inputs))))
+    present = {vertex.iri for vertex in vertices}
+    released = tuple(sorted(
+        (iri, status) for iri, document, status in observations
+        if status in allowed and document in present
+    ))
+    return Projection(allowed, tuple(vertices), tuple(edges), members, tuple(sorted(set(inputs))),
+                      released)

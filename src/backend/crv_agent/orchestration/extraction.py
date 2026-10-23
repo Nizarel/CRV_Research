@@ -13,7 +13,13 @@ import json
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from crv_agent.domain.evidence import Claim, Evidence, WorkerResult
+from crv_agent.domain.evidence import (
+    Claim,
+    Evidence,
+    ExtractionRound,
+    TracedWorkerResult,
+    WorkerResult,
+)
 from crv_agent.domain.execution import Budget, estimate_tokens
 from crv_agent.domain.planning import Contract
 from crv_agent.orchestration.middleware import UsageRecorder
@@ -52,6 +58,7 @@ class ExtractionWorker:
         found: dict[str, Evidence] = {}
         claims: list[Claim] = []
         gaps: list[str] = []
+        rounds: list[ExtractionRound] = []
         query = question.split("\n", 1)[0]
         for round_number in range(MAX_ROUNDS):
             text = (query + "\n" + " ".join(fixed)).strip()
@@ -90,23 +97,29 @@ class ExtractionWorker:
                 raise next(r for r in results if isinstance(r, BaseException))
             if len(extractions) < len(results):
                 gaps.append("An extraction batch failed; some retrieved passages were not read.")
-            fresh_claims = {
-                claim.model_dump_json(): claim
-                for extraction in extractions for claim in extraction.claims[:self.max_claims]
-            }
+            kept = [claim for e in extractions for claim in e.claims[:self.max_claims]]
+            fresh_claims = {claim.model_dump_json(): claim for claim in kept}
             claims.extend(fresh_claims.values())
             # A batch reports aspects missing from its own passages; keep them only when no
             # batch found anything, otherwise they contradict the other batches' claims.
             if not fresh_claims or len(extractions) == 1:
                 gaps.extend(gap for extraction in extractions for gap in extraction.gaps)
             rewrite = next((e.rewrite for e in extractions if e.rewrite), None)
+            rounds.append(ExtractionRound(
+                query=text, passage_ids=[str(passage["id"]) for passage in passages],
+                returned=kept,
+                capped=[claim for e in extractions for claim in e.claims[self.max_claims:]],
+                gaps=[gap for e in extractions for gap in e.gaps], rewrite=rewrite,
+            ))
             # Rewrite only when nothing usable was found: a second sequential round costs
             # another full model call on the critical path.
             if fresh_claims or not rewrite or round_number + 1 >= MAX_ROUNDS:
                 break
             query = rewrite
         gaps.append("Top-50 candidate search per query; not an exhaustive document review.")
-        return WorkerResult(claims=claims, gaps=list(dict.fromkeys(gaps))), list(found.values())
+        return TracedWorkerResult(
+            claims=claims, gaps=list(dict.fromkeys(gaps)), rounds=rounds,
+        ), list(found.values())
 
     async def extract(
         self, question: str, passages: list[dict[str, object]], round_number: int,
