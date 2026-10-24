@@ -59,6 +59,17 @@ def test_anchoring_repairs_spacing_ids_stitching_and_spurious_calculations() -> 
         assert claim_errors(repaired, {"S1": PAGE}) == []
 
 
+def test_a_date_whose_year_the_cited_passage_does_not_print_is_cleared() -> None:
+    dated = PAGE.model_copy(update={"content": PAGE.content + "\nRévision du 25/02/2016."})
+    from_filename = claim("Tonnage traité : 13 360 t.", "13360").model_copy(
+        update={"date": "02-2016"},
+    )
+    assert anchor_claim(from_filename, [PAGE]).date is None
+    assert anchor_claim(from_filename, [dated]).date == "02-2016"
+    undated = from_filename.model_copy(update={"date": "février"})
+    assert anchor_claim(undated, [PAGE]).date == "février"
+
+
 def test_anchoring_never_accepts_text_that_was_not_shown() -> None:
     invented = claim("Récupération en cuivre de 92 %", "92")
     assert anchor_claim(invented, [PAGE]) == invented

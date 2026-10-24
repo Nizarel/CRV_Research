@@ -119,6 +119,8 @@ async def answer(
                 reasons = ["Statements the verifier found unsupported were removed."]
             if listed:
                 reasons = ["The synthesis failed verification; only verified findings are listed."]
+            label = "Non couvert : " if plan.language == "fr" else "Not answered: "
+            reasons += [label + part for part in draft.unanswered]
     selected = {cid for claim in claims for cid in claim.evidence_ids}
     result = Answer.model_validate({
         "status": status, "content": text,

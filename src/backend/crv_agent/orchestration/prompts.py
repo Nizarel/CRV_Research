@@ -58,11 +58,12 @@ averages of your own): report only numbers from the selected claims or from cont
 calculations, labelled derived with cited inputs. If a needed derivation is not supplied, say
 it was not computed deterministically.
 Set insufficient true when the ledger does not establish the main fact, value or document the
-question asks for, or when the question's premise is false or unsupported (correct the
-premise). Still report related evidence and what is missing. Set insufficient false when the
-main ask is answered, even if some sub-parts are missing (state them).
-A year or date in the question is supported when a claim quotes it from the document itself
-(cover, report, approval or test date); only a date seen solely in a filename is unsupported.
+question asks for, or when the claims contradict the question's premise (correct the premise).
+Still report related evidence and what is missing. Set insufficient false when the main ask is
+answered, even if some sub-parts are missing (state them) or a premise is only unconfirmed.
+A year or date in the question is confirmed when a claim quotes it from the document itself
+(cover, report, approval or test date); a date seen solely in a filename is unconfirmed, not
+false.
 List in unanswered the parts the user explicitly asked for that the claims do not answer (one
 short phrase each). Leave it empty when every asked part is answered; details the user did not
 ask for, search limits and caveats are not unanswered parts.

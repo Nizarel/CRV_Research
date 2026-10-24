@@ -4,7 +4,8 @@ The extractor sometimes copies a quote with other whitespace or typography, cite
 other than the one holding the quote, joins several shown lines into one quote, or sets a
 calculation index on a plain value. Each repair only replaces the quote with an exact span of
 shown text (or narrows it to one shown line that prints the value) and rebinds the evidence IDs
-to passages that contain it. ``claim_errors`` still decides acceptance, unchanged.
+to passages that contain it. A date whose year no cited passage prints (a filename year) is
+cleared rather than failing the claim. ``claim_errors`` still decides acceptance, unchanged.
 """
 
 import re
@@ -20,6 +21,7 @@ _PUNCTUATION = str.maketrans({
     "\u2013": "-", "\u2014": "-", "\u2011": "-", "\u2212": "-", "\u00ad": None,
 })
 _FRAGMENTS = re.compile(r"\s*(?:\n+|…|\.\.\.)\s*")
+_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 MIN_FRAGMENT = 8
 
 
@@ -53,6 +55,18 @@ def locate(quote: str, text: str) -> str | None:
 
 def anchor_claim(claim: Claim, shown: Sequence[Evidence]) -> Claim:
     """The claim quoted exactly from, and bound to, the passages that state it."""
+    claim = _anchor(claim, shown)
+    years = _YEAR.findall(claim.date or "")
+    texts = [
+        text for item in shown if item.id in claim.evidence_ids and not item.generated
+        for text in exposed_text(item)
+    ]
+    if any(not any(year in text for text in texts) for year in years):
+        return claim.model_copy(update={"date": None})
+    return claim
+
+
+def _anchor(claim: Claim, shown: Sequence[Evidence]) -> Claim:
     if claim.calculation_index is not None:
         # Worker claims are never derived; derived values come from the calculator only.
         claim = claim.model_copy(update={"calculation_index": None})

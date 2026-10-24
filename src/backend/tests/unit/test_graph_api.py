@@ -396,7 +396,7 @@ async def test_repair_drops_only_verifier_rejected_claims() -> None:
     from crv_agent.domain.answers import AnswerDraft, Verdict
 
     good = CLAIM
-    bad = CLAIM.model_copy(update={"text": "Recovery dated wrongly", "date": "2015"})
+    bad = CLAIM.model_copy(update={"text": "Recovery at bench scale", "conditions": "bench"})
 
     class Models(FakeModels):
         def __init__(self) -> None:
@@ -412,7 +412,7 @@ async def test_repair_drops_only_verifier_rejected_claims() -> None:
         async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
             await budget.reserve(model=1, tokens=10)
             if bad in draft.claims:
-                return Verdict(supported=False, reasons=["date not supported"],
+                return Verdict(supported=False, reasons=["conditions not supported"],
                                unsupported_claims=[draft.claims.index(bad)])
             return Verdict(supported=True, reasons=[])
 
@@ -599,7 +599,7 @@ async def test_failed_final_draft_is_pruned_to_a_verified_answer() -> None:
     assert answer.reasons == ["Statements the verifier found unsupported were removed."]
 
 
-async def _status(models: FakeModels, worker: FakeWorker | None = None) -> str:
+async def _answer(models: FakeModels, worker: FakeWorker | None = None) -> Answer:
     result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
         {"question": "Recovery?", "history": []},
         {"configurable": {"thread_id": str(uuid4())}},
@@ -608,7 +608,11 @@ async def _status(models: FakeModels, worker: FakeWorker | None = None) -> str:
             budget=Budget(), search_release="r1", kg_release="kg1", trace_id="t",
         ),
     )
-    return str(result["answer"].status)
+    return result["answer"]  # type: ignore[no-any-return]
+
+
+async def _status(models: FakeModels, worker: FakeWorker | None = None) -> str:
+    return str((await _answer(models, worker)).status)
 
 
 @pytest.mark.asyncio
@@ -636,7 +640,9 @@ async def test_status_is_partial_only_for_unanswered_or_lost_content() -> None:
             draft = await super().compose(question, claims, context, budget)
             return draft.model_copy(update={"unanswered": ["2016 value"]})
 
-    assert await _status(Unanswered(), Gapped()) == "partial"
+    unanswered = await _answer(Unanswered(), Gapped())
+    assert unanswered.status == "partial"
+    assert unanswered.reasons == ["Not answered: 2016 value"]
 
     class TwoFacets(FakeModels):
         async def plan(self, question, history, budget):  # type: ignore[no-untyped-def]
