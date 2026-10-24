@@ -213,7 +213,7 @@ async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_number
             assert role == "answer"
             assert '"evidence_ids"' not in data
             return ComposedAnswer(content="87.5 % [S1] [S9]", claim_numbers=[1, 1, 7, -1],
-                                  insufficient=False, conflicts=[])
+                                  insufficient=False, unanswered=["2016 value"], conflicts=[])
 
     ledger = [
         claim(value="80", evidence_ids=["long-opaque-id"]),
@@ -221,6 +221,7 @@ async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_number
     ]
     draft = await Models().compose("Q?", ledger, "{}", Budget())
     assert draft.claims == [ledger[1]]
+    assert draft.unanswered == ["2016 value"]
     assert draft.content == "87.5 % [long-opaque-id] [S9]"  # unknown handle kept, then rejected
     evidence = [source(id="long-opaque-id")]
     assert "Answer contains unknown citation markers" in verify_draft(draft, evidence, "r1")
@@ -239,7 +240,7 @@ async def test_composer_conflicts_need_two_selected_claims_that_differ() -> None
 
         async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
             return ComposedAnswer(content="[S1]", claim_numbers=[0, 1, 2], insufficient=False,
-                                  conflicts=self.conflicts)
+                                  unanswered=[], conflicts=self.conflicts)
 
     ledger = [claim(), claim(value="80", quote="Recovery 80 % at pilot scale."), claim()]
     differing = ComposedConflict(subject="sample A", quantity="recovery", claim_numbers=[0, 1])
@@ -346,5 +347,5 @@ async def test_sentences_with_llm_arithmetic_are_pruned_deterministically() -> N
         ),
     )
     answer = result["answer"]
-    assert answer.status == "partial"
+    assert answer.status == "answered"  # an unsupported sentence went, every sourced fact stayed
     assert answer.content == "Recovery was 87.5 % at pilot scale [S1]."

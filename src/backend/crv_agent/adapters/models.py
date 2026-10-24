@@ -107,7 +107,7 @@ class LangChainModels:
                 ))
         return AnswerDraft(
             content=content, claims=selected, insufficient=composed.insufficient,
-            conflicts=conflicts,
+            conflicts=conflicts, unanswered=composed.unanswered,
         )
 
     async def verify(

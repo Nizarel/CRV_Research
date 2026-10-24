@@ -170,6 +170,12 @@ spec:
           args: [crv-agent, check, --models]
           envFrom:
             - configMapRef: {name: crv-research-agent}
+          # Search backend per job only: the web app shares the ConfigMap and stays on Azure.
+          env:
+            - {name: CRV_SEARCH_BACKEND, value: "${SEARCH_BACKEND}"}
+            - {name: CRV_PG_RERANKER, value: "${PG_RERANKER}"}
+            - {name: CRV_PG_RERANKER_URL, value: "${PG_RERANKER_URL}"}
+            - {name: CRV_PG_RERANKER_MODEL, value: "${PG_RERANKER_MODEL}"}
           resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
@@ -204,6 +210,11 @@ spec:
                  --out, /results/contexts.jsonl, --confirm-live${EVAL_ARGS}]
           envFrom:
             - configMapRef: {name: crv-research-agent}
+          env:
+            - {name: CRV_SEARCH_BACKEND, value: "${SEARCH_BACKEND}"}
+            - {name: CRV_PG_RERANKER, value: "${PG_RERANKER}"}
+            - {name: CRV_PG_RERANKER_URL, value: "${PG_RERANKER_URL}"}
+            - {name: CRV_PG_RERANKER_MODEL, value: "${PG_RERANKER_MODEL}"}
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
@@ -273,6 +284,10 @@ spec:
             - {name: CRV_EXTRACT_BATCHES, value: "${EXTRACT_BATCHES}"}
             - {name: CRV_REPAIR_MODE, value: "${REPAIR_MODE}"}
             - {name: CRV_KG_RESULTS, value: "${KG_RESULTS}"}
+            - {name: CRV_SEARCH_BACKEND, value: "${SEARCH_BACKEND}"}
+            - {name: CRV_PG_RERANKER, value: "${PG_RERANKER}"}
+            - {name: CRV_PG_RERANKER_URL, value: "${PG_RERANKER_URL}"}
+            - {name: CRV_PG_RERANKER_MODEL, value: "${PG_RERANKER_MODEL}"}
           # Exec probe: kubelet httpGet probes come from the node and cannot reach pod loopback.
           startupProbe:
             exec: {command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]}

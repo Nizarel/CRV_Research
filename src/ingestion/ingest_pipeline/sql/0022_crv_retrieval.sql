@@ -77,6 +77,7 @@ CREATE FUNCTION crv_retrieval.document_vector(
 -- Any query word (as the Search simple syntax with searchMode any), stop words of both
 -- languages removed first. NULL when nothing searchable remains. The tsvector text form
 -- quotes every lexeme, so joining the quoted lexemes with "|" is a valid tsquery.
+-- The Snowball French list lacks "les" and loses its accented words to unaccent ("à" -> "a").
 CREATE FUNCTION crv_retrieval.query_terms(p_text TEXT) RETURNS tsquery
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
@@ -85,8 +86,11 @@ BEGIN ATOMIC
             || to_tsvector('crv_retrieval.en', cleaned.words)
             || to_tsvector('crv_retrieval.simple', cleaned.words))::text,
         ''' ''', ''' | '''), '')::tsquery
-    FROM (SELECT array_to_string(tsvector_to_array(
-        to_tsvector('crv_retrieval.simple', p_text)), ' ') AS words) AS cleaned;
+    FROM (SELECT array_to_string(ARRAY(
+        SELECT word
+        FROM unnest(tsvector_to_array(to_tsvector('crv_retrieval.simple', p_text))) AS word
+        WHERE word <> ALL ('{a,les,est,sont,ont,cette,cet,meme,ete,etre,etant,etait,etaient}'::text[])
+    ), ' ') AS words) AS cleaned;
 END;
 
 CREATE TABLE crv_retrieval.chunk (

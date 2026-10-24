@@ -9,6 +9,7 @@ cost, latency and composition metadata. Scoring is done by the shared golden har
 import argparse
 import asyncio
 import json
+import re
 import sys
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -43,7 +44,8 @@ POLICIES: dict[str, EvidencePolicy] = {
     "LLM": EvidencePolicy(pack_size=16, excerpt_characters=1200, rerank="llm"),
     "FULL50": EvidencePolicy(),
 }
-ARMS = ("A0", "A1", *POLICIES, "DEC", "KGB", "CEIL", "AAR")
+ARMS = ("A0", "A1", "LEX", *POLICIES, "DEC", "KGB", "CEIL", "AAR")
+LABEL = re.compile(r"^[A-Za-z0-9-]{1,16}$")
 
 
 @dataclass
@@ -134,6 +136,10 @@ class Arms:
             await budget.reserve(retrieval=1)
             hits = await self.search.query(question, self.release, "semantic", [], top=50)
             return ArmOutput(full(focus(hits)[:10]), "truncate")
+        if arm == "LEX":
+            await budget.reserve(retrieval=1)
+            hits = await self.search.query(question, self.release, "lexical", [], top=10)
+            return ArmOutput(full(hits), "truncate")
         if arm in POLICIES:
             return ArmOutput(
                 await self.pack([question], question, POLICIES[arm], [], budget), "split",
@@ -194,8 +200,9 @@ def record(
 
 async def evaluate(
     questions: Sequence[GoldenQuestion], arms: Sequence[str], runner: Arms, concurrency: int,
-    emit: Callable[[dict[str, Any]], None],
+    emit: Callable[[dict[str, Any]], None], label: str = "",
 ) -> None:
+    """``label`` prefixes arm names (e.g. PG_A1) so runs of two backends can be scored together."""
     gate = asyncio.Semaphore(concurrency)
 
     async def one(question: GoldenQuestion) -> None:
@@ -209,7 +216,10 @@ async def evaluate(
                     output = await runner.run(arm, question.question, budget)
                 except Exception as exc:  # recorded per arm; never silently dropped
                     error = f"{type(exc).__name__}: {exc}"[:500]
-                emit(record(question, arm, output, budget, time.perf_counter() - started, error))
+                emit(record(
+                    question, f"{label}_{arm}" if label else arm, output, budget,
+                    time.perf_counter() - started, error,
+                ))
 
     await asyncio.gather(*(one(q) for q in questions))
 
@@ -255,7 +265,7 @@ async def _run(args: argparse.Namespace) -> int:
                 out.write(json.dumps(item, ensure_ascii=False) + "\n")
                 out.flush()
 
-            await evaluate(questions, arms, runner, args.concurrency, emit)
+            await evaluate(questions, arms, runner, args.concurrency, emit, args.label)
             if out is sys.stdout:
                 print(END, flush=True)
     finally:
@@ -313,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--knowledge-base", default="", help="AAR knowledge base name")
     parser.add_argument("--knowledge-source", default="crv-evidence-ks")
     parser.add_argument("--out", default="-", help="JSONL path, or - for stdout with markers")
+    parser.add_argument("--label", default="",
+                        help="Arm-name prefix, e.g. the search backend (PG -> PG_A1)")
     parser.add_argument("--confirm-live", action="store_true",
                         help="Acknowledge paid Search/model calls on Azure")
     args = parser.parse_args(argv)
@@ -320,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Live Azure retrieval requires --confirm-live")
     if args.split == "heldout" and not args.allow_heldout:
         parser.error("The held-out split requires --allow-heldout")
+    if args.label and not LABEL.match(args.label):
+        parser.error("--label must be 1-16 letters, digits or hyphens")
     with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
         return runner.run(_run(args))
 

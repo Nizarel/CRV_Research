@@ -16,6 +16,8 @@ class AnswerDraft(Contract):
     insufficient: bool
     # Indices into claims; validated deterministically before reaching the answer.
     conflicts: list[Conflict] = []
+    # Parts the user explicitly asked for that the selected claims do not answer.
+    unanswered: list[str] = []
 
 
 class ComposedConflict(Contract):
@@ -30,6 +32,7 @@ class ComposedAnswer(Contract):
     content: str
     claim_numbers: list[int]
     insufficient: bool
+    unanswered: list[str]
     conflicts: list[ComposedConflict]
 
 
@@ -47,6 +50,8 @@ class Coverage(Contract):
     visited: int = 0
     enumerated: int = 0
     catalogue_complete: bool = False
+    # Research was cut short (a facet failed or ran out of budget, or a listing was truncated).
+    incomplete: bool = False
     gaps: list[str] = []
 
 

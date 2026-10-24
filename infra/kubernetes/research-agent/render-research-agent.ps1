@@ -49,7 +49,7 @@ param(
     [ValidatePattern('^[a-z0-9]{1,12}$')] [string] $RunId = (Get-Date -Format 'MMddHHmm'),
     [string] $ResourceGroup = 'rg-CRV-southcentralus',
     [string] $Cluster = 'aks-crv-southcentralus',
-    [ValidateSet('A0', 'A1', 'P16', 'P12', 'P24', 'P16W2000', 'CAP', 'LLM', 'FULL50', 'DEC', 'KGB', 'CEIL', 'AAR')] [string[]] $Arm = @(),
+    [ValidateSet('A0', 'A1', 'LEX', 'P16', 'P12', 'P24', 'P16W2000', 'CAP', 'LLM', 'FULL50', 'DEC', 'KGB', 'CEIL', 'AAR')] [string[]] $Arm = @(),
     [ValidateSet('dev', 'heldout')] [string] $Split = 'dev',
     [switch] $AllowHeldout,
     [ValidatePattern('^[A-Za-z0-9]{1,8}$')] [string[]] $Only = @(),
@@ -61,6 +61,14 @@ param(
     [ValidateRange(1, 8)] [int] $ScoreConcurrency = 6,
     [ValidateRange(900, 86400)] [int] $DeadlineSeconds = 14400,
     [ValidateRange(30, 600)] [int] $TurnSeconds = 180,
+    # Evidence search of the evaluation jobs (the web app stays on Azure AI Search). postgres reads
+    # crv_retrieval (pipeline migration 0022, retrieval-backfill); a Cohere cross-encoder needs
+    # its Foundry rerank URL and model. -ArmLabel prefixes retrieval-eval arms (PG -> PG_A1).
+    [ValidateSet('azure', 'postgres')] [string] $SearchBackend = 'azure',
+    [ValidateSet('none', 'cohere')] [string] $PgReranker = 'none',
+    [ValidatePattern('^$|^https://[A-Za-z0-9.\-/_]+$')] [string] $PgRerankerUrl = '',
+    [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $PgRerankerModel = '',
+    [ValidatePattern('^$|^[A-Za-z0-9-]{1,16}$')] [string] $ArmLabel = '',
     [string] $GoldenPath = (Join-Path $PSScriptRoot '../../../golden/crv_golden.jsonl'),
     [string] $RenderPath = '',
     [switch] $Invoke
@@ -75,6 +83,8 @@ $evalArgs = ''
 foreach ($item in $Arm) { $evalArgs += ", --arm, $item" }
 foreach ($item in $Only) { $evalArgs += ", --only, $item" }
 if ($KnowledgeBase) { $evalArgs += ", --knowledge-base, $KnowledgeBase" }
+if ($ArmLabel) { $evalArgs += ", --label, $ArmLabel" }
+if ($PgReranker -eq 'cohere' -and -not ($PgRerankerUrl -and $PgRerankerModel)) { throw '-PgReranker cohere needs -PgRerankerUrl and -PgRerankerModel.' }
 if ($Split -eq 'heldout') { $evalArgs += ', --allow-heldout' }
 $answerArgs = ''
 foreach ($item in $Only) { $answerArgs += ", --question-id, $item" }
@@ -124,6 +134,10 @@ $values = [ordered]@{
     JUDGE_REPEATS       = $JudgeRepeats.ToString()
     SCORE_CONCURRENCY   = $ScoreConcurrency.ToString()
     DEADLINE_SECONDS    = $DeadlineSeconds.ToString()
+    SEARCH_BACKEND      = $SearchBackend
+    PG_RERANKER         = $PgReranker
+    PG_RERANKER_URL     = $PgRerankerUrl
+    PG_RERANKER_MODEL   = $PgRerankerModel
 }
 foreach ($login in $AgentIdentityName, $AdminIdentityName) {
     if ($login -notmatch '^[a-z][a-z0-9-]{2,62}$') { throw "Unsafe login name: $login" }

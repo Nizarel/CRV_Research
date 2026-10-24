@@ -10,7 +10,10 @@ No tools other than the provided internal read-only tools are available.
 """
 
 PLAN_RULES = RESEARCH_RULES + """
-Return a QueryPlan, not an answer. Resolve pronouns using history but do not treat it as truth.
+Return a QueryPlan, not an answer. Use history only to resolve references in the question
+(pronouns, "ce rapport", "et pour X ?"); history is not truth. A question that names its own
+subject starts a new topic: never carry people, sites, dates or premises from earlier turns into
+its facets or premises.
 Choose lookup, synthesis, timeline, comparison, catalogue, calculation, procedure, clarify or
 out_of_scope. Use clarify only when no reasonable interpretation can be searched (e.g. an
 unresolved pronoun with no history); otherwise search the most plausible reading and list the
@@ -58,6 +61,11 @@ Set insufficient true when the ledger does not establish the main fact, value or
 question asks for, or when the question's premise is false or unsupported (correct the
 premise). Still report related evidence and what is missing. Set insufficient false when the
 main ask is answered, even if some sub-parts are missing (state them).
+A year or date in the question is supported when a claim quotes it from the document itself
+(cover, report, approval or test date); only a date seen solely in a filename is unsupported.
+List in unanswered the parts the user explicitly asked for that the claims do not answer (one
+short phrase each). Leave it empty when every asked part is answered; details the user did not
+ask for, search limits and caveats are not unanswered parts.
 List in conflicts each pair or group of claims that report different values or descriptions
 for the same subject and quantity (by claim number); describe the difference in content
 without merging values.

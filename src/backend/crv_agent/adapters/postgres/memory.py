@@ -50,7 +50,7 @@ def serializer() -> JsonPlusSerializer:
 @asynccontextmanager
 async def entra_pool(
     credential: DefaultAzureCredential, host: str, database: str, user: str, *, read_only: bool,
-    root_cert: str = "system",
+    root_cert: str = "system", max_size: int = 5,
 ) -> AsyncIterator[AsyncConnectionPool[AsyncConnection[DictRow]]]:
     async def conninfo() -> str:
         token = await credential.get_token(DB_SCOPE)
@@ -68,7 +68,7 @@ async def entra_pool(
 
     pool: AsyncConnectionPool[AsyncConnection[DictRow]] = AsyncConnectionPool(
         conninfo=conninfo, kwargs={"row_factory": dict_row, "autocommit": True},
-        min_size=1, max_size=5, max_lifetime=2700, timeout=15, open=False,
+        min_size=1, max_size=max_size, max_lifetime=2700, timeout=15, open=False,
         configure=configure,
     )
     await pool.open()

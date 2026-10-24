@@ -48,7 +48,7 @@ async def answer(
         }, ensure_ascii=False)
         draft: AnswerDraft | None = None
         verdict: Verdict | None = None
-        pruned = listed = False
+        pruned = listed = dropped = False
         try:
             for round_number in range(2):
                 composed = await context.models.compose(
@@ -74,6 +74,7 @@ async def answer(
                     if candidate is not None and not verify_draft(
                         candidate, evidence, context.search_release, state["calculations"],
                     ):
+                        dropped = len(candidate.claims) < len(draft.claims)
                         draft, reasons, pruned = candidate, [], True
                         break
                 # Converge on the single repair: drop exactly the claims the verifier rejected,
@@ -93,6 +94,7 @@ async def answer(
             if candidate is not None and not verify_draft(
                 candidate, evidence, context.search_release, state["calculations"],
             ):
+                dropped = len(candidate.claims) < len(draft.claims)
                 draft, reasons, pruned = candidate, [], True
             elif (
                 candidate := findings(draft, verdict, state["calculations"], plan.language)
@@ -108,8 +110,10 @@ async def answer(
         else:
             text, claims = draft.content, draft.claims
             conflicts = answer_conflicts(draft, state["claims"], state["conflicts"])
+            # Coverage gaps are always-present caveats; only lost or unanswered content is partial.
             status = "insufficient_evidence" if draft.insufficient else (
-                "partial" if state["coverage"].gaps or pruned or listed else "answered"
+                "partial" if draft.unanswered or state["coverage"].incomplete or dropped or listed
+                else "answered"
             )
             if pruned:
                 reasons = ["Statements the verifier found unsupported were removed."]

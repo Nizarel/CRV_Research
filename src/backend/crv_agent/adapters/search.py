@@ -20,14 +20,28 @@ def literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def check_hashes(hashes: list[str]) -> None:
+    if len(hashes) > 1000 or any(
+        len(value) != 64 or any(c not in "0123456789abcdef" for c in value)
+        for value in hashes
+    ):
+        raise ValueError("Invalid content hash filter")
+
+
+def check_table_scope(pages: dict[str, list[int]]) -> None:
+    if len(pages) > 5 or any(
+        not numbers or len(numbers) > 15
+        or any(type(number) is not int or number < 1 for number in numbers)
+        for numbers in pages.values()
+    ):
+        raise ValueError("Invalid neighboring table scope")
+    check_hashes(list(pages))
+
+
 def query_filter(release: str, hashes: list[str]) -> str:
     result = f"release_id eq {literal(release)}"
     if hashes:
-        if len(hashes) > 1000 or any(
-            len(value) != 64 or any(c not in "0123456789abcdef" for c in value)
-            for value in hashes
-        ):
-            raise ValueError("Invalid content hash filter")
+        check_hashes(hashes)
         result += f" and search.in(content_hash, {literal(','.join(hashes))}, ',')"
     return result
 
@@ -107,12 +121,7 @@ class AzureSearch:
     async def tables(self, release: str, pages: dict[str, list[int]]) -> list[Evidence]:
         if not pages:
             return []
-        if len(pages) > 5 or any(
-            not numbers or len(numbers) > 15
-            or any(type(number) is not int or number < 1 for number in numbers)
-            for numbers in pages.values()
-        ):
-            raise ValueError("Invalid neighboring table scope")
+        check_table_scope(pages)
         clauses = [
             f"({query_filter(release, [digest])} and original_page_numbers/any(page: "
             + " or ".join(f"page eq {number}" for number in sorted(set(numbers))) + "))"

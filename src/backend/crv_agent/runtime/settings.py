@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     search_endpoint: str
     search_index: str = "crv-evidence-v1"
     search_release: str = "crv-v1"
+    # azure: Azure AI Search; postgres: crv_retrieval in the KG database (ingestion migration 0022).
+    search_backend: Literal["azure", "postgres"] = "azure"
+    # Deployment that embedded the corpus (query vectors must come from the same model).
+    pg_embedding_deployment: str = "text-embedding-3-large"
+    pg_search_pool_size: int = Field(default=10, ge=1, le=20)
+    # Cross-encoder over the top 50 semantic results, in the semantic ranker's role.
+    pg_reranker: Literal["none", "cohere"] = "none"
+    pg_reranker_url: str = ""
+    pg_reranker_model: str = ""
     kg_release: str
     kg_scopes: list[str] = ["crv:research", "crv:geometallurgy", "crv:environment"]
     postgres_host: str
@@ -85,6 +94,10 @@ class Settings(BaseSettings):
             "https://",
         ):
             raise ValueError("Azure endpoints must use HTTPS")
+        if self.pg_reranker == "cohere" and not (
+            self.pg_reranker_url.startswith("https://") and self.pg_reranker_model
+        ):
+            raise ValueError("The cohere reranker needs an HTTPS URL and a model")
         return self
 
 

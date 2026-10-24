@@ -89,6 +89,7 @@ async def research(
             items.append({"document": doc.model_dump(mode="json"), "lineage": lineage})
             if len(items) == 12 and len(docs) > 12:
                 gaps.append("Catalogue details limited to 12 documents; narrow the request.")
+                coverage = coverage.model_copy(update={"incomplete": True})
                 break
         # Catalogue observations retain an explicit filename/manifest basis, not scientific facts.
         evidence = [
@@ -170,6 +171,8 @@ async def research(
                 )
         if context.diagnostics:
             audit.append(facet_audit(facet.question, status, result, evidence_by_id))
+        if status != "completed":
+            cut_short.append(facet.question)
         # Early findings, not a verified answer: every streamed claim's quote is located verbatim.
         cited = {cid for claim in accepted for cid in claim.evidence_ids}
         runtime.stream_writer({
@@ -185,6 +188,7 @@ async def research(
             ],
         })
     failures: list[Exception] = []
+    cut_short: list[str] = []
     async with asyncio.TaskGroup() as group:
         for facet, scope, strict in runs:
             group.create_task(run(facet, scope, strict))
@@ -197,7 +201,10 @@ async def research(
     return {
         "evidence": sorted(evidence_by_id.values(), key=lambda e: e.id),
         "claims": [claims[key] for key in sorted(claims)],
-        "coverage": coverage.model_copy(update={"visited": visited, "gaps": sorted(set(gaps))}),
+        "coverage": coverage.model_copy(update={
+            "visited": visited, "gaps": sorted(set(gaps)),
+            "incomplete": coverage.incomplete or bool(cut_short),
+        }),
         **({"audit": audit} if context.diagnostics else {}),
     }
 

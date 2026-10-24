@@ -478,7 +478,7 @@ async def test_prune_repair_mode_skips_the_second_compose_and_verify(
     )
     answer = result["answer"]
     assert (models.compositions, models.verifications) == (rounds, rounds)
-    assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
+    assert answer.status == "answered" and answer.content == "Recovery was 87.5 % [S1]."
     assert answer.claims == [CLAIM]
 
 
@@ -519,7 +519,7 @@ async def test_budget_stop_during_answer_keeps_the_last_verified_draft(stop_at: 
         assert answer.status == "insufficient_evidence" and not answer.claims
         assert any("budget" in reason for reason in answer.reasons)
     else:  # round 1 was verified; its pruned draft survives the stop in round 2
-        assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
+        assert answer.status == "answered" and answer.content == "Recovery was 87.5 % [S1]."
         assert answer.claims == [CLAIM]
 
 
@@ -566,7 +566,7 @@ def test_prune_leaves_no_citation_only_lines_or_bodiless_headings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_final_draft_is_pruned_to_a_partial_verified_answer() -> None:
+async def test_failed_final_draft_is_pruned_to_a_verified_answer() -> None:
     from crv_agent.domain.answers import AnswerDraft, Verdict
 
     class Models(FakeModels):
@@ -594,9 +594,87 @@ async def test_failed_final_draft_is_pruned_to_a_partial_verified_answer() -> No
     )
     answer = result["answer"]
     assert models.compositions == 2
-    assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
+    assert answer.status == "answered" and answer.content == "Recovery was 87.5 % [S1]."
     assert answer.citations == [SOURCE]
     assert answer.reasons == ["Statements the verifier found unsupported were removed."]
+
+
+async def _status(models: FakeModels, worker: FakeWorker | None = None) -> str:
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=models, knowledge=FakeKnowledge(), worker=worker or FakeWorker(),
+            budget=Budget(), search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    return str(result["answer"].status)
+
+
+@pytest.mark.asyncio
+async def test_status_is_partial_only_for_unanswered_or_lost_content() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.domain.evidence import WorkerResult
+    from crv_agent.domain.execution import BudgetExceeded
+    from crv_agent.domain.planning import Facet
+
+    other = CLAIM.model_copy(update={"text": "Pilot dedicated to talc"})
+
+    class Gapped(FakeWorker):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
+            await budget.reserve(retrieval=1)
+            return WorkerResult(claims=[CLAIM, other], gaps=["Date not printed."]), [SOURCE]
+
+    # Standing caveats and worker gaps alone no longer make an answer partial.
+    assert await _status(FakeModels(), Gapped()) == "answered"
+
+    class Unanswered(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            draft = await super().compose(question, claims, context, budget)
+            return draft.model_copy(update={"unanswered": ["2016 value"]})
+
+    assert await _status(Unanswered(), Gapped()) == "partial"
+
+    class TwoFacets(FakeModels):
+        async def plan(self, question, history, budget):  # type: ignore[no-untyped-def]
+            plan = await super().plan(question, history, budget)
+            return plan.model_copy(update={"facets": [Facet(question="a"), Facet(question="b")]})
+
+    class OneRunsOut(FakeWorker):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
+            if question.startswith("b"):
+                raise BudgetExceeded("Turn execution budget exhausted")
+            return await super().run(question, release, hashes, budget)
+
+    assert await _status(TwoFacets(), OneRunsOut()) == "partial"
+
+    class DropsClaim(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            return AnswerDraft(
+                content="Recovery was 87.5 % [S1]. Pilot dedicated to talc [S2].",
+                claims=[CLAIM, other.model_copy(update={"evidence_ids": ["S2"]})],
+                insufficient=False,
+            )
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            return Verdict(supported=False, reasons=["talc not stated"], unsupported_claims=[1])
+
+    class TwoSources(FakeWorker):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
+            return WorkerResult(claims=[CLAIM], gaps=[]), [
+                SOURCE, SOURCE.model_copy(update={"id": "S2", "chunk_id": "c2"}),
+            ]
+
+    assert await _status(DropsClaim("synthesis"), TwoSources()) == "partial"
 
 
 def test_findings_list_only_unrejected_self_grounded_claims() -> None:

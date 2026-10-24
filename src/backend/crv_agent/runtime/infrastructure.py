@@ -1,7 +1,8 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 
+import aiohttp
 from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
 from azure.search.documents.aio import SearchClient
 from langchain_openai import ChatOpenAI
@@ -12,15 +13,19 @@ from psycopg_pool import AsyncConnectionPool
 from crv_agent.adapters.knowledge import PostgresKnowledge
 from crv_agent.adapters.models import reject_unapproved_tracing
 from crv_agent.adapters.postgres.memory import entra_pool
+from crv_agent.adapters.postgres.search import PostgresSearch
+from crv_agent.adapters.retrieval_models import AzureOpenAIQueryEmbedder, CohereReranker
 from crv_agent.adapters.search import AzureSearch
+from crv_agent.ports.retrieval import Search
 from crv_agent.runtime.settings import Settings
 
 Pool = AsyncConnectionPool[AsyncConnection[DictRow]]
+COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
 
 
 @dataclass(frozen=True)
 class Infrastructure:
-    search: AzureSearch
+    search: Search
     knowledge: PostgresKnowledge
     kg_pool: Pool
     memory_pool: Pool | None
@@ -43,21 +48,16 @@ async def infrastructure(
     reject_unapproved_tracing()
     async with AsyncExitStack() as stack:
         credential = await stack.enter_async_context(DefaultAzureCredential())
-        search_client = await stack.enter_async_context(SearchClient(
-            settings.search_endpoint, settings.search_index, credential,
-            retry_total=0, connection_timeout=10, read_timeout=20,
-        ))
+        token_provider = get_bearer_token_provider(credential, COGNITIVE_SCOPE)
         kg_pool = await stack.enter_async_context(entra_pool(
             credential, settings.postgres_host, settings.kg_database, settings.postgres_user,
             read_only=True, root_cert=settings.postgres_root_cert,
         ))
+        search = await _search(stack, settings, credential, token_provider)
         memory_pool = await stack.enter_async_context(entra_pool(
             credential, settings.postgres_host, settings.memory_database, settings.memory_user,
             read_only=False, root_cert=settings.postgres_root_cert,
         )) if memory else None
-        token_provider = get_bearer_token_provider(
-            credential, "https://cognitiveservices.azure.com/.default",
-        )
         endpoint = settings.openai_endpoint.rstrip("/")
         if not endpoint.endswith("/openai/v1"):
             endpoint += "/openai/v1"
@@ -79,7 +79,37 @@ async def infrastructure(
             close_clients(stack, chat_model)
             models[role] = chat_model
         yield Infrastructure(
-            search=AzureSearch(search_client, settings.search_release),
+            search=search,
             knowledge=PostgresKnowledge(kg_pool, settings.kg_scopes),
             kg_pool=kg_pool, memory_pool=memory_pool, models=models,
         )
+
+
+async def _search(
+    stack: AsyncExitStack, settings: Settings, credential: DefaultAzureCredential,
+    token_provider: Callable[[], Awaitable[str]],
+) -> Search:
+    if settings.search_backend == "azure":
+        client = await stack.enter_async_context(SearchClient(
+            settings.search_endpoint, settings.search_index, credential,
+            retry_total=0, connection_timeout=10, read_timeout=20,
+        ))
+        return AzureSearch(client, settings.search_release)
+    pool = await stack.enter_async_context(entra_pool(
+        credential, settings.postgres_host, settings.kg_database, settings.postgres_user,
+        read_only=True, root_cert=settings.postgres_root_cert,
+        max_size=settings.pg_search_pool_size,
+    ))
+    session = await stack.enter_async_context(
+        aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)),
+    )
+    reranker = CohereReranker(
+        session, settings.pg_reranker_url, settings.pg_reranker_model, token_provider,
+    ) if settings.pg_reranker == "cohere" else None
+    return PostgresSearch(
+        pool, settings.search_release,
+        AzureOpenAIQueryEmbedder(
+            session, settings.openai_endpoint, settings.pg_embedding_deployment, token_provider,
+        ),
+        reranker=reranker,
+    )
