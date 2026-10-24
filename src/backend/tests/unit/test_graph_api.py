@@ -355,7 +355,10 @@ async def test_one_failed_facet_becomes_a_gap_but_all_failed_facets_fail_the_tur
         def __init__(self, fail_all: bool) -> None:
             self.fail_all = fail_all
 
-        async def run(self, question: str, release: str, hashes: list[str], budget: Budget):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
             if self.fail_all or question.startswith("bad"):
                 raise ValueError("Failed to parse structured output")
             return WorkerResult(claims=[CLAIM], gaps=[]), [SOURCE]
@@ -414,7 +417,10 @@ async def test_repair_drops_only_verifier_rejected_claims() -> None:
             return Verdict(supported=True, reasons=[])
 
     class TwoClaims(FakeWorker):
-        async def run(self, question: str, release: str, hashes: list[str], budget: Budget):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
             from crv_agent.domain.evidence import WorkerResult
 
             await budget.reserve(retrieval=1)
@@ -591,6 +597,62 @@ async def test_failed_final_draft_is_pruned_to_a_partial_verified_answer() -> No
     assert answer.status == "partial" and answer.content == "Recovery was 87.5 % [S1]."
     assert answer.citations == [SOURCE]
     assert answer.reasons == ["Statements the verifier found unsupported were removed."]
+
+
+def test_findings_list_only_unrejected_self_grounded_claims() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+    from crv_agent.orchestration.nodes.answer import findings
+
+    rejected = CLAIM.model_copy(update={"text": "Recovery was the best ever"})
+    loose = CLAIM.model_copy(update={"text": "Recovery rose to 93.2 %"})
+    draft = AnswerDraft(
+        content="Synthesis [S1].", claims=[CLAIM, rejected, loose], insufficient=False,
+    )
+    specific = Verdict(supported=False, reasons=["x"], unsupported_claims=[1])
+    listed = findings(draft, specific, [], "en")
+    assert listed is not None
+    assert listed.claims == [CLAIM]
+    assert listed.content.endswith("\n\n- Recovery was 87.5 % [S1]")
+    assert findings(draft, specific, [], "fr").content.startswith(  # type: ignore[union-attr]
+        "La synthèse n'a pas passé la vérification",
+    )
+    assert findings(draft, Verdict(supported=False, reasons=["x"]), [], "en") is None
+    assert findings(draft, specific.model_copy(update={"unsupported_claims": [0, 1, 2]}),
+                    [], "en") is None
+
+
+@pytest.mark.asyncio
+async def test_unprunable_synthesis_falls_back_to_the_verified_findings() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+
+    class Models(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.compositions += 1
+            text = " and ".join(f"{c.text} [{c.evidence_ids[0]}]" for c in claims)
+            return AnswerDraft(content=text + ", so the plant steadily improved.",
+                               claims=list(claims), insufficient=False)
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            # The flagged sentence is paraphrased, so pruning cannot remove it.
+            return Verdict(supported=False, reasons=["chronology not supported"],
+                           unsupported_sentences=["The plant improved steadily."])
+
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=Models(), knowledge=FakeKnowledge(), worker=FakeWorker(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    answer = result["answer"]
+    assert answer.status == "partial"
+    assert answer.content.endswith("\n\n- Recovery was 87.5 % [S1]")
+    assert answer.claims == [CLAIM]
+    assert answer.citations == [SOURCE]
+    assert answer.reasons == [
+        "The synthesis failed verification; only verified findings are listed.",
+    ]
 
 
 def test_markers_must_bind_to_selected_claims_and_orphans_are_pruned() -> None:

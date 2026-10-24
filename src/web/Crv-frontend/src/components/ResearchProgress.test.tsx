@@ -54,6 +54,19 @@ describe('ResearchProgress', () => {
     expect(screen.getByText('Réunion 2015, p. 3')).toBeTruthy()
   })
 
+  it('lists findings for the original question even when the plan has no sub-questions', () => {
+    render(
+      <ResearchProgress
+        step="research"
+        plan={{ intent: 'lookup', facets: [] }}
+        findings={[{ ...finding, facet: 'Question posée' }]}
+      />,
+    )
+
+    expect(screen.getByText('Question posée')).toBeTruthy()
+    expect(screen.getByText('1 fait trouvé')).toBeTruthy()
+  })
+
   it('reports a failed or exhausted sub-question', () => {
     render(
       <ResearchProgress

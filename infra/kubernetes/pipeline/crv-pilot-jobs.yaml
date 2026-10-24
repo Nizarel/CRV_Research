@@ -378,8 +378,8 @@ spec:
         - {name: cu-config, configMap: {name: crv-pipeline-cu}}
 ---
 # JOB kg-extract: KG-2 pilot. Extracts studies/observations of KG_FOLDER with KG_DEPLOYMENT,
-# grounds every item on its cited page and (with -KgImport) records them as candidates in crv_kg
-# (crv_kg_writer; needs migrations 0020-0021 and Azure OpenAI access for the ops identity).
+# grounds every item on its cited page and prints the JSONL between KG EXTRACT markers. Runs as
+# the worker identity (Azure OpenAI user, read-only catalog); kg-import records the reviewed file.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -395,14 +395,52 @@ spec:
       labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
     spec:
       restartPolicy: Never
-      serviceAccountName: crv-pipeline-ops
+      serviceAccountName: crv-pipeline-worker
       securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: kg-extract
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
           args: [kg-extract, --policy, "${KG_POLICY}", --folder, "${KG_FOLDER}",
                  --deployment, "${KG_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
-                 --tables, --output, /tmp/kg-extract.jsonl${KG_EXTRACT_ARGS}]
+                 --tables, --output, "-"${KG_EXTRACT_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${WORKER_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "1", memory: 3Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
+---
+# JOB kg-import: record a reviewed kg-extract JSONL (ConfigMap crv-kg-extract) as candidates in
+# crv_kg. No model call: items are grounded again on the current pages and the run refuses any
+# drift. Runs as the ops identity (crv_kg_writer); -KgDryRun only reports.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-kg-import-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: kg-import}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: kg-import
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [kg-import, --from, /extract/extract.jsonl, --policy, "${KG_POLICY}",
+                 --folder, "${KG_FOLDER}"${KG_ARGS}]
           envFrom:
             - configMapRef: {name: crv-pipeline}
           env:
@@ -410,9 +448,11 @@ spec:
           resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "1", memory: 3Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
+            - {name: extract, mountPath: /extract, readOnly: true}
             - {name: tmp, mountPath: /tmp}
             - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
       volumes:
+        - {name: extract, configMap: {name: crv-kg-extract}}
         - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
         - {name: cu-config, configMap: {name: crv-pipeline-cu}}
 ---

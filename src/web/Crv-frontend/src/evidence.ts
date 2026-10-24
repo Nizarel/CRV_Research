@@ -107,6 +107,50 @@ export function formatClaimValue(claim: Claim): string | null {
   return formatQuantity(claim.value, claim.unit, claim.qualifier)
 }
 
+const LIMITS: Record<string, string> = {
+  'Statements the verifier found unsupported were removed.':
+    'Des affirmations que le vérificateur jugeait non étayées ont été retirées.',
+  'The synthesis failed verification; only verified findings are listed.':
+    "La synthèse n'a pas passé la vérification ; seuls les constats vérifiés sont listés.",
+  'The turn budget ran out before an answer could be verified.':
+    "Le budget de la recherche a été épuisé avant qu'une réponse puisse être vérifiée.",
+  'Top-k evidence retrieval is not an exhaustive corpus review.':
+    "La recherche porte sur les meilleurs passages, pas sur une revue exhaustive du corpus.",
+  'Top-50 candidate search per query; not an exhaustive document review.':
+    "Recherche limitée aux 50 meilleurs candidats par requête, sans revue exhaustive des documents.",
+  'A worker claim failed source/locator/value validation.':
+    "Un constat extrait n'a pas passé la validation de la source, de l'emplacement ou de la valeur.",
+  'A research facet exhausted the shared execution budget.':
+    "Une sous-question a épuisé le budget d'exécution partagé.",
+  'Evidence retrieval did not inspect every enumerated document.':
+    "La recherche n'a pas examiné tous les documents recensés.",
+  'KG enumeration excludes collections not represented in the pinned graph.':
+    "Le recensement exclut les collections absentes du graphe de connaissances utilisé.",
+  'KG-2 studies chose the documents of one search; cited text only.':
+    "Une recherche a été restreinte aux documents choisis via le graphe de connaissances ; seul le texte cité fait foi.",
+  'A rewritten search returned no new candidates.':
+    "Une recherche reformulée n'a retourné aucun nouveau candidat.",
+  'An extraction batch failed; some retrieved passages were not read.':
+    "Un lot d'extraction a échoué ; certains passages retrouvés n'ont pas été lus.",
+  'Some KG documents have no Search-compatible content hash.':
+    "Certains documents du graphe n'ont pas d'empreinte compatible avec la recherche.",
+  'Catalogue details limited to 12 documents; narrow the request.':
+    'Détail du catalogue limité à 12 documents ; précisez la demande.',
+  'Search-only baseline; no KG catalogue enumeration or navigation.':
+    'Recherche seule : sans recensement ni navigation dans le graphe de connaissances.',
+}
+
+/** French text for the backend's fixed English coverage notes; other notes pass through. */
+export function localizeLimit(text: string): string {
+  const known = LIMITS[text]
+  if (known) return known
+  const candidate = /^Candidate entity mapping: (.+)$/.exec(text)
+  if (candidate) return `Entité candidate retenue pour la navigation : ${candidate[1]}.`
+  const failed = /^A research facet failed \((.+)\); its evidence is missing\.$/.exec(text)
+  if (failed) return `Une sous-question a échoué (${failed[1]}) ; ses preuves manquent.`
+  return text
+}
+
 const QUALIFIERS: Record<string, string> = { '<': '<', '<=': '≤', '>': '>', '>=': '≥', '~': '≈' }
 
 export function formatQuantity(

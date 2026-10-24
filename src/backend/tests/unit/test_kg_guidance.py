@@ -1,4 +1,4 @@
-"""KG-guided retrieval: released observations steer one extra facet, never become claims."""
+"""KG-guided retrieval: released studies choose the documents of one strict search."""
 
 import json
 from dataclasses import replace
@@ -7,54 +7,53 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from crv_agent.api.app import create_app
-from crv_agent.domain.planning import Entity, ObservationRef
-from crv_agent.services.kg_guidance import kg_facet
+from crv_agent.domain.planning import Entity, StudyRef
+from crv_agent.services.kg_guidance import MAX_DOCUMENTS, kg_documents
 from tests.fakes import FakeKnowledge, FakeModels, FakeWorker
 from tests.unit.test_graph_api import services
 
 
-def ref(value: str, document: str, study: str | None = "Pilote 2015") -> ObservationRef:
-    return ObservationRef(
-        property="recovery", element="Cu", stream=None, value_text=value, unit="%",
-        status="candidate", subject="Tizert", study=study, period="2015",
-        content_hash=document * 64, source_paths=[], page=7, quote=f"Récupération {value}",
+def study(document: str | None, period: str = "2015") -> StudyRef:
+    return StudyRef(
+        iri=f"urn:crv:study:{document}/0", label="Pilote", scale="pilot", period=period,
+        facility=None, status="candidate", content_hash=document and document * 64,
+        source_paths=[], pages=[3],
     )
 
 
-def test_kg_facet_lists_values_round_robin_across_documents() -> None:
-    built = kg_facet([ref("87,5 %", "a"), ref("88 %", "a"), ref("79 %", "b"), ref("x", "c")])
-    assert built is not None
-    facet, hashes = built
-    assert hashes == ["a" * 64, "b" * 64, "c" * 64]
-    assert facet.question.startswith(
-        "Locate and quote these reported results in their source documents: "
-        "recovery Cu 87,5 % (Pilote 2015, 2015); recovery Cu 79 % (Pilote 2015, 2015)",
-    )
-    assert kg_facet([]) is None
-    assert kg_facet([ref("1 %", "a").model_copy(update={"content_hash": None})]) is None
+def test_kg_documents_keep_period_order_and_spread_over_the_cap() -> None:
+    assert kg_documents([study("a"), study("b"), study("a"), study(None)]) == [
+        "a" * 64, "b" * 64,
+    ]
+    assert kg_documents([]) == []
+    many = [study(f"{n:x}", str(2000 + n)) for n in range(15)]
+    chosen = kg_documents(many)
+    assert len(chosen) == MAX_DOCUMENTS == len(set(chosen))
+    assert (chosen[0], chosen[-1]) == ("0" * 64, "e" * 64)
+    assert chosen == sorted(chosen, key=lambda h: int(h[0], 16))
 
 
 class Steered(FakeKnowledge):
     async def resolve(self, text: str, release: str) -> list[Entity]:
         return [Entity(iri="urn:crv:site:tizert", name="Tizert", kind="Site", status="observed")]
 
-    async def observations(
-        self, entities: list[str], properties: list[str] | None, release: str,
-    ) -> list[ObservationRef]:
+    async def studies(self, entities: list[str], release: str) -> list[StudyRef]:
         assert entities == ["urn:crv:site:tizert"]
-        return [ref("87,5 %", "a")]
+        return [study("a"), study("b", "2018")]
 
 
 class Recording(FakeWorker):
     def __init__(self) -> None:
-        self.calls: list[tuple[str, list[str]]] = []
+        self.calls: list[tuple[str, list[str], bool]] = []
 
-    async def run(self, question, release, hashes, budget):  # type: ignore[no-untyped-def]
-        self.calls.append((question.split("\n", 1)[0], list(hashes)))
+    async def run(  # type: ignore[no-untyped-def]
+        self, question, release, hashes, budget, *, strict=False,
+    ):
+        self.calls.append((question.split("\n", 1)[0], list(hashes), strict))
         return await super().run(question, release, hashes, budget)
 
 
-def _ask(enabled: bool, intent: str) -> list[tuple[str, list[str]]]:
+def _ask(enabled: bool, intent: str) -> list[tuple[str, list[str], bool]]:
     worker = Recording()
     deps = replace(services(FakeModels(intent=intent)), knowledge=Steered(), worker=worker,
                    kg_results=enabled)
@@ -73,11 +72,11 @@ def _ask(enabled: bool, intent: str) -> list[tuple[str, list[str]]]:
     return worker.calls
 
 
-def test_kg_results_add_one_scoped_facet_only_when_enabled_for_synthesis() -> None:
+def test_kg_results_add_one_strict_facet_on_study_documents_for_synthesis() -> None:
     steered = _ask(True, "synthesis")
     assert len(steered) == 2
-    question, hashes = steered[1]
-    assert question.startswith("Locate and quote these reported results")
-    assert hashes == ["a" * 64]
+    chosen, planned = steered  # the KG facet starts first
+    assert planned[2] is False
+    assert chosen == ("Tizert pilots?", ["a" * 64, "b" * 64], True)
     assert len(_ask(False, "synthesis")) == 1
     assert len(_ask(True, "lookup")) == 1

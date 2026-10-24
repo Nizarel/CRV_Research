@@ -22,7 +22,7 @@ from crv_agent.services.evidence_pack import (
     merge_exposure,
     term_weights,
 )
-from crv_agent.services.retrieval import Retrieval, focus
+from crv_agent.services.retrieval import Retrieval, focus, identifiers
 from crv_agent.services.verification import claim_errors
 from crv_agent.tools.evidence import evidence_tools
 from tests.fakes import CLAIM, SOURCE, FakeKnowledge, FakeModels, FakeWorker
@@ -34,6 +34,14 @@ def candidates() -> list[Evidence]:
             "id": f"S{i}", "chunk_id": f"c{i}", "content_hash": f"{i:064x}",
         }) for i in range(50)
     ]
+
+
+def test_document_identifiers_exclude_hyphenated_question_words() -> None:
+    assert identifiers("Comment le probleme a-t-il evolue ?") == []
+    assert identifiers("Qu'a-t-on teste dans CR-AR-CO-RP-19-10 et KM5962 ?") == [
+        "CR-AR-CO-RP-19-10", "KM5962",
+    ]
+    assert identifiers("CR/AF/AG/RP/10/15 et CR/AF/AG/RP/10/15") == ["CR/AF/AG/RP/10/15"]
 
 
 class Search:
@@ -50,6 +58,9 @@ class Search:
 
     async def ready(self) -> None:
         return None
+
+    async def tables(self, release: str, pages: dict[str, list[int]]) -> list[Evidence]:
+        return []
 
 
 @pytest.mark.asyncio
@@ -84,6 +95,116 @@ async def test_depth_fifty_semantic_fallback_and_exact_converted_hash() -> None:
         ("Recovery?", "r1", "semantic", [converted_pdf_hash], 50),
     ]
     assert budget.retrieval_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_strict_scope_searches_only_the_given_documents() -> None:
+    search, budget = Search(), Budget()
+    chosen = ["a" * 64, "b" * 64]
+    await Retrieval(search).retrieve("Recovery 2015?", "r1", chosen, budget, strict=True)
+    assert search.calls == [
+        ("Recovery 2015?", "r1", "semantic", chosen, 50),
+        ("Recovery 2015?", "r1", "lexical", chosen, 50),
+    ]
+    assert budget.retrieval_calls == 2
+    search = Search()
+    await Retrieval(search).retrieve("Recovery?", "r1", [], Budget(), strict=True)
+    assert search.calls == [("Recovery?", "r1", "semantic", [], 50)]
+
+
+@pytest.mark.asyncio
+async def test_referenced_table_is_exposed_without_another_model_search() -> None:
+    hits = candidates()
+    hits[4] = hits[4].model_copy(update={
+        "content": "Scenarios de flottation (voir tableau No 2).", "pages": [4],
+    })
+    table = SOURCE.model_copy(update={
+        "id": "table-p5", "chunk_id": "table-p5", "content_hash": hits[4].content_hash,
+        "pages": [5], "content": "| Scenario 5 | CR global (%) |\n| 5 | 24,20 |",
+    })
+    scopes: list[dict[str, list[int]]] = []
+
+    class Tables(Search):
+        async def tables(self, release: str, pages: dict[str, list[int]]) -> list[Evidence]:
+            assert release == "r1"
+            scopes.append(pages)
+            return [
+                table, table.model_copy(update={"id": "other-doc", "content_hash": "f" * 64}),
+                table.model_copy(update={"id": "other-release", "release": "r2"}),
+                table.model_copy(update={"id": "far-page", "pages": [9]}),
+                table.model_copy(update={"id": "generated", "generated": True}),
+            ]
+
+    search, budget = Tables(hits), Budget()
+    result = await Retrieval(search).retrieve("Scenarios de flottation?", "r1", [], budget)
+    assert len(result) == 50
+    assert result[5] == table
+    assert scopes == [{hits[4].content_hash: [3, 4, 5]}]
+    assert len(search.calls) == 1
+    assert budget.retrieval_calls == 2
+    assert not {"other-doc", "other-release", "far-page", "generated"} & {hit.id for hit in result}
+    scopes.clear()
+    result = await Retrieval(search).retrieve(
+        "Scenarios?", "r1", [], Budget(retrieval_limit=1),
+    )
+    assert result == focus(hits)
+    assert scopes == []
+
+
+@pytest.mark.asyncio
+async def test_table_lookup_is_filtered_and_never_vectorizes() -> None:
+    async def empty_rows():
+        if False:
+            yield {}
+
+    client = AsyncMock(spec=SearchClient)
+    client.search.return_value = empty_rows()
+    search = AzureSearch(client, "r1")
+    assert await search.tables("r1", {"a" * 64: [4, 5]}) == []
+    options = client.search.call_args.kwargs
+    assert options["search_text"] == "*"
+    assert options["query_type"] == "simple"
+    assert options["top"] == 100
+    assert "vector_queries" not in options
+    assert "semantic_configuration_name" not in options
+    assert "chunk_kind eq 'table'" in options["filter"]
+    assert "is_generated eq false" in options["filter"]
+    assert "release_id eq 'r1'" in options["filter"]
+    assert "page eq 4 or page eq 5" in options["filter"]
+    assert "a" * 64 in options["filter"]
+    client.search.reset_mock()
+    assert await search.tables("r1", {}) == []
+    client.search.assert_not_called()
+    with pytest.raises(ValueError, match="scope"):
+        await search.tables("r1", {"a" * 64: [-1]})
+
+
+@pytest.mark.asyncio
+async def test_neighboring_tables_are_bounded_and_failure_keeps_ranked_hits() -> None:
+    hits = [hit.model_copy(update={
+        "content": "Results are in Table 2.", "pages": [4],
+    }) for hit in candidates()]
+    scopes: list[dict[str, list[int]]] = []
+
+    class Tables(Search):
+        fail = False
+
+        async def tables(self, release: str, pages: dict[str, list[int]]) -> list[Evidence]:
+            scopes.append(pages)
+            if self.fail:
+                raise ConnectionError("Search unavailable")
+            return [SOURCE.model_copy(update={
+                "id": f"{digest}-{number}", "chunk_id": f"{digest}-{number}",
+                "content_hash": digest, "pages": [5],
+            }) for digest in pages for number in range(3)]
+
+    search = Tables(hits)
+    result = await Retrieval(search).with_tables(hits, "r1", Budget())
+    assert len(scopes[0]) == 5
+    assert len(result) == 50
+    assert len({hit.id for hit in result} - {hit.id for hit in hits}) == 8
+    search.fail = True
+    assert await Retrieval(search).with_tables(hits, "r1", Budget()) == hits
 
 
 def test_focused_ranking_uses_measured_soft_penalties_and_keeps_every_hit() -> None:
@@ -335,7 +456,10 @@ async def test_no_precise_entities_never_enumerates_whole_corpus_as_a_boost() ->
     class Worker(FakeWorker):
         questions: list[str] = []
 
-        async def run(self, question: str, release: str, hashes: list[str], budget: Budget):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
             assert hashes == []
             self.questions.append(question)
             await budget.reserve(retrieval=1)

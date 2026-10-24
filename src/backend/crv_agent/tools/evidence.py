@@ -20,6 +20,7 @@ def evidence_tools(
     retrieval: Retrieval, release: str, hashes: list[str], budget: Budget,
     found: dict[str, Evidence], question: str,
     policy: EvidencePolicy | None = None, reranker: Reranker | None = None,
+    *, strict: bool = False,
 ) -> list[BaseTool]:
     policy = policy or EvidencePolicy()
     searches = 0
@@ -49,7 +50,9 @@ def evidence_tools(
             raise ValueError("Search query must be between 1 and 4000 characters")
         searches += 1
         text = (query + "\n" + " ".join(fixed_identifiers)).strip()
-        hits = await ranked_candidates(retrieval, text, release, hashes, budget, policy, reranker)
+        hits = await ranked_candidates(
+            retrieval, text, release, hashes, budget, policy, reranker, strict=strict,
+        )
         pack = build_pack(hits, text, fixed_identifiers, policy)
         candidates.update(
             (hit.id, (hit, pack.weights))

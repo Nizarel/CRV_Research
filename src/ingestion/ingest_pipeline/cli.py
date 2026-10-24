@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import re
+import sys
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager, nullcontext
@@ -328,8 +329,8 @@ async def _kg_build(
 async def _kg_extract(
     settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
 ) -> int:
-    """KG-2 pilot: extract and ground studies/observations of one folder (JSONL; with
-    ``--import``, also record them as candidates)."""
+    """KG-2 pilot: extract and ground studies/observations of one folder (JSONL, recorded
+    after review with ``kg-import``)."""
 
     from azure.identity.aio import DefaultAzureCredential
 
@@ -339,7 +340,6 @@ async def _kg_extract(
 
     endpoint = args.openai_endpoint or require(settings.embeddings.endpoint,
                                                "TIZ_EMBEDDINGS__ENDPOINT")
-    started = datetime.now(UTC)
     async with azure_runtime(settings, telemetry, bus=False) as runtime:
         documents = await load_study_inputs(
             runtime.pool, runtime.services.require_artifacts(), policy_version=args.policy,
@@ -359,9 +359,6 @@ async def _kg_extract(
                     return document, None
 
             extracted = await asyncio.gather(*(one(document) for document in documents))
-        imported = await _import_extractions(runtime.pool, extracted, started) if (
-            args.import_records
-        ) else None
     results: list[dict[str, Any]] = [
         {
             "content_hash": document.content_hash, "source_path": document.source_path,
@@ -374,13 +371,22 @@ async def _kg_extract(
                 for o in grounded.observations
             ] if grounded else [],
             "rejected": grounded.rejected if grounded else [],
+            "table_sample": [
+                {"page": page, "property": cell.property, "stream": cell.stream,
+                 "element": cell.element, "value_text": cell.value_text, "unit": cell.unit,
+                 "quote": cell.quote}
+                for page, cell in document.tables[:: max(1, len(document.tables) // 12)][:12]
+            ],
         }
         for document, grounded in extracted
     ]
-    await asyncio.to_thread(
-        Path(args.output).write_text,
-        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in results), "utf-8",
-    )
+    lines = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in results)
+    if args.output == "-":
+        print("=== KG EXTRACT BEGIN ===")
+        sys.stdout.write(lines)
+        print("=== KG EXTRACT END ===")
+    else:
+        await asyncio.to_thread(Path(args.output).write_text, lines, "utf-8")
     _print({
         "documents": len(results),
         "errors": sum(1 for r in results if r["error"]),
@@ -388,10 +394,70 @@ async def _kg_extract(
         "observations": sum(len(r["observations"]) for r in results),
         "table_observations": sum(r["tables"] for r in results),
         "rejected": sum(len(r["rejected"]) for r in results),
-        "imported": imported,
         "output": args.output,
     })
     return 0
+
+
+def _reviewed_extractions(text: str) -> dict[str, Any]:
+    """The successful extractions of a kg-extract JSONL by content hash."""
+
+    from .domain.crv_kg.study import DocumentExtraction, ObservationExtraction, StudyExtraction
+
+    items = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return {
+        item["content_hash"]: DocumentExtraction(
+            studies=[StudyExtraction.model_validate(study) for study in item["studies"]],
+            observations=[
+                ObservationExtraction.model_validate(
+                    {key: value for key, value in observation.items() if key != "value_num"}
+                )
+                for observation in item["observations"]
+            ],
+        )
+        for item in items if not item["error"]
+    }
+
+
+async def _kg_import(
+    settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
+) -> int:
+    """KG-2: record a reviewed kg-extract JSONL as candidates without calling a model. Items are
+    grounded again on the current pages and table cells typed again from the evidence; any drift
+    (a changed document, a quote no longer on its page) refuses the import."""
+
+    from .domain.crv_kg.study import ground
+
+    started = datetime.now(UTC)
+    extractions = _reviewed_extractions(
+        await asyncio.to_thread(Path(args.from_file).read_text, "utf-8")
+    )
+    async with azure_runtime(settings, telemetry, bus=False) as runtime:
+        documents = await load_study_inputs(
+            runtime.pool, runtime.services.require_artifacts(), policy_version=args.policy,
+            folder=args.folder, tables=True, only=frozenset(extractions),
+        )
+        grounded = [(d, ground(extractions[d.content_hash], d.pages)) for d in documents]
+        drift = {
+            "missing_documents": len(extractions) - len(documents),
+            "rejected": [
+                f"{document.source_path}: {reason}"
+                for document, grounding in grounded for reason in grounding.rejected
+            ],
+        }
+        refused = bool(drift["missing_documents"] or drift["rejected"])
+        imported = None if args.dry_run or refused else await _import_extractions(
+            runtime.pool, grounded, started
+        )
+    _print({
+        "documents": len(documents),
+        "studies": sum(len(g.studies) for _, g in grounded),
+        "observations": sum(len(g.observations) for _, g in grounded),
+        "table_observations": sum(len(d.tables) for d, _ in grounded),
+        "drift": drift,
+        "imported": imported,
+    })
+    return 2 if refused else 0
 
 
 async def _import_extractions(
@@ -1090,10 +1156,19 @@ def build_parser() -> argparse.ArgumentParser:
     kg_extract.add_argument("--limit", type=int, default=0, help="First N documents (0 = all)")
     kg_extract.add_argument("--tables", action="store_true",
                             help="Also type numeric table cells (reads every page)")
-    kg_extract.add_argument("--import", dest="import_records", action="store_true",
-                            help="Record the grounded extractions as candidates in crv_kg")
-    kg_extract.add_argument("--output", required=True, help="JSONL of grounded extractions")
+    kg_extract.add_argument("--output", required=True,
+                            help="JSONL of grounded extractions; - prints it between markers")
     kg_extract.set_defaults(handler=_kg_extract)
+
+    kg_import = commands.add_parser(
+        "kg-import",
+        help="KG-2: record a reviewed kg-extract JSONL as candidates (no model call)",
+    )
+    kg_import.add_argument("--from", dest="from_file", required=True, help="kg-extract JSONL")
+    kg_import.add_argument("--policy", default="crv-full-v1", help="Routing policy version")
+    kg_import.add_argument("--folder", default="Dossier Cu", help="Path segment to select")
+    kg_import.add_argument("--dry-run", action="store_true", help="Ground and report only")
+    kg_import.set_defaults(handler=_kg_import)
 
     kg_sheet = commands.add_parser(
         "kg-gazetteer-sheet", help="Write the gazetteer expert review sheet (CSV, offline)"

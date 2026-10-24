@@ -21,7 +21,7 @@ from crv_agent.services.anchoring import anchor_claim
 from crv_agent.services.calculation import calculate
 from crv_agent.services.catalogue import enumerate_documents
 from crv_agent.services.evidence_pack import merge_exposure
-from crv_agent.services.kg_guidance import KG_INTENTS, kg_facet
+from crv_agent.services.kg_guidance import KG_INTENTS, kg_documents
 from crv_agent.services.navigation import steering_entities
 from crv_agent.services.policy import hazardous_instructions
 from crv_agent.services.reconciliation import conflicts
@@ -112,30 +112,30 @@ async def research(
             "evidence": evidence, "claims": catalogue_claims,
             "coverage": coverage.model_copy(update={"visited": len(items), "gaps": gaps}),
         }
-    facets = plan.facets or [Facet(question=state["question"])]
-    scoped: dict[str, list[str]] = {}
+    # (facet, documents, strict): a strict facet searches only its documents.
+    runs = [(facet, hashes, False) for facet in plan.facets or [Facet(question=state["question"])]]
     if (
         context.kg_results and context.retrieval_mode == "kg" and navigation
         and plan.intent in KG_INTENTS
     ):
         try:
             await context.budget.reserve(retrieval=1)
-            reported = await context.budget.wait(context.knowledge.observations(
-                [e.iri for e in navigation], None, context.kg_release,
+            studies = await context.budget.wait(context.knowledge.studies(
+                [e.iri for e in navigation], context.kg_release,
             ))
         except BudgetExceeded:
-            reported = []
-        if (guided := kg_facet(reported)) is not None:
-            facets = [*facets, guided[0]]
-            scoped[guided[0].question] = guided[1]
-            gaps.append("KG-2 candidate observations steered one search; cited text only.")
+            studies = []
+        if chosen := kg_documents(studies):
+            # First, so a large plan cannot exhaust the turn budget before it searches.
+            runs.insert(0, (Facet(question=state["question"]), chosen, True))
+            gaps.append("KG-2 studies chose the documents of one search; cited text only.")
     gaps.append("Top-k evidence retrieval is not an exhaustive corpus review.")
     semaphore = asyncio.Semaphore(context.facet_concurrency)
     evidence_by_id: dict[str, Evidence] = {}
     claims: dict[str, Claim] = {}
     audit: list[dict[str, object]] = []
 
-    async def run(facet: Facet) -> None:
+    async def run(facet: Facet, scope: list[str], strict: bool) -> None:
         accepted: list[Claim] = []
         status = "completed"
         result: WorkerResult | None = None
@@ -144,7 +144,7 @@ async def research(
                 result, found = await context.worker.run(
                     facet.question + "\nOriginal question: " + state["question"]
                     + "\nPremises to verify: " + "; ".join(plan.premises),
-                    context.search_release, scoped.get(facet.question, hashes), context.budget,
+                    context.search_release, scope, context.budget, strict=strict,
                 )
                 for item in found:
                     previous = evidence_by_id.get(item.id)
@@ -186,9 +186,9 @@ async def research(
         })
     failures: list[Exception] = []
     async with asyncio.TaskGroup() as group:
-        for facet in facets:
-            group.create_task(run(facet))
-    if failures and len(failures) == len(facets):
+        for facet, scope, strict in runs:
+            group.create_task(run(facet, scope, strict))
+    if failures and len(failures) == len(runs):
         # Every facet failed: a provider/tool failure, never an absence-of-evidence answer.
         raise failures[0]
     visited = len({e.content_hash for e in evidence_by_id.values()})

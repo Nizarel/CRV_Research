@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { citationNumbers, formatClaimValue, formatPages, formatQuantity, sourceTitle } from '../evidence'
+import { citationNumbers, formatClaimValue, formatPages, formatQuantity, localizeLimit, sourceTitle } from '../evidence'
 import type { Answer, AnswerStatus, Claim, Evidence } from '../types'
 import { Icon, type IconName } from './Icon'
 import { Markdown, type RenderRef } from './Markdown'
@@ -31,7 +31,7 @@ export function AnswerView({ answer, onOpenEvidence }: AnswerViewProps) {
   const numbers = citationNumbers(answer)
   const byId = new Map(answer.citations.map((citation) => [citation.id, citation]))
   const notice = STATUS_NOTICE[answer.status]
-  const limits = [...new Set([...answer.coverage.gaps, ...answer.reasons])]
+  const limits = [...new Set([...answer.coverage.gaps, ...answer.reasons].map(localizeLimit))]
 
   const chip = (evidence: Evidence, key: string) => (
     <button

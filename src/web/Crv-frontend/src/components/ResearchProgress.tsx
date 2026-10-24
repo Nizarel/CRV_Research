@@ -25,6 +25,10 @@ interface ResearchProgressProps {
 export function ResearchProgress({ step, plan, findings }: ResearchProgressProps) {
   const reached = ORDER.indexOf(step)
   const byFacet = new Map(findings.map((finding) => [finding.facet, finding]))
+  // The backend also searches the original question (KG-scoped or when the plan has no
+  // sub-questions); those findings are not in the plan event.
+  const planned = plan?.facets ?? []
+  const facets = [...planned, ...findings.map((f) => f.facet).filter((f) => !planned.includes(f))]
 
   return (
     <div className="research-progress" role="status" aria-label="Recherche en cours">
@@ -40,14 +44,14 @@ export function ResearchProgress({ step, plan, findings }: ResearchProgressProps
         })}
       </ol>
 
-      {plan && plan.facets.length > 0 && (
+      {facets.length > 0 && (
         <section className="facet-list" aria-label="Sous-questions">
           <h3 className="facet-list-title">
             Sous-questions
             <span className="facet-list-note">résultats provisoires, non vérifiés</span>
           </h3>
           <ul>
-            {plan.facets.map((facet) => (
+            {facets.map((facet) => (
               <FacetRow key={facet} facet={facet} finding={byFacet.get(facet)} />
             ))}
           </ul>

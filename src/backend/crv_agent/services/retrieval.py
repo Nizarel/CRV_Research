@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import unicodedata
 from collections import defaultdict
@@ -6,13 +7,18 @@ from typing import Literal
 from urllib.parse import unquote
 
 from crv_agent.domain.evidence import Evidence
-from crv_agent.domain.execution import Budget
+from crv_agent.domain.execution import Budget, BudgetExceeded
 from crv_agent.ports.retrieval import Search
+
+logger = logging.getLogger(__name__)
 
 _IDENTIFIER = re.compile(
     r"\b[A-Za-z]{1,6}(?:[-/][A-Za-z0-9]{1,10}){2,7}\b|\b[A-Z]{1,5}\d{3,8}\b",
 )
 CANDIDATE_DEPTH = 50
+_TABLE_REFERENCE = re.compile(r"\b(?:tableaux?|tables?)\b", re.IGNORECASE)
+_TABLE_SEEDS = 5
+_TABLE_ADDITIONS = 8
 _PERIODIC = re.compile(
     r"\brapport d activite\b|\brapport mensuel\b|\bmonthly report\b|^ra\b"
     r"|\bexecutive summary\b|\bflash\b|^reporting\b",
@@ -20,7 +26,9 @@ _PERIODIC = re.compile(
 
 
 def identifiers(text: str) -> list[str]:
-    return list(dict.fromkeys(_IDENTIFIER.findall(text)))
+    return list(dict.fromkeys(
+        value for value in _IDENTIFIER.findall(text) if any(char.isdigit() for char in value)
+    ))
 
 
 class Retrieval:
@@ -29,13 +37,17 @@ class Retrieval:
 
     async def retrieve(
         self, text: str, release: str, hashes: list[str], budget: Budget,
-        captions: bool = False,
+        captions: bool = False, *, strict: bool = False,
     ) -> list[Evidence]:
-        modes: list[tuple[Literal["lexical", "semantic"], list[str]]] = [("semantic", [])]
+        """Fused candidates; ``hashes`` add a scoped leg, or with ``strict`` are the only scope."""
+        only = strict and bool(hashes)
+        modes: list[tuple[Literal["lexical", "semantic"], list[str]]] = (
+            [] if only else [("semantic", [])]
+        )
         if hashes:
             modes.append(("semantic", hashes))
         if any(c.isdigit() for c in text):
-            modes.append(("lexical", []))
+            modes.append(("lexical", hashes if only else []))
         await budget.reserve(retrieval=len(modes))
         async with asyncio.TaskGroup() as group:
             tasks = [
@@ -45,7 +57,73 @@ class Retrieval:
                 )))
                 for mode, selected in modes
             ]
-        return focus(fuse([task.result() for task in tasks]))
+        hits = focus(fuse([task.result() for task in tasks]))
+        return await self.with_tables(hits, release, budget)
+
+    async def with_tables(
+        self, hits: list[Evidence], release: str, budget: Budget,
+    ) -> list[Evidence]:
+        seeds: list[Evidence] = []
+        scopes: dict[str, list[int]] = {}
+        for hit in hits:
+            if (
+                hit.release != release or hit.generated or not hit.pages
+                or periodic_summary(hit) or not _TABLE_REFERENCE.search(hit.content)
+            ):
+                continue
+            if not re.fullmatch(r"[a-f0-9]{64}", hit.content_hash):
+                continue
+            neighbors = sorted({
+                page + offset for page in hit.pages[:3] for offset in (-1, 0, 1)
+                if page + offset > 0
+            })
+            known = scopes.setdefault(hit.content_hash, [])
+            if set(neighbors) <= set(known):
+                continue
+            scopes[hit.content_hash] = sorted(set(known + neighbors))[:15]
+            seeds.append(hit)
+            if len(seeds) == _TABLE_SEEDS:
+                break
+        if not seeds:
+            return hits
+        try:
+            await budget.reserve(retrieval=1)
+            tables = await budget.wait(self.search.tables(release, scopes))
+        except BudgetExceeded:
+            return hits
+        except Exception as error:
+            logger.warning("table_lookup_failed error_type=%s", type(error).__name__)
+            return hits
+        return insert_tables(hits, seeds, tables, release)
+
+
+def insert_tables(
+    hits: list[Evidence], seeds: list[Evidence], tables: list[Evidence], release: str,
+) -> list[Evidence]:
+    existing = {hit.id for hit in hits}
+    seed_ids = {seed.id for seed in seeds}
+    result: list[Evidence] = []
+    added = 0
+    for hit in hits:
+        result.append(hit)
+        if hit.id not in seed_ids:
+            continue
+        neighbors = [
+            table for table in tables
+            if table.id not in existing and table.release == release and not table.generated
+            and table.content_hash == hit.content_hash
+            and table.pages and any(abs(page - anchor) <= 1
+                                    for page in table.pages for anchor in hit.pages[:3])
+        ]
+        neighbors.sort(key=lambda table: (
+            min(abs(page - anchor) for page in table.pages for anchor in hit.pages[:3]),
+            min(table.pages), table.id,
+        ))
+        for table in neighbors[:min(2, _TABLE_ADDITIONS - added)]:
+            result.append(table)
+            existing.add(table.id)
+            added += 1
+    return result[:CANDIDATE_DEPTH]
 
 
 def fuse(rankings: list[list[Evidence]], top: int = CANDIDATE_DEPTH) -> list[Evidence]:

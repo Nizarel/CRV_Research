@@ -14,11 +14,11 @@ RERANK_PREVIEW_CHARACTERS = 600
 
 async def ranked_candidates(
     retrieval: Retrieval, query: str, release: str, hashes: list[str], budget: Budget,
-    policy: EvidencePolicy, reranker: Reranker | None,
+    policy: EvidencePolicy, reranker: Reranker | None, *, strict: bool = False,
 ) -> list[Evidence]:
     """Focused Search candidates, optionally reordered by a listwise model reranker."""
     hits = await retrieval.retrieve(
-        query, release, hashes, budget, captions=policy.anchor == "caption",
+        query, release, hashes, budget, captions=policy.anchor == "caption", strict=strict,
     )
     if policy.rerank == "llm":
         if reranker is None:

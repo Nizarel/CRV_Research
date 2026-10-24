@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     extract_batches: int = Field(default=1, ge=1, le=4)
     # prune: after a failed verification, delete rejected text before composing a second draft.
     repair_mode: Literal["recompose", "prune"] = "recompose"
-    # KG-2 pilot: steer one extra facet with released studies/observations (needs 0021 read API).
+    # KG-2 pilot: released studies choose the documents of one strict search (needs 0021).
     kg_results: bool = False
     facet_concurrency: int = Field(default=4, ge=1, le=6)
     turn_tokens: int = Field(default=300_000, ge=8192, le=1_000_000)

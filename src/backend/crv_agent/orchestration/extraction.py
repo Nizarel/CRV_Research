@@ -53,6 +53,7 @@ class ExtractionWorker:
 
     async def run(
         self, question: str, release: str, hashes: list[str], budget: Budget,
+        *, strict: bool = False,
     ) -> tuple[WorkerResult, list[Evidence]]:
         fixed = identifiers(question)
         found: dict[str, Evidence] = {}
@@ -64,6 +65,7 @@ class ExtractionWorker:
             text = (query + "\n" + " ".join(fixed)).strip()
             hits = await ranked_candidates(
                 self.retrieval, text, release, hashes, budget, self.policy, self.reranker,
+                strict=strict,
             )
             fresh = [hit for hit in hits if hit.id not in found]
             pack = build_pack(fresh, text, fixed, self.policy)

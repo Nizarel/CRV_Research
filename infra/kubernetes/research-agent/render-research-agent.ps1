@@ -36,7 +36,7 @@ param(
     [ValidateRange(1, 24)] [int] $WorkerMaxClaims = 8,
     [ValidateRange(1, 4)] [int] $ExtractBatches = 1,
     [ValidateSet('recompose', 'prune')] [string] $RepairMode = 'recompose',
-    # KG-2 pilot: steer one facet with released observations (needs migration 0021 + a release).
+    # KG-2 pilot: released studies choose the documents of one strict search (needs 0021 + a release).
     [switch] $KgResults,
     # answer-eval: scorer arm label of this configuration, and the exposed/ledger funnel arms.
     [ValidatePattern('^[A-Za-z0-9_-]{1,32}$')] [string] $AnswerArm = 'AGENT',

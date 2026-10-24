@@ -142,9 +142,11 @@ async def load_study_inputs(
     statuses: tuple[str, ...] = ("embedded",),
     concurrency: int = 16,
     tables: bool = False,
+    only: Collection[str] | None = None,
 ) -> list[StudyDocument]:
-    """KG-2 inputs: documents placed under ``folder`` (case-insensitive path segment) with the
-    text of their ``study_pages``; with ``tables``, every unit is read for typed table cells."""
+    """KG-2 inputs: documents placed under ``folder`` (case-insensitive path segment), or only
+    those of ``only`` content hashes among them, with the text of their ``study_pages``; with
+    ``tables``, every unit is read for typed table cells."""
 
     segment = folder.casefold()
     async with pool.acquire() as connection:
@@ -154,8 +156,9 @@ async def load_study_inputs(
             paths[row["content_hash"]].append(_placement(row).source_path)
     selected = [
         row for row in rows
-        if any(segment in part.casefold() for path in paths[row["content_hash"]]
-               for part in path.split("/")[:-1])
+        if (only is None or row["content_hash"] in only)
+        and any(segment in part.casefold() for path in paths[row["content_hash"]]
+                for part in path.split("/")[:-1])
     ]
     gate = asyncio.Semaphore(concurrency)
 

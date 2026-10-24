@@ -48,7 +48,7 @@ async def answer(
         }, ensure_ascii=False)
         draft: AnswerDraft | None = None
         verdict: Verdict | None = None
-        pruned = False
+        pruned = listed = False
         try:
             for round_number in range(2):
                 composed = await context.models.compose(
@@ -94,6 +94,12 @@ async def answer(
                 candidate, evidence, context.search_release, state["calculations"],
             ):
                 draft, reasons, pruned = candidate, [], True
+            elif (
+                candidate := findings(draft, verdict, state["calculations"], plan.language)
+            ) is not None and not verify_draft(
+                candidate, evidence, context.search_release, state["calculations"],
+            ):
+                draft, reasons, listed = candidate, [], True
         if reasons or draft is None:
             status, text, claims = "insufficient_evidence", (
                 "La réponse n'a pas passé la vérification des sources."
@@ -103,10 +109,12 @@ async def answer(
             text, claims = draft.content, draft.claims
             conflicts = answer_conflicts(draft, state["claims"], state["conflicts"])
             status = "insufficient_evidence" if draft.insufficient else (
-                "partial" if state["coverage"].gaps or pruned else "answered"
+                "partial" if state["coverage"].gaps or pruned or listed else "answered"
             )
             if pruned:
                 reasons = ["Statements the verifier found unsupported were removed."]
+            if listed:
+                reasons = ["The synthesis failed verification; only verified findings are listed."]
     selected = {cid for claim in claims for cid in claim.evidence_ids}
     result = Answer.model_validate({
         "status": status, "content": text,
@@ -210,6 +218,36 @@ def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
         )) >= 2
     ]
     return draft.model_copy(update={"content": content, "claims": claims, "conflicts": conflicts})
+
+
+def findings(
+    draft: AnswerDraft, verdict: Verdict, calculations: list[Calculation], language: str,
+) -> AnswerDraft | None:
+    """Unrejected, self-grounded claims listed with citations; None for a blanket rejection."""
+    if not verdict.unsupported_claims and not verdict.unsupported_sentences:
+        return None
+    rejected = set(verdict.unsupported_claims)
+    lines: list[str] = []
+    claims: list[Claim] = []
+    for n, claim in enumerate(draft.claims):
+        line = f"- {claim.text} " + " ".join(f"[{cid}]" for cid in claim.evidence_ids)
+        if n in rejected or _MARKER.search(claim.text) or ungrounded_numbers(
+            line, [claim], calculations,
+        ):
+            continue
+        lines.append(line)
+        claims.append(claim)
+    if not claims:
+        return None
+    intro = (
+        "La synthèse n'a pas passé la vérification des sources ; seuls les constats "
+        "vérifiés sont listés." if language == "fr" else
+        "The synthesis did not pass source verification; only verified findings are listed."
+    )
+    return AnswerDraft(
+        content=intro + "\n\n" + "\n".join(lines), claims=claims,
+        insufficient=draft.insufficient,
+    )
 
 
 def answer_conflicts(

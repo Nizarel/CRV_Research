@@ -94,6 +94,7 @@ class FakeKnowledge:
 class FakeWorker:
     async def run(
         self, question: str, release: str, hashes: list[str], budget: Budget,
+        *, strict: bool = False,
     ) -> tuple[WorkerResult, list[Evidence]]:
         await budget.reserve(retrieval=1)
         return WorkerResult(claims=[CLAIM], gaps=[]), [SOURCE]

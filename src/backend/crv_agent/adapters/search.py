@@ -51,6 +51,19 @@ class SearchRow(Contract):
     extraction_route: str | None
     original_content_hashes: list[str]
 
+    def evidence(self, caption: str | None = None) -> Evidence:
+        return Evidence(
+            id=self.projection_id, release=self.release_id, chunk_id=self.chunk_id,
+            content_hash=self.content_hash, title=self.title, content=self.content,
+            source_uri=self.source_uri, source_path=self.source_path or "",
+            document_code=self.document_code, pages=self.original_page_numbers,
+            locators=self.source_locators, original_sources=self.original_source_uris,
+            generated=self.is_generated, document_class=self.document_class or "unknown",
+            citation_basis=self.citation_basis or "unknown",
+            extraction_route=self.extraction_route or "unknown",
+            original_content_hashes=self.original_content_hashes, caption=caption,
+        )
+
 
 class AzureSearch:
     def __init__(self, client: SearchClient, release: str) -> None:
@@ -88,15 +101,29 @@ class AzureSearch:
                 if (value := item.get("text") if isinstance(item, dict)
                     else getattr(item, "text", None))
             ), None)
-            result.append(Evidence(
-                id=row.projection_id, release=row.release_id, chunk_id=row.chunk_id,
-                content_hash=row.content_hash, title=row.title, content=row.content,
-                source_uri=row.source_uri, source_path=row.source_path or "",
-                document_code=row.document_code, pages=row.original_page_numbers,
-                locators=row.source_locators, original_sources=row.original_source_uris,
-                generated=row.is_generated, document_class=row.document_class or "unknown",
-                citation_basis=row.citation_basis or "unknown",
-                extraction_route=row.extraction_route or "unknown",
-                original_content_hashes=row.original_content_hashes, caption=caption,
-            ))
+            result.append(row.evidence(caption))
         return result
+
+    async def tables(self, release: str, pages: dict[str, list[int]]) -> list[Evidence]:
+        if not pages:
+            return []
+        if len(pages) > 5 or any(
+            not numbers or len(numbers) > 15
+            or any(type(number) is not int or number < 1 for number in numbers)
+            for numbers in pages.values()
+        ):
+            raise ValueError("Invalid neighboring table scope")
+        clauses = [
+            f"({query_filter(release, [digest])} and original_page_numbers/any(page: "
+            + " or ".join(f"page eq {number}" for number in sorted(set(numbers))) + "))"
+            for digest, numbers in pages.items()
+        ]
+        rows = await self.client.search(
+            search_text="*", query_type="simple", select=SELECT, top=100,
+            filter="chunk_kind eq 'table' and is_generated eq false and ("
+            + " or ".join(clauses) + ")",
+        )
+        return [
+            SearchRow.model_validate({key: raw.get(key) for key in SELECT}).evidence()
+            async for raw in rows
+        ]

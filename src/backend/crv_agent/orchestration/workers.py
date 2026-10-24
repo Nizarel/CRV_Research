@@ -24,6 +24,7 @@ from crv_agent.tools.evidence import evidence_tools
 class Worker(Protocol):
     async def run(
         self, question: str, release: str, hashes: list[str], budget: Budget,
+        *, strict: bool = False,
     ) -> tuple[WorkerResult, list[Evidence]]: ...
 
 
@@ -63,10 +64,12 @@ class EvidenceWorker:
 
     async def run(
         self, question: str, release: str, hashes: list[str], budget: Budget,
+        *, strict: bool = False,
     ) -> tuple[WorkerResult, list[Evidence]]:
         found: dict[str, Evidence] = {}
         tools = evidence_tools(
             self.retrieval, release, hashes, budget, found, question, self.policy, self.reranker,
+            strict=strict,
         )
         agent = create_agent(
             self.model, tools=tools, system_prompt=WORKER_RULES,

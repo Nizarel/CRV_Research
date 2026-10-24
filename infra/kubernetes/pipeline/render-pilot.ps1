@@ -7,8 +7,8 @@ Render one CRV pilot operations job (crv-pilot-jobs.yaml) and optionally apply i
 Shared objects (ops service account, converter service account, work disk, isolation policy and
 pilot list) are always rendered; exactly one job is selected with -Job, so stages run in order:
 verify-raw, dbsetup, index (setup, dry runs by default) then stage -> convert -> intake ->
-(review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-extract (KG-2 pilot,
--KgImport to record candidates) -> kg-release.
+(review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-extract (KG-2 pilot) ->
+(review) -> kg-import -KgFile (-KgDryRun first) -> kg-release.
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest.
 
@@ -18,7 +18,7 @@ Images are referenced only by digest.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-release', 'golden-eval')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-import', 'kg-release', 'golden-eval')] [string] $Job,
     [Parameter(Mandatory)] [guid] $OpsClientId,
     [Parameter(Mandatory)] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $ConverterDigest = '',
@@ -45,11 +45,12 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $KgPolicy = 'crv-full-v1',
     [ValidatePattern('^[a-z][a-z0-9-]{0,30}$')] [string] $KgEnvironment = 'dev',
     [switch] $KgDryRun,
-    # kg-extract (KG-2 pilot): folder segment, chat deployment, document limit, candidate import.
+    # kg-extract (KG-2 pilot): folder segment, chat deployment, document limit; kg-import: the
+    # reviewed kg-extract JSONL.
     [ValidatePattern('^[\w .&-]{1,80}$')] [string] $KgFolder = 'Dossier Cu',
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $KgDeployment = 'gpt-6.1-sol',
     [ValidateRange(0, 5000)] [int] $KgLimit = 0,
-    [switch] $KgImport,
+    [string] $KgFile = '',
     [string] $WorkerIdentityName = 'id-crv-pipeline-worker',
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $EvalRelease = 'crv-v1',
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $JudgeDeployment = 'gpt-5.4-mini',
@@ -67,6 +68,7 @@ $ErrorActionPreference = 'Stop'
 if ($Job -in 'convert', 'intake' -and -not $ConverterDigest) { throw "-Job $Job needs -ConverterDigest." }
 if ($Job -eq 'stage' -and -not ($PilotList -or $AllBlobs)) { throw '-Job stage needs -PilotList or -AllBlobs.' }
 if ($PilotList -and $AllBlobs) { throw 'Use either -PilotList or -AllBlobs.' }
+if ($Job -eq 'kg-import' -and -not $KgFile) { throw '-Job kg-import needs -KgFile (a reviewed kg-extract JSONL).' }
 
 $entries = @()
 if ($PilotList) {
@@ -106,7 +108,7 @@ $values = [ordered]@{
     KG_ARGS               = if ($KgDryRun) { ', --dry-run' } else { '' }
     KG_FOLDER             = $KgFolder
     KG_DEPLOYMENT         = $KgDeployment
-    KG_EXTRACT_ARGS       = $(if ($KgLimit) { ", --limit, $KgLimit" } else { '' }) + $(if ($KgImport) { ', --import' } else { '' })
+    KG_EXTRACT_ARGS       = if ($KgLimit) { ", --limit, '$KgLimit'" } else { '' }
     WORKER_IDENTITY_NAME  = $WorkerIdentityName
     EVAL_RELEASE          = $EvalRelease
     JUDGE_DEPLOYMENT      = $JudgeDeployment
@@ -151,6 +153,18 @@ if ($Job -eq 'golden-eval') {
     }
     $rendered += "`n---`n" + ($configMap | ConvertTo-Json -Depth 5)
 }
+if ($Job -eq 'kg-import') {
+    $extract = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $KgFile).Path, [Text.UTF8Encoding]::new($false))
+    # A ConfigMap holds at most 1 MiB.
+    if ([Text.Encoding]::UTF8.GetByteCount($extract) -gt 900KB) { throw "$KgFile is too large for a ConfigMap; split it." }
+    foreach ($line in $extract -split "`n" | Where-Object { $_.Trim() }) { $null = $line | ConvertFrom-Json }
+    $configMap = [ordered]@{
+        apiVersion = 'v1'; kind = 'ConfigMap'
+        metadata = [ordered]@{ name = 'crv-kg-extract'; namespace = 'crv' }
+        data = [ordered]@{ 'extract.jsonl' = $extract }
+    }
+    $rendered += "`n---`n" + ($configMap | ConvertTo-Json -Depth 5)
+}
 $rendered += "`n"
 
 $path = if ($RenderPath) { $RenderPath } else { Join-Path ([IO.Path]::GetTempPath()) "crv-pilot-$Job-$RunId.yaml" }
@@ -158,7 +172,9 @@ Set-Content -LiteralPath $path -Value $rendered -Encoding utf8 -NoNewline
 Write-Output "Rendered $Job (run $RunId) to $path"
 if ($Invoke) {
     $name = Split-Path -Leaf $path
-    az aks command invoke -g $ResourceGroup -n $Cluster --command "kubectl apply -f $name" --file $path -o json --only-show-errors
+    # Server-side apply: client-side apply copies the object into a 256 KB annotation.
+    $apply = if ($Job -eq 'kg-import') { 'kubectl apply --server-side --force-conflicts -f' } else { 'kubectl apply -f' }
+    az aks command invoke -g $ResourceGroup -n $Cluster --command "$apply $name" --file $path -o json --only-show-errors
     if ($LASTEXITCODE -ne 0) { throw "az aks command invoke failed with exit code $LASTEXITCODE" }
     Write-Output "Applied job crv-pilot-$Job-$RunId"
 }
