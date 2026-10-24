@@ -8,7 +8,9 @@ Shared objects (ops service account, converter service account, work disk, isola
 pilot list) are always rendered; exactly one job is selected with -Job, so stages run in order:
 verify-raw, dbsetup, index (setup, dry runs by default) then stage -> convert -> intake ->
 (review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-extract (KG-2 pilot) ->
-(review) -> kg-import -KgFile (-KgDryRun first) -> kg-release.
+(review) -> kg-import -KgFile (-KgDryRun first) -> kg-release. PostgreSQL retrieval (after dbsetup
+applies migration 0022): retrieval-backfill (-RetrievalDryRun and -RetrievalLimit first) ->
+retrieval-index.
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest.
 
@@ -18,7 +20,7 @@ Images are referenced only by digest.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-import', 'kg-release', 'golden-eval')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-import', 'kg-release', 'golden-eval', 'retrieval-backfill', 'retrieval-index')] [string] $Job,
     [Parameter(Mandatory)] [guid] $OpsClientId,
     [Parameter(Mandatory)] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $ConverterDigest = '',
@@ -55,6 +57,14 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{0,62}$')] [string] $EvalRelease = 'crv-v1',
     [ValidatePattern('^[A-Za-z0-9._-]{1,64}$')] [string] $JudgeDeployment = 'gpt-5.4-mini',
     [string] $GoldenPath = (Join-Path $PSScriptRoot '../../../golden/crv_golden.jsonl'),
+    # retrieval-backfill: contents to copy (0 = all), dry run (compare digests only), copy drifted
+    # contents, revisit copied ones; retrieval-index: the embedding model's vector column.
+    [ValidateRange(0, 1000000)] [int] $RetrievalLimit = 0,
+    [ValidateRange(1, 32)] [int] $RetrievalConcurrency = 4,
+    [switch] $RetrievalDryRun,
+    [switch] $RetrievalAllowDrift,
+    [switch] $RetrievalRefresh,
+    [ValidateSet('te3', 'm3')] [string] $RetrievalModel = 'te3',
     [switch] $DbApply,
     [switch] $IndexApply,
     [string] $IndexSchema = (Join-Path $PSScriptRoot '../../search/crv-evidence-index.json'),
@@ -112,6 +122,14 @@ $values = [ordered]@{
     WORKER_IDENTITY_NAME  = $WorkerIdentityName
     EVAL_RELEASE          = $EvalRelease
     JUDGE_DEPLOYMENT      = $JudgeDeployment
+    RETRIEVAL_ARGS        = (@(
+        ", --concurrency, '$RetrievalConcurrency'"
+        if ($RetrievalLimit) { ", --limit, '$RetrievalLimit'" }
+        if ($RetrievalDryRun) { ', --dry-run' }
+        if ($RetrievalAllowDrift) { ', --allow-drift' }
+        if ($RetrievalRefresh) { ', --refresh' }
+    ) -join '')
+    RETRIEVAL_MODEL       = $RetrievalModel
 }
 foreach ($name in 'PRINCIPAL_COORDINATOR', 'PRINCIPAL_WORKER', 'PRINCIPAL_OPS') {
     if ($values[$name] -notmatch '^[a-z][a-z0-9-]{2,62}=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {

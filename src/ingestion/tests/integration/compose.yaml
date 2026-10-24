@@ -1,10 +1,12 @@
-# Ephemeral PostgreSQL 16 + Apache AGE 1.6.0 for the pipeline integration tests.
+# Ephemeral PostgreSQL 16 + Apache AGE 1.6.0 + pgvector for the pipeline integration tests.
 # The database is never published to the host; the password is a throwaway test value.
 name: tizert-pipeline-integration
 
 services:
   age:
-    image: apache/age:release_PG16_1.6.0@sha256:16aa423d20a31aed36a3313244bf7aa00731325862f20ed584510e381f2feaed
+    build:
+      context: .
+      dockerfile: postgres.Dockerfile
     # Azure Database for PostgreSQL runs with jit=off; with the image default (on), compiling
     # the large kg release queries takes several seconds each.
     command: ["postgres", "-c", "jit=off"]

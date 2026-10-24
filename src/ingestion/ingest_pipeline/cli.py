@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import sys
+import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager, nullcontext
@@ -39,6 +40,7 @@ from .adapters.postgres.legacy import LegacyCatalog
 from .adapters.postgres.migrations import apply_crv_baseline, apply_migrations, load_migrations
 from .adapters.postgres.pool import create_pool
 from .adapters.postgres.report import pipeline_status
+from .adapters.postgres.retrieval import VECTOR_INDEXES, build_vector_index
 from .adapters.postgres.snapshots import PostgresSnapshots
 from .adapters.search.index_admin import ensure_index, render_schema
 from .adapters.servicebus.transport import ServiceBusMessageReceiver, open_receiver
@@ -58,9 +60,11 @@ from .ports.telemetry import Telemetry
 from .runtime.bootstrap import azure_runtime, spend_policy
 from .runtime.coordinator import Coordinator, LeaseReconciler, OutboxDispatcher
 from .runtime.executor import ExecutorSettings, StageExecutor
+from .runtime.retrieval_copy import CopyOptions, copy_release
 from .runtime.shutdown import install_stop_signals
 from .runtime.worker import Worker
 from .stages.links import preflight_job, project_job
+from .stages.project_search import ProjectionSettings
 from .stages.snapshot import snapshot_job
 
 Handler = Callable[[PipelineSettings, Telemetry, argparse.Namespace], Coroutine[Any, Any, int]]
@@ -969,6 +973,66 @@ async def _status(
     return 0
 
 
+async def _retrieval_backfill(
+    settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
+) -> int:
+    """Copy a Search release into crv_retrieval from the cached evidence (no paid calls)."""
+
+    search = settings.search
+    projection = ProjectionSettings(
+        target=search.index_name,
+        corpus=search.corpus,
+        release_id=args.release or search.release_id,
+        access_scope_id=search.access_scope_id,
+        acl_policy_version=search.acl_policy_version,
+    )
+    options = CopyOptions(
+        source_store=projection.store,
+        source_target=search.index_name,
+        model=settings.embeddings.model,
+        dimensions=settings.embeddings.dimensions,
+        limit=args.limit,
+        concurrency=args.concurrency,
+        dry_run=args.dry_run,
+        allow_drift=args.allow_drift,
+        refresh=args.refresh,
+    )
+    async with azure_runtime(settings, telemetry, bus=False) as runtime:
+        report = await copy_release(runtime.services, runtime.pool, projection, options)
+    _print(asdict(report))
+    return 1 if report.failed_contents else 0
+
+
+async def _retrieval_index(
+    settings: PipelineSettings, _: Telemetry, args: argparse.Namespace
+) -> int:
+    """As the table owner: build one model's HNSW index after retrieval-backfill."""
+
+    database = settings.db.model_copy(update={
+        "min_pool_size": 1, "max_pool_size": 1, "statement_timeout_ms": 0,
+        "command_timeout_seconds": args.timeout_minutes * 60.0,
+    })
+    started = time.perf_counter()
+    async with (
+        _database(settings.model_copy(update={"db": database})) as pool,
+        pool.acquire() as connection,
+    ):
+        report = await build_vector_index(
+            connection, args.model, m=args.m, ef_construction=args.ef_construction,
+            maintenance_work_mem=args.maintenance_work_mem,
+            parallel_workers=args.parallel_workers,
+        )
+    _print({**report, "seconds": round(time.perf_counter() - started, 1)})
+    return 0
+
+
+def _positive(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tizagent-pipeline", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1130,6 +1194,34 @@ def build_parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="Read-only ledger, evidence and projection summary")
     status.add_argument("--failures", type=int, default=20, help="Recent problems to list")
     status.set_defaults(handler=_status)
+
+    backfill = commands.add_parser(
+        "retrieval-backfill",
+        help="Copy a Search release into PostgreSQL crv_retrieval from cached evidence",
+    )
+    backfill.add_argument("--release", help="Search release (default: TIZ_SEARCH__RELEASE_ID)")
+    backfill.add_argument("--limit", type=_positive, default=1_000_000,
+                          help="At most this many contents (documents)")
+    backfill.add_argument("--concurrency", type=_positive, default=4)
+    backfill.add_argument("--dry-run", action="store_true",
+                          help="Rebuild rows and compare digests only")
+    backfill.add_argument("--allow-drift", action="store_true",
+                          help="Also copy contents whose rebuilt rows differ from Search")
+    backfill.add_argument("--refresh", action="store_true",
+                          help="Revisit contents that were already copied")
+    backfill.set_defaults(handler=_retrieval_backfill)
+
+    vector_index = commands.add_parser(
+        "retrieval-index",
+        help="Table owner: build one embedding model's HNSW index after retrieval-backfill",
+    )
+    vector_index.add_argument("--model", choices=sorted(VECTOR_INDEXES), default="te3")
+    vector_index.add_argument("--m", type=_positive, default=16)
+    vector_index.add_argument("--ef-construction", type=_positive, default=128)
+    vector_index.add_argument("--maintenance-work-mem", default="2GB")
+    vector_index.add_argument("--parallel-workers", type=int, default=2)
+    vector_index.add_argument("--timeout-minutes", type=_positive, default=240)
+    vector_index.set_defaults(handler=_retrieval_index)
 
     kg_build = commands.add_parser(
         "kg-build",

@@ -40,6 +40,9 @@ class Budget:
     seconds: float = 120
     retrieval_calls: int = 0
     model_calls: int = 0
+    # Plain table lookups have their own cap so they never starve the main searches.
+    lookup_calls: int = 0
+    lookup_limit: int = 4
     reserved_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -68,6 +71,12 @@ class Budget:
             self.retrieval_calls += retrieval
             self.model_calls += model
             self.reserved_tokens += tokens
+
+    async def reserve_lookup(self) -> None:
+        async with self._lock:
+            if self.remaining <= 0 or self.lookup_calls >= self.lookup_limit:
+                raise BudgetExceeded("Turn lookup allowance exhausted")
+            self.lookup_calls += 1
 
     async def wait(self, work: Awaitable[T]) -> T:
         return await asyncio.wait_for(work, timeout=self.remaining)

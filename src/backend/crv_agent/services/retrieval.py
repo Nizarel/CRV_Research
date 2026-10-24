@@ -87,7 +87,7 @@ class Retrieval:
         if not seeds:
             return hits
         try:
-            await budget.reserve(retrieval=1)
+            await budget.reserve_lookup()
             tables = await budget.wait(self.search.tables(release, scopes))
         except BudgetExceeded:
             return hits

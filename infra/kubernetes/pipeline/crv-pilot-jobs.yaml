@@ -500,6 +500,78 @@ spec:
       volumes:
         - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
 ---
+# JOB retrieval-backfill: copy the EVAL_RELEASE Search rows into PostgreSQL crv_retrieval from the
+# cached evidence and embeddings (no paid calls). Uses the workers' TIZ_SEARCH__* settings, so the
+# rebuilt rows carry the Search digests; resumable. RETRIEVAL_ARGS: --limit, --dry-run,
+# --allow-drift, --refresh.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-retrieval-backfill-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: retrieval-backfill}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-ops
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: retrieval-backfill
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [retrieval-backfill, --release, "${EVAL_RELEASE}"${RETRIEVAL_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 3Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
+---
+# JOB retrieval-index: as the Entra admin (owner of crv_retrieval.chunk), build the RETRIEVAL_MODEL
+# HNSW index after retrieval-backfill. The build runs on the PostgreSQL server.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-retrieval-index-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: retrieval-index}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-ops, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: retrieval-index
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [retrieval-index, --model, "${RETRIEVAL_MODEL}"]
+          env:
+            - {name: TIZ_DB__HOST, value: "${PG_HOST}"}
+            - {name: TIZ_DB__DATABASE, value: ingestion-catalog}
+            - {name: TIZ_DB__USER, value: "${ADMIN_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
 # JOB golden-eval: retrieval quality on the golden questions (Docs/AGENTIC_ARCHITECTURE.md §7).
 # Runs as the worker identity (Search data reader, Azure OpenAI user, crv_kg_reader member);
 # reads only, prints the report between GOLDEN REPORT markers.

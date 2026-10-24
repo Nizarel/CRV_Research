@@ -11,10 +11,8 @@ from typing import Any
 import pytest
 from pipeline_harness import Harness, HarnessFactory, build_harness
 
-AGE_IMAGE = (
-    "apache/age:release_PG16_1.6.0@sha256:"
-    "16aa423d20a31aed36a3313244bf7aa00731325862f20ed584510e381f2feaed"
-)
+PG_DOCKERFILE = Path(__file__).resolve().parent / "integration" / "postgres.Dockerfile"
+"""PostgreSQL 16 + Apache AGE 1.6.0 (pinned there) + pgvector for migration 0022."""
 
 
 @pytest.fixture
@@ -30,6 +28,7 @@ def harness() -> Harness:
 # --- PostgreSQL with Apache AGE (integration marker only) ---------------------------------
 
 LEDGER_TABLES = (
+    "crv_retrieval.chunk",
     "ingest.extraction_cache",
     "ingest.job_replay",
     "ingest.legacy_reconciliation",
@@ -96,12 +95,23 @@ def pg_dsn() -> Iterator[str]:
         yield configured
         return
     postgres = pytest.importorskip("testcontainers.postgres")
+    images = pytest.importorskip("testcontainers.core.image")
+    try:
+        image = images.DockerImage(
+            path=str(PG_DOCKERFILE.parent), dockerfile_path=PG_DOCKERFILE.name,
+            tag="crv-pipeline-postgres:test",
+        )
+        image.build()
+    except Exception as error:  # Docker unavailable
+        pytest.skip(f"Cannot build the PostgreSQL test image: {error}")
     container = postgres.PostgresContainer(
-        AGE_IMAGE, username="postgres", password="postgres", dbname="ingestion-catalog", driver=None
+        str(image), username="postgres", password="postgres", dbname="ingestion-catalog",
+        driver=None,
     ).with_command("postgres -c jit=off")  # as on Azure (see integration/compose.yaml)
     try:
         container.start()
     except Exception as error:  # Docker unavailable
+        image.remove()
         pytest.skip(f"Cannot start AGE container: {error}")
     try:
         dsn = container.get_connection_url()
@@ -109,6 +119,7 @@ def pg_dsn() -> Iterator[str]:
         yield dsn
     finally:
         container.stop()
+        image.remove()
 
 
 @pytest.fixture

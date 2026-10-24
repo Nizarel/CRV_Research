@@ -141,11 +141,12 @@ async def test_referenced_table_is_exposed_without_another_model_search() -> Non
     assert result[5] == table
     assert scopes == [{hits[4].content_hash: [3, 4, 5]}]
     assert len(search.calls) == 1
-    assert budget.retrieval_calls == 2
+    assert budget.retrieval_calls == 1
+    assert budget.lookup_calls == 1
     assert not {"other-doc", "other-release", "far-page", "generated"} & {hit.id for hit in result}
     scopes.clear()
     result = await Retrieval(search).retrieve(
-        "Scenarios?", "r1", [], Budget(retrieval_limit=1),
+        "Scenarios?", "r1", [], Budget(lookup_limit=0),
     )
     assert result == focus(hits)
     assert scopes == []

@@ -26,7 +26,7 @@ from ..domain.routing import Family, Route
 from ..domain.states import JobStatus
 from ..domain.vectors import Vector, encode_f32le
 from ..ports.evidence import EvidenceRecord, EvidenceStatus
-from .base import StageContext
+from .base import StageContext, StageServices
 from .common import load_jsonl, load_model, parse_inputs
 from .links import ProjectInputs, project_job
 from .projection_fields import UnitMetadata, placement_metadata, row_metadata
@@ -128,6 +128,60 @@ def build_row(
     return row
 
 
+async def evidence_units(
+    services: StageServices, record: EvidenceRecord
+) -> tuple[str, dict[str, UnitMetadata], tuple[str, ...]]:
+    """Manifest family, unit metadata and printed document codes.
+
+    Only field-bearing units load their evidence.
+    """
+
+    manifest = await load_model(services, record.manifest, EvidenceDocument)
+    units: dict[str, UnitMetadata] = {}
+    for unit in manifest.units:
+        fields: tuple[FieldObservation, ...] = ()
+        if unit.evidence is not None and unit.route in FIELD_ROUTES:
+            evidence = await load_model(services, unit.evidence, EvidenceUnit)
+            fields = evidence.fields
+        units[unit.unit_id] = UnitMetadata(route=unit.route, kind=unit.kind, fields=fields)
+    return manifest.family, units, manifest.document_codes
+
+
+async def projection_rows(
+    services: StageServices,
+    record: EvidenceRecord,
+    placements: Sequence[SourceSnapshot],
+    settings: ProjectionSettings,
+    *,
+    model: str,
+    dimensions: int,
+) -> dict[str, dict[str, Any]]:
+    """Rows of one embedded evidence by key; ``placements`` in canonical order."""
+
+    family, units, document_codes = await evidence_units(services, record)
+    chunks = await load_jsonl(services, record.chunk_set, EvidenceChunk)
+    vectors = await services.require_embedding_cache().get_many(
+        sorted({chunk.text_sha256 for chunk in chunks}), model=model, dimensions=dimensions
+    )
+    if any(chunk.text_sha256 not in vectors for chunk in chunks):
+        raise IntegrityError(f"Embedding cache misses vectors of {record.evidence_id}")
+    return {
+        row[KEY_FIELD]: row
+        for row in (
+            build_row(
+                chunk,
+                vectors[chunk.text_sha256],
+                placements=placements,
+                family=family,
+                settings=settings,
+                units=units,
+                document_codes=document_codes,
+            )
+            for chunk in chunks
+        )
+    }
+
+
 @dataclass(frozen=True)
 class ProjectSearchStage:
     settings: ProjectionSettings
@@ -166,31 +220,15 @@ class ProjectSearchStage:
             return StageOutcome.succeeded(
                 next_jobs=refresh, checkpoint={"skipped": "no embedded evidence yet"}
             )
-        manifest_family, units, document_codes = await self._units(context, record)
-        chunks = await load_jsonl(services, record.chunk_set, EvidenceChunk)
         provider = services.require_embeddings()
-        vectors = await services.require_embedding_cache().get_many(
-            sorted({chunk.text_sha256 for chunk in chunks}),
+        rows = await projection_rows(
+            services,
+            record,
+            placements,
+            settings,
             model=provider.model,
             dimensions=provider.dimensions,
         )
-        if any(chunk.text_sha256 not in vectors for chunk in chunks):
-            raise IntegrityError(f"Embedding cache misses vectors of {record.evidence_id}")
-        rows = {
-            row[KEY_FIELD]: row
-            for row in (
-                build_row(
-                    chunk,
-                    vectors[chunk.text_sha256],
-                    placements=placements,
-                    family=manifest_family,
-                    settings=settings,
-                    units=units,
-                    document_codes=document_codes,
-                )
-                for chunk in chunks
-            )
-        }
         repository = services.require_projections()
         await repository.upsert(
             [
@@ -349,24 +387,6 @@ class ProjectSearchStage:
             for content_hash in previous
             if content_hash != inputs.content_hash
         )
-
-    async def _units(
-        self, context: StageContext, record: EvidenceRecord
-    ) -> tuple[str, dict[str, UnitMetadata], tuple[str, ...]]:
-        """Manifest family, unit metadata and printed document codes.
-
-        Only field-bearing units load their evidence.
-        """
-
-        manifest = await load_model(context.services, record.manifest, EvidenceDocument)
-        units: dict[str, UnitMetadata] = {}
-        for unit in manifest.units:
-            fields: tuple[FieldObservation, ...] = ()
-            if unit.evidence is not None and unit.route in FIELD_ROUTES:
-                evidence = await load_model(context.services, unit.evidence, EvidenceUnit)
-                fields = evidence.fields
-            units[unit.unit_id] = UnitMetadata(route=unit.route, kind=unit.kind, fields=fields)
-        return manifest.family, units, manifest.document_codes
 
     async def _retire(
         self,
