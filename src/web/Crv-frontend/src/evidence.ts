@@ -107,6 +107,19 @@ export function formatClaimValue(claim: Claim): string | null {
   return formatQuantity(claim.value, claim.unit, claim.qualifier)
 }
 
+const SOURCE_PDF = /(?:^|\/)crv\/sources\/([0-9a-f]{64})\.pdf$/
+
+/** Content hash of the cited source PDF, or null when the source is not a stored PDF
+ * (catalogue records, spreadsheets). Page numbers refer to this PDF. */
+export function sourceDigest(evidence: Evidence): string | null {
+  return SOURCE_PDF.exec(evidence.source_uri)?.[1] ?? null
+}
+
+/** Distinct cited pages, ascending. */
+export function citedPages(evidence: Evidence): number[] {
+  return [...new Set(evidence.pages)].sort((a, b) => a - b)
+}
+
 const LIMITS: Record<string, string> = {
   'Statements the verifier found unsupported were removed.':
     'Des affirmations que le vérificateur jugeait non étayées ont été retirées.',

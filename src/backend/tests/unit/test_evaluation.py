@@ -139,6 +139,89 @@ async def test_answer_export_matches_shared_score_context_format_without_source_
     }]
     citation = record["answer"]["citations"][0]  # type: ignore[index]
     assert citation["pages"] == [4] and "content" not in citation
+    assert record["schema_valid"] is True
+    assert record["schema_check_status"] == "valid"
+    assert record["execution_status"] == "completed"
+    assert record["request_id"] and record["thread_id"] and record["trace_id"]
+    assert record["latency_ms"] > 0  # type: ignore[operator]
+    assert record["total_execution_ms"] >= record["latency_ms"]  # type: ignore[operator]
+    assert record["tool_call_count"] is None
+    assert record["tool_trace_status"] == "unmeasured"
+
+
+@pytest.mark.asyncio
+async def test_malformed_answer_is_logged_as_schema_failure_not_an_empty_success() -> None:
+    import json
+
+    from crv_agent.evaluation.runner import ask
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("conversations"):
+            return httpx.Response(200, json={"id": "thread"})
+        payload = {"content": "Exact malformed answer", "status": "answered"}
+        return httpx.Response(200, text=f"event: answer\ndata: {json.dumps(payload)}\n\n")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://test",
+    ) as client:
+        result = await ask(client, "question")
+    assert result["schema_valid"] is False
+    assert result["schema_check_status"] == "invalid"
+    assert result["error"] == "answer_schema_invalid"
+    assert result["raw_answer_content"] == "Exact malformed answer"
+    assert result["schema_errors"]
+    assert all("input" not in error for error in result["schema_errors"])
+
+
+@pytest.mark.asyncio
+async def test_timeout_retains_elapsed_time_and_missing_schema_state() -> None:
+    from crv_agent.evaluation.runner import ask
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    attempts = []
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://test",
+    ) as client:
+        result = await ask(client, "question", emit_attempt=attempts.append)
+    assert result["execution_status"] == "timeout"
+    assert result["schema_valid"] is False
+    assert result["schema_check_status"] == "not_received"
+    assert result["total_seconds"] > 0
+    assert [item["event"] for item in attempts] == ["started", "finished"]
+    assert attempts[-1]["execution_status"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_logged_and_propagated() -> None:
+    import asyncio
+
+    from crv_agent.evaluation.runner import ask
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        raise asyncio.CancelledError
+
+    attempts = []
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://test",
+    ) as client:
+        with pytest.raises(asyncio.CancelledError):
+            await ask(client, "question", emit_attempt=attempts.append)
+    assert [item["event"] for item in attempts] == ["started", "cancelled"]
+
+
+def test_generation_cli_cannot_overwrite_its_golden_dataset(tmp_path: Path) -> None:
+    from crv_agent.evaluation.cli import main
+
+    path = tmp_path / "golden.jsonl"
+    original = GoldenQuestion(
+        id="Q77", question="Question", category="A", split="dev", key_facts=[],
+    ).model_dump_json() + "\n"
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(SystemExit):
+        main(["--confirm-live", "--dataset", str(path), "--output", str(path)])
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_step_durations_come_from_consecutive_progress_events() -> None:

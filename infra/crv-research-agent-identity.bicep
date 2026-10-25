@@ -3,6 +3,7 @@
 // Least privilege, resource-scoped:
 // - Search Index Data Reader on the evidence search service (query only, no writes).
 // - Cognitive Services OpenAI User on the model account (inference only).
+// - Storage Blob Data Reader on the crv-sources container only (cited source PDFs, read-only).
 // - PostgreSQL access is granted inside the database, not here: run
 //   `crv-pipeline kg-grant-reader` (execute-only crv_kg_reader) and
 //   `crv-agent grant-memory-runtime` (agent-memory DML only).
@@ -30,10 +31,17 @@ param searchServiceName string
 @description('Existing Azure OpenAI / Foundry account with the agent deployments')
 param openAiAccountName string
 
+@description('Existing storage account holding the ingestion source container')
+param sourcesStorageAccountName string
+
+@description('Container of the content-addressed source PDFs')
+param sourcesContainerName string = 'crv-sources'
+
 param tags object = {}
 
 var searchIndexDataReader = '1407120a-92aa-4202-b7e9-c0e197c71c8f'
 var cognitiveServicesOpenAIUser = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+var storageBlobDataReader = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
   name: identityName
@@ -76,6 +84,24 @@ resource openAiUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalId: identity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesOpenAIUser)
+  }
+}
+
+resource sourcesAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: sourcesStorageAccountName
+}
+
+resource sourcesContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
+  name: '${sourcesAccount.name}/default/${sourcesContainerName}'
+}
+
+resource sourcesReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sourcesContainer.id, identity.id, storageBlobDataReader)
+  scope: sourcesContainer
+  properties: {
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataReader)
   }
 }
 

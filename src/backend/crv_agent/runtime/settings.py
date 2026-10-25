@@ -1,6 +1,7 @@
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from crv_agent.services.evidence_pack import EvidencePolicy
@@ -9,7 +10,7 @@ ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="CRV_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="CRV_", extra="ignore", hide_input_in_errors=True)
 
     mode: Literal["development"] = "development"
     retrieval_mode: Literal["kg", "search"] = "kg"
@@ -34,6 +35,8 @@ class Settings(BaseSettings):
     memory_database: str = "crv-agent-memory"
     memory_user: str
     openai_endpoint: str
+    model_endpoint: str | None = None
+    model_api_key: SecretStr | None = None
     planner_deployment: str
     worker_deployment: str
     answer_deployment: str
@@ -56,6 +59,9 @@ class Settings(BaseSettings):
     repair_mode: Literal["recompose", "prune"] = "recompose"
     # KG-2 pilot: released studies choose the documents of one strict search (needs 0021).
     kg_results: bool = False
+    # Blob account/container of the ingestion source PDFs; unset disables GET /api/v1/sources.
+    sources_account_url: str | None = None
+    sources_container: str = "crv-sources"
     facet_concurrency: int = Field(default=4, ge=1, le=6)
     turn_tokens: int = Field(default=300_000, ge=8192, le=1_000_000)
     model_calls: int = Field(default=24, ge=4, le=40)
@@ -98,6 +104,22 @@ class Settings(BaseSettings):
             self.pg_reranker_url.startswith("https://") and self.pg_reranker_model
         ):
             raise ValueError("The cohere reranker needs an HTTPS URL and a model")
+        if self.sources_account_url and not self.sources_account_url.startswith("https://"):
+            raise ValueError("The sources account URL must use HTTPS")
+        if self.model_api_key is not None:
+            if not self.model_endpoint or not self.model_api_key.get_secret_value().strip():
+                raise ValueError(
+                    "A model API key requires an explicit model endpoint and nonblank key",
+                )
+        if self.model_endpoint:
+            endpoint = urlsplit(self.model_endpoint)
+            if (
+                endpoint.scheme != "https" or not endpoint.hostname
+                or endpoint.username is not None or endpoint.password is not None
+                or endpoint.query or endpoint.fragment
+                or endpoint.path.rstrip("/") not in {"", "/openai/v1"}
+            ):
+                raise ValueError("Model endpoint must be an HTTPS origin or OpenAI v1 URL")
         return self
 
 

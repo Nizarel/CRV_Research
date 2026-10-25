@@ -11,6 +11,7 @@ from crv_agent.orchestration.workers import Worker
 from crv_agent.ports.knowledge import Knowledge
 from crv_agent.ports.models import Models
 from crv_agent.ports.persistence import Persistence
+from crv_agent.ports.sources import Sources
 
 
 @dataclass(frozen=True)
@@ -33,3 +34,4 @@ class AppServices:
     diagnostics: bool = False
     repair_mode: Literal["recompose", "prune"] = "recompose"
     kg_results: bool = False
+    sources: Sources | None = None

@@ -27,6 +27,7 @@ param(
     [Parameter(ParameterSetName = 'Deploy')] [ValidateRange(1, 4)] [int] $ExtractBatches = 1,
     # 'prune' (adopted 2026-10-22, PR arm) and ExtractBatches > 1 need agent image rd15+/rd16+.
     [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('recompose', 'prune')] [string] $RepairMode = 'prune',
+    [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^https://[a-z0-9]+\.blob\.core\.windows\.net$')] [string] $SourcesAccountUrl = 'https://stawmc6icu2kueq.blob.core.windows.net',
     [Parameter(ParameterSetName = 'Deploy')] [ValidateRange(30, 280)] [int] $TurnSeconds = 180,
     [Parameter(ParameterSetName = 'Deploy')] [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
     [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\.Network/ApplicationGatewayWebApplicationFirewallPolicies/[A-Za-z0-9._-]+$')] [string] $ChatWafPolicyId = '/subscriptions/b6e08f96-9a62-46d0-b276-8dc80e6bc02a/resourceGroups/rg-CRV-southcentralus/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/agw-crv-southcentralus-chat-waf',
@@ -73,6 +74,7 @@ $values = [ordered]@{
     WORKER_MAX_CLAIMS   = $WorkerMaxClaims.ToString()
     EXTRACT_BATCHES     = $ExtractBatches.ToString()
     REPAIR_MODE         = $RepairMode
+    SOURCES_ACCOUNT_URL = $SourcesAccountUrl
     TURN_SECONDS        = $TurnSeconds.ToString()
 }
 $text = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'research-agent-web.yaml') -Raw

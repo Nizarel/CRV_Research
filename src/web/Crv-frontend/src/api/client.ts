@@ -52,6 +52,23 @@ export function fetchHistory(threadId: string): Promise<Run[]> {
   return request<Run[]>(`/conversations/${encodeURIComponent(threadId)}`)
 }
 
+/** URL of a cited source PDF (served inline; append `#page=N` to open it on a page). */
+export function sourceDocumentUrl(digest: string): string {
+  return `${API}/sources/${digest}.pdf`
+}
+
+/** Whether the backend can serve the PDF. A one-byte range keeps the probe cheap, and an
+ * iframe would otherwise render an error page without telling us. */
+export async function sourceDocumentAvailable(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { headers: { Range: 'bytes=0-0' } })
+    await response.body?.cancel()
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 /** Record a vote on one answer; voting again on the same run replaces the earlier vote. */
 export async function postFeedback(
   threadId: string,

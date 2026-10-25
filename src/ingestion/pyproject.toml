@@ -9,6 +9,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+evaluation = [
+    "github-copilot-sdk==1.0.26",
+]
 azure = [
     "aiohttp>=3.12,<4",
     "asyncpg==0.31.0",
@@ -165,3 +168,4 @@ include = ["ingest_pipeline*"]
 
 [tool.setuptools.package-data]
 "ingest_pipeline" = ["sql/*.sql", "data/*.json"]
+"ingest_pipeline.tools.golden" = ["*.mjs"]

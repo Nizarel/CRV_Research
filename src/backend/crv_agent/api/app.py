@@ -1,26 +1,31 @@
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Annotated, Any, cast
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from opentelemetry import trace
 from starlette.requests import Request
 
 from crv_agent.api.dependencies import AppServices
 from crv_agent.api.events import diagnostics, event
 from crv_agent.api.identity import AuthenticationError
+from crv_agent.api.ranges import UnsatisfiableRange, byte_range
 from crv_agent.api.schemas import ChatRequest, FeedbackRequest
 from crv_agent.domain.answers import Answer
 from crv_agent.domain.execution import Budget
 from crv_agent.domain.planning import QueryPlan
 from crv_agent.orchestration.context import ResearchContext
 from crv_agent.ports.persistence import Run, Thread, ThreadNotFound, TurnConflict
+from crv_agent.ports.sources import SourceNotFound
 
 logger = logging.getLogger(__name__)
+# Source PDFs are content-addressed (`<sha256>.pdf`); anything else is never looked up.
+SOURCE_NAME = re.compile(r"([0-9a-f]{64})\.pdf")
 # Custom graph stream events forwarded to clients; anything else stays server-side.
 STREAMED_FINDINGS = frozenset({"facet"})
 
@@ -98,6 +103,40 @@ def create_app(
     ) -> None:
         await deps.persistence.feedback(
             principal, str(body.thread_id), str(body.request_id), body.rating, body.comment,
+        )
+
+    @app.get("/api/v1/sources/{name}")
+    async def source(
+        name: str, request: Request, principal: Annotated[str, Depends(owner)],
+        deps: Annotated[AppServices, Depends(dependencies)],
+    ) -> Response:
+        """A cited source PDF, so the browser can open it on the cited page."""
+        match = SOURCE_NAME.fullmatch(name)
+        if deps.sources is None or match is None:
+            raise HTTPException(404, "Source not available")
+        digest = match[1]
+        try:
+            info = await deps.sources.stat(digest)
+        except SourceNotFound as error:
+            raise HTTPException(404, "Source not available") from error
+        headers = {
+            "Accept-Ranges": "bytes", "ETag": f'"{info.etag}"',
+            "Content-Disposition": 'inline; filename="source.pdf"',
+            "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff",
+        }
+        try:
+            span = byte_range(request.headers.get("range"), info.size)
+        except UnsatisfiableRange:
+            return Response(
+                status_code=416, headers={**headers, "Content-Range": f"bytes */{info.size}"},
+            )
+        start, end = span or (0, info.size)
+        if span:
+            headers["Content-Range"] = f"bytes {start}-{end - 1}/{info.size}"
+        headers["Content-Length"] = str(end - start)
+        return StreamingResponse(
+            deps.sources.read(digest, start, end), status_code=206 if span else 200,
+            media_type="application/pdf", headers=headers,
         )
 
     @app.post("/api/v1/chat")

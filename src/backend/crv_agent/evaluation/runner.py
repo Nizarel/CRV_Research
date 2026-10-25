@@ -10,12 +10,14 @@ import json
 import time
 from collections import defaultdict
 from collections.abc import Callable
+from datetime import UTC, datetime
 from math import ceil
 from statistics import mean, median
 from typing import Any
 from uuid import uuid4
 
 import httpx
+from pydantic import ValidationError
 
 from crv_agent.domain.answers import Answer
 from crv_agent.evaluation.dataset import GoldenQuestion
@@ -24,8 +26,21 @@ from crv_agent.evaluation.judge import FactJudge
 from crv_agent.evaluation.scoring import score
 
 
-async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
-    started = time.monotonic()
+async def ask(
+    client: httpx.AsyncClient, question: str,
+    *, emit_attempt: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    requested_at = datetime.now(UTC).isoformat()
+    request_id, thread_id = str(uuid4()), None
+    setup_seconds: float | None = None
+    schema_errors: list[dict[str, Any]] = []
+    schema_check_status = "not_received"
+    raw_answer_content: Any = None
+    execution_status = "error"
+    error_trace_id: str | None = None
+    if emit_attempt is not None:
+        emit_attempt({"event": "started", "request_id": request_id, "requested_at": requested_at})
     first_progress: float | None = None
     first_finding: float | None = None
     first_answer: float | None = None
@@ -38,8 +53,10 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
     try:
         created = await client.post("/api/v1/conversations")
         created.raise_for_status()
+        thread_id = created.json()["id"]
+        setup_seconds = time.perf_counter() - started
         async with client.stream("POST", "/api/v1/chat", json={
-            "thread_id": created.json()["id"], "request_id": str(uuid4()), "message": question,
+            "thread_id": thread_id, "request_id": request_id, "message": question,
         }) as response:
             response.raise_for_status()
             event = ""
@@ -49,7 +66,7 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
                 elif line.startswith("data: "):
                     data = json.loads(line.removeprefix("data: "))
                     if event == "progress":
-                        elapsed = time.monotonic() - started
+                        elapsed = time.perf_counter() - started
                         first_progress = first_progress or elapsed
                         steps.append(str(data.get("step")))
                         progress.append((str(data.get("step")), elapsed))
@@ -61,26 +78,58 @@ async def ask(client: httpx.AsyncClient, question: str) -> dict[str, Any]:
                     elif event == "plan":
                         plan = {"intent": data.get("intent"), "facets": data.get("facets") or []}
                     elif event == "facet" and data.get("claims"):
-                        first_finding = first_finding or time.monotonic() - started
+                        first_finding = first_finding or time.perf_counter() - started
                     elif event == "answer":
-                        first_answer = time.monotonic() - started
-                        answer = Answer.model_validate({
+                        first_answer = time.perf_counter() - started
+                        raw_answer_content = data.get("content")
+                        payload = {
                             key: value for key, value in data.items()
                             if key not in {"run_id", "sequence"}
-                        })
+                        }
+                        try:
+                            answer = Answer.model_validate(payload)
+                            schema_check_status = "valid"
+                        except ValidationError as exc:
+                            schema_check_status = "invalid"
+                            schema_errors = [dict(detail) for detail in exc.errors(
+                                include_input=False, include_url=False, include_context=False,
+                            )]
+                            error = "answer_schema_invalid"
                     elif event == "error":
                         error = str(data.get("error_type") or data.get("error"))
+                        error_trace_id = data.get("trace_id")
+        if answer is not None and error is None:
+            execution_status = "completed"
         if answer is None and error is None:
             error = "no_verified_answer"
+    except (httpx.TimeoutException, TimeoutError) as exc:
+        error, execution_status = type(exc).__name__, "timeout"
+    except asyncio.CancelledError:
+        if emit_attempt is not None:
+            emit_attempt({"event": "cancelled", "request_id": request_id,
+                          "latency_ms": 1000 * (time.perf_counter() - started)})
+        raise
     except (httpx.HTTPError, ValueError) as exc:
         error = f"{type(exc).__name__}"
-    return {
+    result = {
+        "request_id": request_id, "thread_id": thread_id, "requested_at": requested_at,
+        "trace_id": answer.trace_id if answer else error_trace_id,
+        "execution_status": execution_status,
+        "schema_valid": schema_check_status == "valid",
+        "schema_check_status": schema_check_status, "schema_errors": schema_errors,
+        "raw_answer_content": raw_answer_content, "setup_seconds": setup_seconds,
         "answer": answer, "error": error, "steps": steps,
         "step_seconds": step_durations(progress), "diagnostics": diagnostics, "plan": plan,
         "first_progress_seconds": first_progress, "first_finding_seconds": first_finding,
         "first_answer_seconds": first_answer,
-        "total_seconds": time.monotonic() - started,
+        "total_seconds": time.perf_counter() - started,
     }
+    if emit_attempt is not None:
+        emit_attempt({"event": "finished", "request_id": request_id, "thread_id": thread_id,
+                      "trace_id": result["trace_id"], "execution_status": execution_status,
+                      "schema_valid": result["schema_valid"], "error": error,
+                      "latency_ms": 1000 * result["total_seconds"]})
+    return result
 
 
 def step_durations(progress: list[tuple[str, float]]) -> dict[str, float]:
@@ -103,6 +152,26 @@ def compact(
     citations = answer.citations if answer else []
     sources = [c.source_path or c.source_uri for c in citations]
     return {
+        "record_version": "generation-v1",
+        "request_id": result.get("request_id"), "thread_id": result.get("thread_id"),
+        "requested_at": result.get("requested_at"),
+        "trace_id": answer.trace_id if answer else result.get("trace_id"),
+        "search_release": answer.search_release if answer else None,
+        "kg_release": answer.kg_release if answer else None,
+        "execution_status": result.get("execution_status", "error"),
+        "schema_valid": result.get("schema_valid", False),
+        "schema_check_status": result.get("schema_check_status", "not_received"),
+        "schema_errors": result.get("schema_errors", []),
+        "raw_answer_content": result.get("raw_answer_content"),
+        "latency_ms": 1000 * (result["first_answer_seconds"] or result["total_seconds"]),
+        "total_execution_ms": 1000 * result["total_seconds"],
+        "conversation_setup_ms": 1000 * result["setup_seconds"]
+        if result.get("setup_seconds") is not None else None,
+        "first_progress_ms": 1000 * result["first_progress_seconds"]
+        if result["first_progress_seconds"] is not None else None,
+        "first_finding_ms": 1000 * result["first_finding_seconds"]
+        if result["first_finding_seconds"] is not None else None,
+        "tool_call_count": None, "tool_trace_status": "unmeasured",
         "id": question.id, "category": question.category, "split": question.split,
         "arm": arm, "passage_mode": "split", "error": None,
         "turn_error": result["error"], "status": answer.status if answer else "error",
@@ -144,6 +213,7 @@ def compact(
                 c.model_dump(mode="json") for c in (answer.calculations if answer else [])
             ],
             "coverage_gaps": answer.coverage.gaps if answer else [],
+            "coverage": answer.coverage.model_dump() if answer else None,
             "reasons": answer.reasons if answer else [],
         },
         # The judged "context" is the answer text only (an empty answer scores zero).
@@ -223,6 +293,7 @@ async def evaluate(
     client: httpx.AsyncClient, questions: list[GoldenQuestion], judge: FactJudge | None = None,
     *, concurrency: int = 1, emit: Callable[[dict[str, Any]], None] | None = None,
     arm: str = "AGENT", emit_stages: Callable[[list[dict[str, Any]]], None] | None = None,
+    emit_attempt: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, object]:
     gate = asyncio.Semaphore(concurrency)
     records: list[dict[str, Any]] = []
@@ -231,8 +302,12 @@ async def evaluate(
     finding_latencies: list[float] = []
 
     async def one(question: GoldenQuestion) -> None:
+        def attempt(event: dict[str, Any]) -> None:
+            if emit_attempt is not None:
+                emit_attempt({"id": question.id, "arm": arm, **event})
+
         async with gate:
-            result = await ask(client, question.question)
+            result = await ask(client, question.question, emit_attempt=attempt)
         answer: Answer | None = result["answer"]
         if answer is not None:
             scores = score(question, answer)

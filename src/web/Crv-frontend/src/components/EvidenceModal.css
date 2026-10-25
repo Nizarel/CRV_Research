@@ -65,6 +65,35 @@
   background: var(--color-surface-hover);
 }
 
+.evidence-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.evidence-tabs button {
+  margin-bottom: -1px;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: none;
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+.evidence-tabs button:hover {
+  color: var(--color-text);
+}
+
+.evidence-tabs button.is-active {
+  border-color: var(--color-border);
+  border-bottom-color: var(--color-surface);
+  background: var(--color-surface);
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+
 .evidence-body {
   display: flex;
   flex-direction: column;

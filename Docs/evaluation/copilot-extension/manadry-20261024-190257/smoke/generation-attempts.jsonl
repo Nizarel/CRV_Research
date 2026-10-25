@@ -1,0 +1,4 @@
+{"id": "Q77", "arm": "MANADRY", "event": "started", "request_id": "be91d5af-da8b-40e5-a435-fc540e0e37e4", "requested_at": "2026-10-25T02:06:46.901061+00:00"}
+{"id": "Q279", "arm": "MANADRY", "event": "started", "request_id": "6eacbdfe-e575-449a-8eb6-f27fa818d00b", "requested_at": "2026-10-25T02:06:46.901591+00:00"}
+{"id": "Q279", "arm": "MANADRY", "event": "finished", "request_id": "6eacbdfe-e575-449a-8eb6-f27fa818d00b", "thread_id": "c77d9871-e0b3-40be-a687-638983ef5248", "trace_id": "04169ad3-bde4-463c-a2c0-0d3978b6c494", "execution_status": "completed", "schema_valid": true, "error": null, "latency_ms": 3743.5703999981342}
+{"id": "Q77", "arm": "MANADRY", "event": "finished", "request_id": "be91d5af-da8b-40e5-a435-fc540e0e37e4", "thread_id": "ec5acce8-7827-494b-9435-d43f01555791", "trace_id": "d6531fd2-2cee-42f5-9d6e-b3a9197a154d", "execution_status": "completed", "schema_valid": true, "error": null, "latency_ms": 24089.509199999156}

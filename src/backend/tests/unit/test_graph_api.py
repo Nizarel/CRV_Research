@@ -143,6 +143,22 @@ def test_clarification_emits_no_unsupported_answer() -> None:
         assert answer["citations"] == []
 
 
+@pytest.mark.parametrize("intent", ["out_of_scope", "procedure"])
+def test_out_of_scope_does_not_mislabel_an_ordinary_question_as_hazardous(intent: str) -> None:
+    with TestClient(create_app(services(FakeModels(intent)))) as client:
+        thread = client.post("/api/v1/conversations").json()
+        response = client.post("/api/v1/chat", json={
+            "thread_id": thread["id"], "request_id": str(uuid4()),
+            "message": "Current copper market price?",
+        })
+        payloads = [json.loads(line.removeprefix("data: "))
+                    for line in response.text.splitlines() if line.startswith("data: ")]
+        answer = next(payload for payload in payloads if "content" in payload)
+        assert answer["status"] == "out_of_scope"
+        assert ("hazardous" in answer["content"].lower()) is (intent == "procedure")
+        assert answer["citations"] == []
+
+
 def test_provider_failure_is_not_an_absence_answer() -> None:
     class Failed(FakeModels):
         async def plan(self, question: str, history: list[str], budget: Budget):
@@ -337,6 +353,54 @@ async def test_async_token_provider_models_close_without_sync_client() -> None:
     assert model.root_client is None and model.root_async_client is not None
     async with AsyncExitStack() as stack:
         close_clients(stack, model)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external", [False, True])
+async def test_external_foundry_chat_is_separate_from_retrieval_and_masks_key(
+    monkeypatch, external: bool,
+) -> None:
+    import os
+    from contextlib import AsyncExitStack
+
+    from crv_agent.runtime.infrastructure import create_chat_models
+    from crv_agent.runtime.settings import Settings
+
+    for name in [name for name in os.environ if name.upper().startswith("CRV_")]:
+        monkeypatch.delenv(name)
+    base = {
+        "search_endpoint": "https://search", "kg_release": "kg1", "postgres_host": "pg",
+        "postgres_user": "u", "kg_database": "kg", "memory_user": "m", "local_owner": "dev",
+        "openai_endpoint": "https://retrieval.example.invalid", "planner_deployment": "p",
+        "worker_deployment": "w", "answer_deployment": "a", "verifier_deployment": "v",
+    }
+    overrides = {
+        "model_endpoint": "https://manadry.cognitiveservices.azure.com/",
+        "model_api_key": "fake-test-key-not-a-credential",
+    } if external else {}
+    settings = Settings(**base, **overrides)
+
+    async def token() -> str:
+        return "test-entra-token"
+
+    async with AsyncExitStack() as stack:
+        models = create_chat_models(stack, settings, token)
+        expected = "https://manadry.cognitiveservices.azure.com/openai/v1/" if external else (
+            "https://retrieval.example.invalid/openai/v1/"
+        )
+        assert set(models) == {"planner", "worker", "answer", "verifier"}
+        assert all(model.openai_api_base == expected for model in models.values())
+        assert settings.openai_endpoint == "https://retrieval.example.invalid"
+        assert models["worker"].max_tokens == settings.worker_output_tokens
+        if external:
+            assert all(model.openai_api_key.get_secret_value() == overrides["model_api_key"]
+                       for model in models.values())
+            assert overrides["model_api_key"] not in repr(settings)
+            assert overrides["model_api_key"] not in settings.model_dump_json()
+    with pytest.raises(ValueError, match="explicit model endpoint"):
+        Settings(**base, model_api_key="fake-test-key-not-a-credential")
+    with pytest.raises(ValueError, match="HTTPS origin"):
+        Settings(**base, model_endpoint="http://manadry.cognitiveservices.azure.com/")
 
 
 @pytest.mark.asyncio
@@ -616,7 +680,7 @@ async def _status(models: FakeModels, worker: FakeWorker | None = None) -> str:
 
 
 @pytest.mark.asyncio
-async def test_status_is_partial_only_for_unanswered_or_lost_content() -> None:
+async def test_status_is_partial_only_for_unanswered_or_cut_short_content() -> None:
     from crv_agent.domain.answers import AnswerDraft, Verdict
     from crv_agent.domain.evidence import WorkerResult
     from crv_agent.domain.execution import BudgetExceeded
@@ -680,7 +744,7 @@ async def test_status_is_partial_only_for_unanswered_or_lost_content() -> None:
                 SOURCE, SOURCE.model_copy(update={"id": "S2", "chunk_id": "c2"}),
             ]
 
-    assert await _status(DropsClaim("synthesis"), TwoSources()) == "partial"
+    assert await _status(DropsClaim("synthesis"), TwoSources()) == "answered"
 
 
 def test_findings_list_only_unrejected_self_grounded_claims() -> None:

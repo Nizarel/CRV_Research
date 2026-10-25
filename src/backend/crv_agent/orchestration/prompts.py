@@ -64,9 +64,10 @@ answered, even if some sub-parts are missing (state them) or a premise is only u
 A year or date in the question is confirmed when a claim quotes it from the document itself
 (cover, report, approval or test date); a date seen solely in a filename is unconfirmed, not
 false.
-List in unanswered the parts the user explicitly asked for that the claims do not answer (one
-short phrase each). Leave it empty when every asked part is answered; details the user did not
-ask for, search limits and caveats are not unanswered parts.
+List in unanswered only the parts the question names explicitly (e.g. "et quels partenaires",
+"le budget") that the claims do not answer, one short phrase each. Never list the question's
+premises or dates, finer details of a part that is answered (durations, parameters, exact
+dates), search limits or caveats; leave it empty when each named part is answered.
 List in conflicts each pair or group of claims that report different values or descriptions
 for the same subject and quantity (by claim number); describe the difference in content
 without merging values.

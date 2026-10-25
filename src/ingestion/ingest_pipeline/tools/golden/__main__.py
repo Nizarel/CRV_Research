@@ -48,8 +48,13 @@ def _convert(args: argparse.Namespace) -> int:
 
 
 def load_golden(path: str) -> list[GoldenQuestion]:
+    from .business import BusinessQuestion
+
     lines = Path(path).read_text(encoding="utf-8").splitlines()
-    return [GoldenQuestion.model_validate_json(line) for line in lines if line.strip()]
+    return [
+        (BusinessQuestion if "evaluation" in json.loads(line) else GoldenQuestion)
+        .model_validate_json(line) for line in lines if line.strip()
+    ]
 
 
 def anchor_scores(question: GoldenQuestion, hits: Sequence[Hit], k: int) -> dict[str, Any]:
@@ -271,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     convert.add_argument("--xlsx", required=True)
     convert.add_argument("--sheet", default="Sheet2")
     convert.add_argument("--out", required=True)
+    business = commands.add_parser(
+        "import-business", help="Freeze stakeholder CSV as a separate suite",
+    )
+    business.add_argument("--csv", type=Path, required=True)
+    business.add_argument("--out", type=Path, required=True)
+    business.add_argument("--review", type=Path, required=True)
     sheet = commands.add_parser(
         "sources-sheet", help="Expert review sheet of proposed expected sources (offline)"
     )
@@ -289,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--scope", action="append")
     run.add_argument("--only", action="append", help="Question id (repeatable)")
     run.add_argument("--concurrency", type=int, default=6)
+    from .answer_compare import add_parser as add_compare_parser
+    from .answer_compare import run_compare
     from .audit import add_parser as add_audit_parser
     from .audit import run_audit
     from .score import add_parser as add_score_parser
@@ -299,7 +312,15 @@ def main(argv: list[str] | None = None) -> int:
     add_score_parser(commands)
     add_audit_parser(commands)
     add_review_parser(commands)
+    add_compare_parser(commands)
     args = parser.parse_args(argv)
+    if args.command == "import-business":
+        from .business import write_import
+
+        print(json.dumps(write_import(args.csv, args.out, args.review), ensure_ascii=True))
+        return 0
+    if args.command == "compare-answers":
+        return asyncio.run(run_compare(args))
     if args.command == "convert":
         return _convert(args)
     if args.command == "sources-sheet":

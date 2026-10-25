@@ -5,11 +5,13 @@ from dataclasses import dataclass
 import aiohttp
 from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
 from azure.search.documents.aio import SearchClient
+from azure.storage.blob.aio import ContainerClient
 from langchain_openai import ChatOpenAI
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
+from crv_agent.adapters.blob import BlobSources
 from crv_agent.adapters.knowledge import PostgresKnowledge
 from crv_agent.adapters.models import reject_unapproved_tracing
 from crv_agent.adapters.postgres.memory import entra_pool
@@ -30,6 +32,7 @@ class Infrastructure:
     kg_pool: Pool
     memory_pool: Pool | None
     models: dict[str, ChatOpenAI]
+    sources: BlobSources | None = None
 
 
 def close_clients(stack: AsyncExitStack, chat_model: ChatOpenAI) -> None:
@@ -38,6 +41,36 @@ def close_clients(stack: AsyncExitStack, chat_model: ChatOpenAI) -> None:
         stack.push_async_callback(chat_model.root_async_client.close)
     if chat_model.root_client is not None:
         stack.callback(chat_model.root_client.close)
+
+
+def create_chat_models(
+    stack: AsyncExitStack, settings: Settings,
+    token_provider: Callable[[], Awaitable[str]],
+) -> dict[str, ChatOpenAI]:
+    endpoint = (settings.model_endpoint or settings.openai_endpoint).rstrip("/")
+    if not endpoint.endswith("/openai/v1"):
+        endpoint += "/openai/v1"
+    api_key = (
+        settings.model_api_key.get_secret_value() if settings.model_api_key else token_provider
+    )
+    models: dict[str, ChatOpenAI] = {}
+    for role, deployment, effort in (
+        ("planner", settings.planner_deployment, settings.planner_reasoning_effort),
+        ("worker", settings.worker_deployment, settings.worker_reasoning_effort),
+        ("answer", settings.answer_deployment, settings.answer_reasoning_effort),
+        ("verifier", settings.verifier_deployment, settings.verifier_reasoning_effort),
+    ):
+        chat_model = ChatOpenAI(
+            model=deployment, base_url=endpoint + "/", api_key=api_key,
+            max_completion_tokens=(
+                settings.worker_output_tokens if role == "worker" else settings.output_tokens
+            ),
+            reasoning_effort=effort,
+            max_retries=settings.model_retries, timeout=60, include_response_headers=False,
+        )
+        close_clients(stack, chat_model)
+        models[role] = chat_model
+    return models
 
 
 @asynccontextmanager
@@ -58,30 +91,14 @@ async def infrastructure(
             credential, settings.postgres_host, settings.memory_database, settings.memory_user,
             read_only=False, root_cert=settings.postgres_root_cert,
         )) if memory else None
-        endpoint = settings.openai_endpoint.rstrip("/")
-        if not endpoint.endswith("/openai/v1"):
-            endpoint += "/openai/v1"
-        models: dict[str, ChatOpenAI] = {}
-        for role, deployment, effort in (
-            ("planner", settings.planner_deployment, settings.planner_reasoning_effort),
-            ("worker", settings.worker_deployment, settings.worker_reasoning_effort),
-            ("answer", settings.answer_deployment, settings.answer_reasoning_effort),
-            ("verifier", settings.verifier_deployment, settings.verifier_reasoning_effort),
-        ):
-            chat_model = ChatOpenAI(
-                model=deployment, base_url=endpoint + "/", api_key=token_provider,
-                max_completion_tokens=(
-                    settings.worker_output_tokens if role == "worker" else settings.output_tokens
-                ),
-                reasoning_effort=effort,
-                max_retries=settings.model_retries, timeout=60, include_response_headers=False,
-            )
-            close_clients(stack, chat_model)
-            models[role] = chat_model
+        models = create_chat_models(stack, settings, token_provider)
+        sources = BlobSources(await stack.enter_async_context(ContainerClient(
+            settings.sources_account_url, settings.sources_container, credential,
+        ))) if settings.sources_account_url else None
         yield Infrastructure(
             search=search,
             knowledge=PostgresKnowledge(kg_pool, settings.kg_scopes),
-            kg_pool=kg_pool, memory_pool=memory_pool, models=models,
+            kg_pool=kg_pool, memory_pool=memory_pool, models=models, sources=sources,
         )
 
 

@@ -154,10 +154,12 @@ async def research(
                     )
                 gaps.extend(result.gaps)
                 for claim in (anchor_claim(raw, found) for raw in result.claims):
-                    if not claim_errors(claim, evidence_by_id):
+                    errors = claim_errors(claim, evidence_by_id)
+                    if not errors:
                         claims[claim.model_dump_json()] = claim
                         accepted.append(claim)
                     else:
+                        logger.warning("worker_claim_rejected errors=%s", "; ".join(errors))
                         gaps.append("A worker claim failed source/locator/value validation.")
             except BudgetExceeded:
                 status = "budget_exhausted"

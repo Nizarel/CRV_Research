@@ -15,6 +15,7 @@ dependencies = [
     "langgraph-checkpoint-postgres==3.1.3",
     "azure-identity==1.25.3",
     "azure-search-documents==12.0.0",
+    "azure-storage-blob==12.30.0",
     "aiohttp>=3.12,<4",
     "psycopg[pool]==3.3.4",
     "psycopg-pool>=3.3,<4",
@@ -71,7 +72,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["azure.search.*", "azure.identity.*"]
+module = ["azure.search.*", "azure.identity.*", "azure.storage.*"]
 ignore_missing_imports = true
 
 [tool.importlinter]

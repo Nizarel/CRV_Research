@@ -7,6 +7,7 @@
     },
     "searchServiceName": { "value": "gptkb-awmc6icu2kueq" },
     "openAiAccountName": { "value": "cog-awmc6icu2kueq" },
+    "sourcesStorageAccountName": { "value": "stawmc6icu2kueq" },
     "tags": { "value": { "workload": "crv-research-agent", "environment": "dev" } }
   }
 }

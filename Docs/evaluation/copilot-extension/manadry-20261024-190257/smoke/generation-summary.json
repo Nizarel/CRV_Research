@@ -1,0 +1,262 @@
+{
+  "arm": "MANADRY",
+  "questions": 2,
+  "records": [
+    {
+      "id": "Q77",
+      "category": "A",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true
+      },
+      "answer_status": "answered",
+      "turn_error": null,
+      "judge_error": null,
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 8,
+        "model_calls": 5,
+        "reserved_tokens": 92231,
+        "input_tokens": 54636,
+        "output_tokens": 2811,
+        "cached_tokens": 0,
+        "reasoning_tokens": 416
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 1,
+          "input_tokens": 2252,
+          "output_tokens": 314,
+          "cached_tokens": 0,
+          "reasoning_tokens": 47,
+          "seconds": 4.919,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 661,
+          "output_tokens": 196,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 3.865,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 1,
+          "input_tokens": 3659,
+          "output_tokens": 361,
+          "cached_tokens": 0,
+          "reasoning_tokens": 44,
+          "seconds": 6.926,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "worker": {
+          "calls": 2,
+          "input_tokens": 48064,
+          "output_tokens": 1940,
+          "cached_tokens": 0,
+          "reasoning_tokens": 325,
+          "seconds": 12.977,
+          "models": {
+            "gpt-5.6-luna-2026-07-09": 2
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 3.948,
+        "research": 7.466,
+        "reconcile": 0.0,
+        "answer": 11.853
+      },
+      "first_progress_seconds": 0.6213215999996464,
+      "first_finding_seconds": 12.013176000000385,
+      "first_answer_seconds": 24.08597010000085,
+      "total_seconds": 24.089509199999156
+    },
+    {
+      "id": "Q279",
+      "category": "F",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": false,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true
+      },
+      "answer_status": "out_of_scope",
+      "turn_error": null,
+      "judge_error": null,
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 0,
+        "model_calls": 1,
+        "reserved_tokens": 5179,
+        "input_tokens": 631,
+        "output_tokens": 63,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "role_usage": {
+        "planner": {
+          "calls": 1,
+          "input_tokens": 631,
+          "output_tokens": 63,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 2.077,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 2.12,
+        "research": 0.0,
+        "reconcile": 0.0,
+        "answer": 0.105
+      },
+      "first_progress_seconds": 1.2538318000006257,
+      "first_finding_seconds": null,
+      "first_answer_seconds": 3.7394846999995934,
+      "total_seconds": 3.7435703999981342
+    }
+  ],
+  "metrics": {
+    "citation_contract_valid": {
+      "rate": 1,
+      "measured": 2,
+      "unmeasured": 0
+    },
+    "source_match": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 2
+    },
+    "numeric_exact": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 2
+    },
+    "abstention_correct": {
+      "rate": 0,
+      "measured": 1,
+      "unmeasured": 1
+    },
+    "conflict_flagged": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 2
+    },
+    "calculator_used": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 2
+    },
+    "catalogue_used": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 2
+    },
+    "key_fact_recall": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 2
+    },
+    "turn_completed": {
+      "rate": 1,
+      "measured": 2,
+      "unmeasured": 0
+    }
+  },
+  "statuses": {
+    "answered": 1,
+    "out_of_scope": 1
+  },
+  "turn_errors": {},
+  "first_answer_seconds_p50": 24.08597010000085,
+  "first_answer_seconds_p95": 24.08597010000085,
+  "first_finding_seconds_p50": 3.7394846999995934,
+  "first_finding_seconds_p95": 12.013176000000385,
+  "step_seconds_p50": {
+    "answer": 5.979,
+    "reconcile": 0.0,
+    "research": 3.733,
+    "understand": 3.034
+  },
+  "role_usage_mean": {
+    "answer": {
+      "calls": 0.5,
+      "seconds": 2.459,
+      "input_tokens": 1126,
+      "output_tokens": 157,
+      "reasoning_tokens": 23.5,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-6.1-sol-2026-09-29": 1
+      }
+    },
+    "planner": {
+      "calls": 1,
+      "seconds": 2.971,
+      "input_tokens": 646,
+      "output_tokens": 129.5,
+      "reasoning_tokens": 0,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-6.1-sol-2026-09-29": 2
+      }
+    },
+    "verifier": {
+      "calls": 0.5,
+      "seconds": 3.463,
+      "input_tokens": 1829.5,
+      "output_tokens": 180.5,
+      "reasoning_tokens": 22,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-6.1-sol-2026-09-29": 1
+      }
+    },
+    "worker": {
+      "calls": 1,
+      "seconds": 6.489,
+      "input_tokens": 24032,
+      "output_tokens": 970,
+      "reasoning_tokens": 162.5,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-5.6-luna-2026-07-09": 2
+      }
+    }
+  },
+  "gate_failures": [
+    "source_match: not measured",
+    "numeric_exact: not measured",
+    "abstention_correct: below 1.0",
+    "conflict_flagged: not measured",
+    "key_fact_recall_A: not measured",
+    "key_fact_recall_BC: not measured",
+    "calculator_used: not measured",
+    "catalogue_used: not measured"
+  ],
+  "gates_passed": false
+}

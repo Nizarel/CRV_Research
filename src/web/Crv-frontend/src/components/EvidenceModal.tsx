@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatPages, highlightSegments, quotesFor, sourceMeta, sourceTitle } from '../evidence'
+import {
+  citedPages,
+  formatPages,
+  highlightSegments,
+  quotesFor,
+  sourceDigest,
+  sourceMeta,
+  sourceTitle,
+} from '../evidence'
 import type { Answer, Evidence } from '../types'
 import { Icon } from './Icon'
+import { SourceDocument } from './SourceDocument'
 import './EvidenceModal.css'
 
 interface EvidenceModalProps {
@@ -14,6 +23,9 @@ interface EvidenceModalProps {
 export function EvidenceModal({ evidence, answer, number, onClose }: EvidenceModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [copied, setCopied] = useState(false)
+  const [view, setView] = useState<'extract' | 'document'>('extract')
+  const digest = sourceDigest(evidence)
+  const pages = citedPages(evidence)
   const quotes = quotesFor(answer, evidence.id)
   const segments = highlightSegments(evidence.content, quotes)
   const title = sourceTitle(evidence)
@@ -70,6 +82,32 @@ export function EvidenceModal({ evidence, answer, number, onClose }: EvidenceMod
           </button>
         </header>
 
+        {digest && (
+          <div className="evidence-tabs" role="tablist" aria-label="Affichage de la source">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'extract'}
+              className={view === 'extract' ? 'is-active' : ''}
+              onClick={() => setView('extract')}
+            >
+              Extrait
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'document'}
+              className={view === 'document' ? 'is-active' : ''}
+              onClick={() => setView('document')}
+            >
+              Document{pages.length === 1 ? ` (p. ${pages[0]})` : ''}
+            </button>
+          </div>
+        )}
+
+        {view === 'document' && digest ? (
+          <SourceDocument digest={digest} pages={pages} title={title} />
+        ) : (
         <div className="evidence-body">
           {evidence.generated && (
             <p className="evidence-warning" role="note">
@@ -132,6 +170,7 @@ export function EvidenceModal({ evidence, answer, number, onClose }: EvidenceMod
             </div>
           </section>
         </div>
+        )}
       </div>
     </dialog>
   )

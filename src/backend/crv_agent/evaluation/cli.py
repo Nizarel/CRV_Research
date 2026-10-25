@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--answers-out", type=Path,
                         help="JSONL answers in the shared golden `score` context format")
+    parser.add_argument("--attempts-out", type=Path,
+                        help="Separate JSONL of started/finished/cancelled generation attempts")
     parser.add_argument("--print-answers", action="store_true",
                         help="Also print answers (no source text) between markers")
     parser.add_argument("--arm", default="AGENT",
@@ -81,12 +83,30 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("Remote evaluation requires HTTPS")
     questions = load_questions(args.dataset, args.split)
     if args.question_id:
+        unknown = set(args.question_id) - {question.id for question in questions}
+        if unknown:
+            parser.error(f"Unknown selected question IDs: {sorted(unknown)}")
         questions = [q for q in questions if q.id in args.question_id]
     if not questions:
         parser.error("The selected split has no questions")
+    outputs = [path for path in (args.output, args.answers_out, args.stages_out, args.attempts_out)
+               if path is not None]
+    destinations = [path.resolve() for path in outputs]
+    if len(set(destinations)) != len(destinations) or args.dataset.resolve() in destinations:
+        parser.error("Dataset and output paths must be distinct")
+    if any(path.exists() for path in outputs):
+        parser.error("Refusing to overwrite evaluation artifacts; choose a new run directory")
+    for path in outputs:
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     answers = args.answers_out.open("w", encoding="utf-8") if args.answers_out else None
     stages = args.stages_out.open("w", encoding="utf-8") if args.stages_out else None
+    attempts = args.attempts_out.open("x", encoding="utf-8") if args.attempts_out else None
+
+    def emit_attempt(record: dict[str, Any]) -> None:
+        if attempts is not None:
+            attempts.write(json.dumps(record, ensure_ascii=False) + "\n")
+            attempts.flush()
 
     def emit(record: dict[str, Any]) -> None:
         if answers is not None:
@@ -110,7 +130,7 @@ def main(argv: list[str] | None = None) -> None:
             if not args.judge:
                 return await evaluate(
                     client, questions, concurrency=args.concurrency, emit=emit,
-                    arm=args.arm, emit_stages=emit_stages,
+                    arm=args.arm, emit_stages=emit_stages, emit_attempt=emit_attempt,
                 )
             endpoint = os.environ["CRV_OPENAI_ENDPOINT"].rstrip("/")
             if not endpoint.endswith("/openai/v1"):
@@ -127,7 +147,7 @@ def main(argv: list[str] | None = None) -> None:
                     return await evaluate(
                         client, questions, LangChainJudge(model),
                         concurrency=args.concurrency, emit=emit,
-                        arm=args.arm, emit_stages=emit_stages,
+                        arm=args.arm, emit_stages=emit_stages, emit_attempt=emit_attempt,
                     )
                 finally:
                     # An async token provider yields only an async client.
@@ -142,6 +162,8 @@ def main(argv: list[str] | None = None) -> None:
             answers.close()
         if stages is not None:
             stages.close()
+        if attempts is not None:
+            attempts.close()
     args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     summary = {key: value for key, value in report.items() if key != "records"}
     print(REPORT_BEGIN)

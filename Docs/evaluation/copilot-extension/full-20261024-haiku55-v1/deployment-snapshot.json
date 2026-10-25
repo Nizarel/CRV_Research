@@ -1,0 +1,25 @@
+{
+  "run_id": "full-20261024-haiku55-v1",
+  "cluster": "aks-crv-southcentralus",
+  "namespace": "crv",
+  "deployment": "crv-research-web",
+  "pod": "crv-research-web-58c7d565b8-6c2gk",
+  "backend_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f",
+  "web_image": "acrcrvscus.azurecr.io/crv-research-web@sha256:5a60280af8a8b485237061aafb0c03b8a869f2faf035b24d3fe66c1fd025620e",
+  "source_csv_sha256": "c6126beb9e4b3fea2345acd742ab147b5930a51c4f31a626535e5039049624e8",
+  "dataset": "golden/crv_golden_extension.jsonl",
+  "questions": 466,
+  "generation_concurrency": 2,
+  "judge_model": "claude-haiku-5.5",
+  "judge_transport": "cli",
+  "judge_repeats": 3,
+  "judge_concurrency": 2,
+  "calibration_reused": false,
+  "production_deployed_by_this_run": false,
+  "notes": [
+    "Capture a fresh baseline because the deployed image changed after calibration.",
+    "Search and knowledge-graph release pins are recorded from each actual answer.",
+    "Tool trace and billed-cost metrics remain unmeasured unless observed data is supplied.",
+    "Preserve all generation and judge failures in run accounting."
+  ]
+}

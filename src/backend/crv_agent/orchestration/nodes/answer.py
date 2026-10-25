@@ -25,7 +25,13 @@ async def answer(
             "Veuillez préciser le site, le document ou l'essai."
             if plan.language == "fr" else "Please specify the site, document or study."
         )
-    elif plan.intent in {"out_of_scope", "procedure"}:
+    elif plan.intent == "out_of_scope":
+        status, text = "out_of_scope", (
+            "Cette information ne peut pas être établie à partir du corpus documentaire disponible."
+            if plan.language == "fr" else
+            "This information cannot be established from the available document corpus."
+        )
+    elif plan.intent == "procedure":
         status, text = "out_of_scope", (
             "Cette demande dépasse ce backend de recherche documentaire. "
             "Les protocoles dangereux ne sont jamais synthétisés."
@@ -48,7 +54,7 @@ async def answer(
         }, ensure_ascii=False)
         draft: AnswerDraft | None = None
         verdict: Verdict | None = None
-        pruned = listed = dropped = False
+        pruned = listed = False
         try:
             for round_number in range(2):
                 composed = await context.models.compose(
@@ -74,7 +80,6 @@ async def answer(
                     if candidate is not None and not verify_draft(
                         candidate, evidence, context.search_release, state["calculations"],
                     ):
-                        dropped = len(candidate.claims) < len(draft.claims)
                         draft, reasons, pruned = candidate, [], True
                         break
                 # Converge on the single repair: drop exactly the claims the verifier rejected,
@@ -94,7 +99,6 @@ async def answer(
             if candidate is not None and not verify_draft(
                 candidate, evidence, context.search_release, state["calculations"],
             ):
-                dropped = len(candidate.claims) < len(draft.claims)
                 draft, reasons, pruned = candidate, [], True
             elif (
                 candidate := findings(draft, verdict, state["calculations"], plan.language)
@@ -110,9 +114,9 @@ async def answer(
         else:
             text, claims = draft.content, draft.claims
             conflicts = answer_conflicts(draft, state["claims"], state["conflicts"])
-            # Coverage gaps are always-present caveats; only lost or unanswered content is partial.
+            # Removed claims are listed in reasons; only unanswered or cut-short work is partial.
             status = "insufficient_evidence" if draft.insufficient else (
-                "partial" if draft.unanswered or state["coverage"].incomplete or dropped or listed
+                "partial" if draft.unanswered or state["coverage"].incomplete or listed
                 else "answered"
             )
             if pruned:
