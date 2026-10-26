@@ -13,10 +13,12 @@ from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
-from .answer_compare import ComparisonVerdict
+from pydantic import BaseModel, ConfigDict
+
+from .answer_compare import ComparisonVerdict, FactComparison, validate_verdict
 from .business import BusinessQuestion
 from .dataset import GoldenQuestion
 
@@ -29,16 +31,93 @@ INSTRUCTIONS = (
     "bounds, dates, sample/site attribution, qualifiers, and laboratory/pilot/industrial scale. "
     "Behavior instructions in a reference describe what the answer must DO, not text to repeat. "
     "Explicitly optional reference details need not appear; judge required meaning, not wording. "
+    "A report identifier, administrative heading, project title or administrative owner is not "
+    "a required finding merely because it prefixes the reference: require it when the question "
+    "asks for it or it materially disambiguates the requested finding. Do not downgrade an "
+    "otherwise complete answer solely for those locator/context omissions. Sample identifiers, "
+    "lot identities, quantities, units, dates, site attribution and material qualifiers remain "
+    "required when they answer or disambiguate the question. "
     "Correct lack-of-evidence responses, premise corrections, unresolved decisions and explicitly "
     "allowed external explanations can pass. Distinguish external explanations from corpus facts. "
     "A pass requires all reference elements and expected behavior, with no material contradiction "
     "or numeric error. Partial means useful correct content with missing required elements, not a "
-    "critical error. Critical errors or fabrication fail. An ambiguous reference needs_review. "
+    "critical error. Partial requires at least one core requested finding: a report header, "
+    "reception date or related background alone does not answer a question about results. If none "
+    "of the core requested findings is supplied, fail, unless abstention or premise correction "
+    "is the expected behavior. Critical errors or fabrication fail. An ambiguous reference "
+    "needs_review. Nonempty reference_review.notes are pre-existing reference-quality concerns "
+    "and require needs_review; they do not establish answer correctness or stakeholder approval. "
     "Extra information absent from the summary is not automatically false; flag it as unverified "
     "when sources are unavailable. Do not certify citations from filenames or generated quotes. "
     "Use exact nonempty excerpts from each reference element and actual answer; use null "
     "for an absent generated excerpt. Give short evidence-based explanations, not chain-of-thought."
 )
+INDEXED_INSTRUCTIONS = INSTRUCTIONS + (
+    " The SDK response schema uses start_line and end_line instead of copied excerpt text. "
+    "Select an inclusive, 1-based contiguous range from generated_answer_lines that supports "
+    "each fact judgment; use null for BOTH boundaries when no supporting text exists. "
+    "Never invent line numbers. Reference text is resolved from the supplied fact index; "
+    "answer quotes are copied verbatim by the evaluator from the selected original lines. "
+    "Do not output expected_excerpt or generated_excerpt fields. "
+    "Every matched, partial or contradicted fact must have a nonempty supporting range; an "
+    "entirely absent fact is missing. An acknowledgment of unavailable evidence still has "
+    "quotable answer lines; do not return null boundaries for a matched acknowledgment. "
+    "A pass requires expected_behavior_met=true, reference_ambiguous=false and all facts matched."
+)
+
+
+class IndexedFactComparison(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    index: int
+    result: Literal["matched", "partial", "missing", "contradicted"]
+    start_line: int | None
+    end_line: int | None
+    explanation: str
+
+
+class IndexedComparisonVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    verdict: Literal["pass", "partial", "fail", "needs_review"]
+    expected_behavior_met: bool
+    reference_ambiguous: bool
+    facts: list[IndexedFactComparison]
+    issues: list[str]
+    rationale: str
+
+
+def json_content(content: str) -> str:
+    content = content.strip()
+    wrapped = re.fullmatch(r"```(?:json)?\s*\n(.*)\n```", content, re.DOTALL)
+    return wrapped.group(1) if wrapped else content
+
+
+def indexed_comparison(
+    content: str, question: GoldenQuestion, answer: str,
+) -> ComparisonVerdict:
+    received = IndexedComparisonVerdict.model_validate_json(json_content(content))
+    lines = answer.splitlines(keepends=True)
+    facts = []
+    for fact in received.facts:
+        if not 1 <= fact.index <= len(question.key_facts):
+            raise ValueError("Judge reference index is outside the frozen reference")
+        excerpt = None
+        if fact.start_line is not None or fact.end_line is not None:
+            if (
+                fact.start_line is None or fact.end_line is None
+                or not 1 <= fact.start_line <= fact.end_line <= len(lines)
+            ):
+                raise ValueError("Judge answer line range is invalid")
+            excerpt = "".join(lines[fact.start_line - 1:fact.end_line])
+        facts.append(FactComparison(
+            index=fact.index, result=fact.result,
+            expected_excerpt=question.key_facts[fact.index - 1].text,
+            generated_excerpt=excerpt, explanation=fact.explanation,
+        ))
+    result = ComparisonVerdict(**received.model_dump(exclude={"facts"}), facts=facts)
+    validate_verdict(question, answer, result)
+    return result
 
 
 def session_options(model: str, deny: Any) -> dict[str, Any]:
@@ -73,6 +152,9 @@ def judge_payload(question: GoldenQuestion, answer: str) -> dict[str, Any]:
         ],
         "expected_behavior": metadata.behavior if metadata else "answer",
         "external_knowledge": metadata.external_knowledge if metadata else "not_requested",
+        "reference_review": {
+            "status": metadata.review_status, "notes": list(metadata.review_notes),
+        } if metadata else None,
         "generated_answer": answer,
     }
 
@@ -147,11 +229,7 @@ def parse_cli_output(output: str) -> tuple[ComparisonVerdict, dict[str, Any]]:
             )
     if not messages:
         raise ValueError("Copilot CLI produced no final assistant message")
-    content = messages[-1].strip()
-    wrapped = re.fullmatch(r"```(?:json)?\s*\n(.*)\n```", content, re.DOTALL)
-    if wrapped:
-        content = wrapped.group(1)
-    return ComparisonVerdict.model_validate_json(content), {"events": usage}
+    return ComparisonVerdict.model_validate_json(json_content(messages[-1])), {"events": usage}
 
 
 class CopilotCLIJudge:
@@ -221,6 +299,7 @@ class JudgeCallError(RuntimeError):
         super().__init__(message)
         self.usage = usage
         self.received_content = received_content
+        self.validation_error = message if received_content is not None else None
 
 
 class CopilotNodeSDKJudge:
@@ -250,7 +329,8 @@ class CopilotNodeSDKJudge:
         )
         try:
             await self._send({"sdk_path": str(sdk), "cli_path": cli_path, "model": self.model,
-                              "instructions": INSTRUCTIONS, "timeout_ms": int(self.timeout * 1000)})
+                              "instructions": INDEXED_INSTRUCTIONS,
+                              "timeout_ms": int(self.timeout * 1000)})
             ready = json.loads(await asyncio.wait_for(self.process.stdout.readline(), self.timeout))
             if ready.get("event") != "ready" or ready.get("model") != self.model:
                 raise RuntimeError("Copilot SDK initialization or authentication failed")
@@ -297,19 +377,24 @@ class CopilotNodeSDKJudge:
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
         try:
+            payload = judge_payload(question, answer)
+            payload["generated_answer_lines"] = [
+                {"line": index, "text": line}
+                for index, line in enumerate(answer.splitlines(keepends=True), 1)
+            ]
+            del payload["generated_answer"]
             await self._send({"id": request_id, "operation": "compare",
-                              "payload": judge_payload(question, answer),
-                              "schema": ComparisonVerdict.model_json_schema()})
+                              "payload": payload,
+                              "schema": IndexedComparisonVerdict.model_json_schema()})
             response = await asyncio.wait_for(future, self.timeout + 20)
-            usage = {**response.get("usage", {}), "runtime_version": self.runtime_version}
+            usage = {**response.get("usage", {}), "runtime_version": self.runtime_version,
+                     "response_contract": "indexed-lines-v1"}
             if response.get("status") != "ok":
                 raise JudgeCallError(response.get("error_type", "SDKError"), usage)
-            event = json.dumps({"type": "assistant.message",
-                                "data": {"content": response["content"]}})
             try:
-                result, _ = parse_cli_output(event)
+                result = indexed_comparison(response["content"], question, answer)
             except ValueError as error:
-                raise JudgeCallError(type(error).__name__, usage, response["content"]) from error
+                raise JudgeCallError(str(error), usage, response["content"]) from error
             return result, usage
         finally:
             self.pending.pop(request_id, None)

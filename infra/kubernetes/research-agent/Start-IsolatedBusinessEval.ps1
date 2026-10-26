@@ -11,6 +11,14 @@ Without Apply, only validates the source configuration and prints a safe snapsho
 Unique DNS-safe evaluation run identifier.
 .PARAMETER Apply
 Create the isolated resources. No ingress or production selector is used.
+.PARAMETER Diagnostics
+Enable source-bearing diagnostics only on the isolated loopback/local-owner backend.
+.PARAMETER CodeOverlay
+Relative Python module paths below OverlayRoot for an explicit candidate.
+.PARAMETER OverlayRoot
+Candidate package root; defaults to src/backend/crv_agent. Use generated ablation sources here.
+.PARAMETER RenderCodePath
+Optional local JSON archive of generated Python source only, never credentials.
 .EXAMPLE
 ./Start-IsolatedBusinessEval.ps1 -RunId manadry-20261024-v1 -Apply
 .NOTES
@@ -26,6 +34,10 @@ param(
     [string] $SourceDeployment = 'crv-research-web',
     [string] $Vault = 'kv-awmc6icu2kueq',
     [string] $SecretName = 'manadry-di-key',
+    [switch] $Diagnostics,
+    [string[]] $CodeOverlay = @(),
+    [string] $OverlayRoot,
+    [string] $RenderCodePath,
     [switch] $Apply
 )
 $ErrorActionPreference = 'Stop'
@@ -36,6 +48,7 @@ $CodeName = "$Name-code"
 $CredentialName = "$Name-model"
 $Output = Join-Path $Repo "Docs/evaluation/copilot-extension/$RunId"
 $KubeArgs = @('--kubeconfig', $Kubeconfig, '-n', $Namespace)
+$OverlayRoot = (Resolve-Path ($OverlayRoot ? $OverlayRoot : (Join-Path $Repo 'src/backend/crv_agent'))).Path
 
 function Get-KubeObject([string] $Kind, [string] $ObjectName) {
     $Text = & kubectl @KubeArgs get $Kind $ObjectName -o json --request-timeout=30s
@@ -54,6 +67,13 @@ function Set-ContainerSetting([hashtable] $Container, [string] $Setting, [hashta
         @(@{ name = $Setting } + $Value)
 }
 
+function Replace-UniquePythonText([string] $Text, [string] $Old, [string] $New) {
+    if ([regex]::Matches($Text, [regex]::Escape($Old)).Count -ne 1) {
+        throw 'Installed diagnostic instrumentation anchor changed'
+    }
+    return $Text.Replace($Old, $New)
+}
+
 if ($MyInvocation.InvocationName -ne '.') {
     $Source = Get-KubeObject deployment $SourceDeployment
     $Pod = $Source.spec.template.spec
@@ -70,7 +90,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         throw 'Source ConfigMap contains secret-shaped settings; do not copy into a ConfigMap'
     }
     $SettingsPath = Join-Path $Repo 'src/backend/crv_agent/runtime/settings.py'
-    $InstalledText = & kubectl @KubeArgs exec "deployment/$SourceDeployment" -c backend -- python -P -c 'import json,importlib.util; from pathlib import Path; root=Path(importlib.util.find_spec("crv_agent").origin).parent; print(json.dumps({"package_root":str(root),"infrastructure":(root/"runtime"/"infrastructure.py").read_text()}))'
+    $InstalledText = & kubectl @KubeArgs exec "deployment/$SourceDeployment" -c backend -- python -P -c 'import json,importlib.util; from pathlib import Path; root=Path(importlib.util.find_spec("crv_agent").origin).parent; print(json.dumps({"package_root":str(root),"infrastructure":(root/"runtime"/"infrastructure.py").read_text(),"api":(root/"api"/"app.py").read_text(),"answer":(root/"orchestration"/"nodes"/"answer.py").read_text(),"research":(root/"orchestration"/"nodes"/"research.py").read_text()}))'
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the installed serving package' }
     $Installed = $InstalledText | ConvertFrom-Json -AsHashtable
     $EndpointAnchor = 'endpoint = settings.openai_endpoint.rstrip("/")'
@@ -89,6 +109,66 @@ if ($MyInvocation.InvocationName -ne '.') {
         'settings.py' = [IO.File]::ReadAllText($SettingsPath)
         'infrastructure.py' = $InfrastructureCode
     }
+    $MountFiles = @{
+        'runtime/settings.py' = 'settings.py'
+        'runtime/infrastructure.py' = 'infrastructure.py'
+    }
+    if ($Diagnostics) {
+        $Code['api-app.py'] = Replace-UniquePythonText $Installed.api `
+            'if chunk.get("event") in STREAMED_FINDINGS:' `
+            'if chunk.get("event") in STREAMED_FINDINGS or (deps.diagnostics and chunk.get("event") == "answer_diagnostics"):'
+        $MountFiles['api/app.py'] = 'api-app.py'
+        $AnswerCode = Replace-UniquePythonText $Installed.answer `
+            'from langgraph.runtime import Runtime' `
+            "from langgraph.runtime import Runtime`nfrom langgraph.config import get_stream_writer"
+        $TraceSetup = @'
+    context, plan = runtime.context, state["plan"]
+    writer = get_stream_writer() if context.diagnostics else None
+    def audit(stage: str, **payload: object) -> None:
+        if writer is not None:
+            writer({"event": "answer_diagnostics", "stage": stage, **payload})
+    audit("input", claims=[claim.model_dump(mode="json") for claim in state["claims"]], coverage=state["coverage"].model_dump(), calculations=[item.model_dump(mode="json") for item in state["calculations"]])
+'@
+        $AnswerCode = Replace-UniquePythonText $AnswerCode `
+            '    context, plan = runtime.context, state["plan"]' $TraceSetup
+        $CommentAnchor = '                # Draft, verdict and reasons only change together, so a budget stop below'
+        $AnswerCode = Replace-UniquePythonText $AnswerCode $CommentAnchor `
+            ('                audit("verified", round=round_number + 1, draft=composed.model_dump(mode="json"), verifier=judged.model_dump(mode="json"), deterministic_errors=checked)' + "`n" + $CommentAnchor)
+        $AnswerCode = [regex]::Replace(
+            $AnswerCode, '(?m)^([ ]*)draft, reasons, pruned = candidate, \[\], True$',
+            '$0' + "`n" + '$1audit("pruned", draft=candidate.model_dump(mode="json"))'
+        )
+        $AnswerCode = [regex]::Replace(
+            $AnswerCode, '(?m)^([ ]*)draft, reasons, listed = candidate, \[\], True$',
+            '$0' + "`n" + '$1audit("findings", draft=candidate.model_dump(mode="json"))'
+        )
+        $Code['answer-trace.py'] = Replace-UniquePythonText $AnswerCode `
+            '    return {"answer": result}' `
+            ('    audit("final", answer=result.model_dump(mode="json"))' + "`n" + '    return {"answer": result}')
+        $MountFiles['orchestration/nodes/answer.py'] = 'answer-trace.py'
+        $Code['research-trace.py'] = Replace-UniquePythonText $Installed.research `
+            'audit.append(facet_audit(facet.question, status, result, evidence_by_id))' `
+            'audit.append(facet_audit(facet.question, status, result, evidence_by_id)); audit[-1].update({"scope_hashes": scope, "strict": strict})'
+        $MountFiles['orchestration/nodes/research.py'] = 'research-trace.py'
+    }
+    foreach ($Relative in $CodeOverlay) {
+        if ($Relative -notmatch '^[a-zA-Z0-9_/-]+\.py$' -or $Relative -match '^runtime/') {
+            throw 'Candidate overlays must be safe non-runtime Python module paths'
+        }
+        $Path = Join-Path $OverlayRoot $Relative
+        $Key = $Relative.Replace('/', '__')
+        $Code[$Key] = [IO.File]::ReadAllText($Path)
+        $MountFiles[$Relative] = $Key
+    }
+    $OverlayHashes = @{}
+    foreach ($Module in $MountFiles.Keys) {
+        $OverlayHashes[$Module] = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($Code[$MountFiles[$Module]])
+        )).ToLowerInvariant()
+    }
+    $Code | ConvertTo-Json -Depth 10 -Compress |
+        & (Join-Path $Repo 'src/backend/.venv/Scripts/python.exe') -c 'import ast,json,sys; modules=json.load(sys.stdin); [ast.parse(text,filename=name) for name,text in modules.items()]; print("Python overlay syntax verified: "+str(len(modules)))'
+    if ($LASTEXITCODE -ne 0) { throw 'Generated Python overlay syntax failed' }
     $Snapshot = [ordered]@{
         run_id = $RunId
         captured_at = [DateTime]::UtcNow.ToString('o')
@@ -104,9 +184,17 @@ if ($MyInvocation.InvocationName -ne '.') {
             [Text.Encoding]::UTF8.GetBytes($InfrastructureCode)
         )).ToLowerInvariant()
         package_root = $Installed.package_root
+        diagnostics_enabled = [bool] $Diagnostics
+        module_overlays = $OverlayHashes
+        overlay_root = [IO.Path]::GetRelativePath($Repo, $OverlayRoot).Replace('\', '/')
         judge = @{ provider = 'github-copilot-sdk'; model = 'claude-haiku-5.5'; sdk_version = '1.0.26' }
         resources = @{ deployment = $Name; native_config = $NativeName; code_config = $CodeName; credential = $CredentialName }
         production_deployment_changed = $false
+    }
+    if ($RenderCodePath) {
+        if (Test-Path $RenderCodePath) { throw 'Refusing to overwrite a rendered source archive' }
+        $Code | ConvertTo-Json -Depth 20 -EscapeHandling EscapeNonAscii |
+            Set-Content $RenderCodePath -Encoding utf8
     }
     if (-not $Apply) {
         $Snapshot | ConvertTo-Json -Depth 10
@@ -125,10 +213,14 @@ if ($MyInvocation.InvocationName -ne '.') {
         valueFrom = @{ secretKeyRef = @{ name = $CredentialName; key = 'api-key' } }
     }
     Set-ContainerSetting $Backend 'CRV_LOCAL_OWNER' @{ value = $RunId }
-    Set-ContainerSetting $Backend 'CRV_EVAL_DIAGNOSTICS' @{ value = 'false' }
+    Set-ContainerSetting $Backend 'CRV_EVAL_DIAGNOSTICS' @{
+        value = $Diagnostics.IsPresent.ToString().ToLowerInvariant()
+    }
     $Backend.volumeMounts = @($Backend.volumeMounts) + @(
-        @{ name = 'eval-code'; mountPath = "$($Installed.package_root)/runtime/settings.py"; subPath = 'settings.py'; readOnly = $true },
-        @{ name = 'eval-code'; mountPath = "$($Installed.package_root)/runtime/infrastructure.py"; subPath = 'infrastructure.py'; readOnly = $true }
+        foreach ($Module in $MountFiles.Keys) {
+            @{ name = 'eval-code'; mountPath = "$($Installed.package_root)/$Module";
+               subPath = $MountFiles[$Module]; readOnly = $true }
+        }
     )
     $Pod.containers = @($Backend)
     $UsedVolumes = @($Backend.volumeMounts | ForEach-Object name)

@@ -149,3 +149,104 @@ def test_cli_requires_live_confirmation_and_explicit_heldout() -> None:
     with pytest.raises(SystemExit):
         evaluation.main(["--golden", "g.jsonl", "--split", "heldout", "--confirm-live"])
     assert set(ARMS) >= {"A0", "A1", "P16", "CAP", "LLM", "DEC", "KGB", "CEIL", "AAR"}
+
+
+def test_direct_search_audit_separates_question_queries_from_reference_oracle() -> None:
+    from crv_agent.evaluation.search_audit import probe_queries
+
+    row = {"question": "Which lots contained organic matter?",
+           "expected_answer": "Report CR/AR/FM/RP/42/18: two positive lots"}
+    lexical, hybrid, oracle = probe_queries(row)
+    assert lexical["text"] == hybrid["text"] == row["question"]
+    assert not lexical["oracle"] and not hybrid["oracle"]
+    assert oracle["oracle"] and oracle["text"] == '"CR/AR/FM/RP/42/18"'
+    assert probe_queries({**row, "expected_answer": "Procedure CR/RC/P/01.00"})[-1][
+        "text"
+    ] == '"CR/RC/P/01.00"'
+    assert probe_queries({**row, "expected_answer": "Reference without a report code"})[-1][
+        "text"
+    ] == "Reference without a report code"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hybrid", [False, True])
+async def test_direct_search_audit_preserves_release_scope_full_passages_and_ranks(hybrid) -> None:
+    from crv_agent.evaluation.search_audit import query
+
+    content = "Full original source text.\n" * 100
+
+    class Rows:
+        async def get_count(self):
+            return 2
+
+        async def __aiter__(self):
+            for projection_id in ("source-1", "source-2"):
+                yield {"projection_id": projection_id, "content": content,
+                       "release_id": "released", "original_page_numbers": [2, 3],
+                       "@search.score": 1.5}
+
+    class Client:
+        async def search(self, **kwargs):
+            assert kwargs["filter"] == "release_id eq 'released'"
+            assert kwargs["search_text"] == "Original question"
+            assert kwargs["top"] == 2
+            assert (kwargs["query_type"] == "semantic") is hybrid
+            if hybrid:
+                assert kwargs["vector_queries"][0].text == "Original question"
+            return Rows()
+
+    result = await query(
+        Client(), {"id": "Q398"},
+        {"arm": "question_hybrid" if hybrid else "question_lexical",
+         "text": "Original question", "oracle": False}, "released", 2,
+    )
+    assert result["error"] is None and result["total_count"] == 2
+    assert [hit["rank"] for hit in result["hits"]] == [1, 2]
+    assert result["hits"][0]["content"] == content
+    assert result["hits"][0]["original_page_numbers"] == [2, 3]
+
+
+@pytest.mark.asyncio
+async def test_direct_search_audit_records_query_failures_without_dropping_the_case() -> None:
+    from crv_agent.evaluation.search_audit import query
+
+    class Unavailable:
+        async def search(self, **kwargs):
+            raise ConnectionError("private endpoint unavailable")
+
+    result = await query(
+        Unavailable(), {"id": "Q398"},
+        {"arm": "question_lexical", "text": "Question", "oracle": False}, "released", 2,
+    )
+    assert result["id"] == "Q398"
+    assert result["error"] == "ConnectionError"
+    assert result["hits"] == [] and result["total_count"] is None
+    assert result["latency_ms"] > 0
+
+
+def test_direct_search_document_followup_requires_one_question() -> None:
+    from crv_agent.evaluation.search_audit import main
+
+    with pytest.raises(SystemExit):
+        main([
+            "--comparisons", "saved.jsonl", "--out-dir", "audit",
+            "--endpoint", "https://search.test", "--index", "evidence",
+            "--document-hash", "a" * 64, "--confirm-live",
+        ])
+
+
+def test_direct_search_document_followup_can_read_a_large_scoped_document(monkeypatch) -> None:
+    from crv_agent.evaluation import search_audit
+
+    async def fake_audit(args):
+        assert args.top == 1000
+        assert args.only == ["Q111"]
+        assert args.document_hash == ["a" * 64]
+        return {"questions": 1}
+
+    monkeypatch.setattr(search_audit, "audit", fake_audit)
+    assert search_audit.main([
+        "--comparisons", "saved.jsonl", "--out-dir", "audit",
+        "--endpoint", "https://search.test", "--index", "evidence",
+        "--document-hash", "a" * 64, "--only", "Q111", "--top", "1000", "--confirm-live",
+    ]) == 0

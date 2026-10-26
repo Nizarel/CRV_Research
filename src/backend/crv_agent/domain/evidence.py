@@ -101,6 +101,7 @@ class CalculationRequest(Contract):
     operation: str
     input_claims: list[int]
     target_unit: str | None
+    comparison_claim: int | None = None
 
 
 class Calculation(Contract):
@@ -109,3 +110,5 @@ class Calculation(Contract):
     value: Decimal
     unit: str
     evidence_ids: list[str]
+    # Some cited input is approximate (~), so the derived value is approximate too.
+    approximate: bool = False

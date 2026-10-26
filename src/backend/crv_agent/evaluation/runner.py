@@ -7,6 +7,7 @@ run or silently shrink the denominator. Answers can be exported in the shared co
 
 import asyncio
 import json
+import re
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -25,10 +26,14 @@ from crv_agent.evaluation.gates import gate_failures
 from crv_agent.evaluation.judge import FactJudge
 from crv_agent.evaluation.scoring import score
 
+# Research reports a failed facet in coverage gaps; the turn still "completes" without it.
+_FACET_FAILED = re.compile(r"A research facet failed \((\w+)\)")
+
 
 async def ask(
     client: httpx.AsyncClient, question: str,
     *, emit_attempt: Callable[[dict[str, Any]], None] | None = None,
+    emit_trace: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     requested_at = datetime.now(UTC).isoformat()
@@ -65,6 +70,11 @@ async def ask(
                     event = line.removeprefix("event: ")
                 elif line.startswith("data: "):
                     data = json.loads(line.removeprefix("data: "))
+                    if emit_trace is not None:
+                        emit_trace({
+                            "event": event, "request_id": request_id, "thread_id": thread_id,
+                            "latency_ms": 1000 * (time.perf_counter() - started), "data": data,
+                        })
                     if event == "progress":
                         elapsed = time.perf_counter() - started
                         first_progress = first_progress or elapsed
@@ -294,6 +304,7 @@ async def evaluate(
     *, concurrency: int = 1, emit: Callable[[dict[str, Any]], None] | None = None,
     arm: str = "AGENT", emit_stages: Callable[[list[dict[str, Any]]], None] | None = None,
     emit_attempt: Callable[[dict[str, Any]], None] | None = None,
+    emit_trace: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, object]:
     gate = asyncio.Semaphore(concurrency)
     records: list[dict[str, Any]] = []
@@ -306,8 +317,15 @@ async def evaluate(
             if emit_attempt is not None:
                 emit_attempt({"id": question.id, "arm": arm, **event})
 
+        def trace_event(event: dict[str, Any]) -> None:
+            if emit_trace is not None:
+                emit_trace({"id": question.id, "arm": arm, **event})
+
         async with gate:
-            result = await ask(client, question.question, emit_attempt=attempt)
+            result = await ask(
+                client, question.question, emit_attempt=attempt,
+                emit_trace=trace_event if emit_trace is not None else None,
+            )
         answer: Answer | None = result["answer"]
         if answer is not None:
             scores = score(question, answer)
@@ -323,6 +341,11 @@ async def evaluate(
                 "key_fact_recall": None,
             }
         scores["turn_completed"] = answer is not None
+        facet_errors = sorted({
+            match[1] for gap in (answer.coverage.gaps if answer else [])
+            if (match := _FACET_FAILED.match(gap))
+        })
+        scores["research_complete"] = answer is not None and not facet_errors
         judge_error: str | None = None
         if judge is not None and question.key_facts and not question.must_abstain:
             grades: list[bool] | None = [False] * len(question.key_facts)
@@ -352,6 +375,7 @@ async def evaluate(
             "id": question.id, "category": question.category, "split": question.split,
             "scores": scores, "answer_status": answer.status if answer else "error",
             "turn_error": result["error"], "judge_error": judge_error,
+            "facet_errors": facet_errors,
             "retrieval_mode": answer.retrieval_mode if answer else None,
             "usage": answer.usage if answer else {},
             "role_usage": {
@@ -388,6 +412,10 @@ async def evaluate(
         "turn_errors": {
             error: sum(1 for r in records if r["turn_error"] == error)
             for error in sorted({str(r["turn_error"]) for r in records if r["turn_error"]})
+        },
+        "facet_errors": {
+            error: sum(1 for r in records if error in r["facet_errors"])
+            for error in sorted({e for r in records for e in r["facet_errors"]})
         },
         "first_answer_seconds_p50": p50, "first_answer_seconds_p95": p95,
         "first_finding_seconds_p50": percentile(finding_latencies, 0.5),

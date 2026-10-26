@@ -193,7 +193,9 @@ def create_app(
                                 raise asyncio.CancelledError
                             chunk = cast(dict[str, Any], streamed)
                             if mode == "custom":
-                                if chunk.get("event") in STREAMED_FINDINGS:
+                                if chunk.get("event") in STREAMED_FINDINGS or (
+                                    deps.diagnostics and chunk.get("event") == "answer_diagnostics"
+                                ):
                                     yield event(chunk["event"], {
                                         key: value for key, value in chunk.items()
                                         if key != "event"

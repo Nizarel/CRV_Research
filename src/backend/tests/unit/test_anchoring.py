@@ -131,3 +131,30 @@ def test_anchoring_never_accepts_text_that_was_not_shown() -> None:
     assert claim_errors(invented, {"S1": PAGE})
     wrong_value = claim("Récupération en cuivre aux alentours de 85 %", "92", "~")
     assert claim_errors(anchor_claim(wrong_value, [PAGE]), {"S1": PAGE})
+
+
+def test_a_leading_continuation_also_cites_the_unfinished_preceding_page() -> None:
+    before = PAGE.model_copy(update={"id": "S1", "pages": [2, 3], "content": (
+        "Objet de la visite. La suite a concerné le stock du minerai intermédiaire qui a un"
+    )})
+    after = PAGE.model_copy(update={"id": "S2", "pages": [4], "content": (
+        "potentiel de 500 KT a 0,8% en cuivre et le stock rouge de 330 KT. Autre phrase."
+    )})
+    quote = "potentiel de 500 KT a 0,8% en cuivre"
+    bound = anchor_claim(claim(quote, "500", ids=["S2"]), [before, after])
+    assert (bound.quote, bound.evidence_ids) == (quote, ["S1", "S2"])
+    assert claim_errors(bound, {"S1": before, "S2": after}) == []
+
+    def ids(*shown: Evidence, quote: str = quote) -> list[str]:
+        return anchor_claim(claim(quote, None, ids=["S2"]), list(shown)).evidence_ids
+
+    assert ids(before, after, quote="Autre phrase.") == ["S2"]  # after the first sentence
+    finished = before.model_copy(update={"content": before.content + " stock."})
+    assert ids(finished, after) == ["S2"]
+    assert ids(before.model_copy(update={"content_hash": "b" * 64}), after) == ["S2"]
+    assert ids(before.model_copy(update={"pages": [1]}), after) == ["S2"]
+    assert ids(before.model_copy(update={"exposed": [(0, 20)]}), after) == ["S2"]
+    assert ids(before, after.model_copy(update={"exposed": [(5, 60)]})) == ["S2"]
+    assert ids(before, before.model_copy(update={"id": "S3"}), after) == ["S2"]  # ambiguous
+    capital = after.model_copy(update={"content": "Potentiel de 500 KT a 0,8% en cuivre."})
+    assert ids(before, capital, quote="Potentiel de 500 KT a 0,8% en cuivre") == ["S2"]

@@ -1,6 +1,7 @@
 import json
 import re
 
+from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
 from crv_agent.domain.answers import Answer, AnswerDraft, Conflict, Verdict
@@ -15,6 +16,15 @@ async def answer(
     state: ResearchState, runtime: Runtime[ResearchContext],
 ) -> dict[str, object]:
     context, plan = runtime.context, state["plan"]
+    writer = get_stream_writer() if context.diagnostics else None
+
+    def audit(stage: str, **payload: object) -> None:
+        if writer is not None:
+            writer({"event": "answer_diagnostics", "stage": stage, **payload})
+
+    audit("input", claims=[claim.model_dump(mode="json") for claim in state["claims"]],
+          coverage=state["coverage"].model_dump(),
+          calculations=[item.model_dump(mode="json") for item in state["calculations"]])
     status = "answered"
     reasons: list[str] = []
     evidence = state["evidence"]
@@ -69,6 +79,11 @@ async def answer(
                     composed, [item for item in evidence if item.id in used], details,
                     context.budget,
                 )
+                audit(
+                    "verified", round=round_number + 1,
+                    draft=composed.model_dump(mode="json"),
+                    verifier=judged.model_dump(mode="json"), deterministic_errors=checked,
+                )
                 # Draft, verdict and reasons only change together, so a budget stop below
                 # never pairs a new draft with the previous round's verdict.
                 draft, verdict = composed, judged
@@ -81,6 +96,8 @@ async def answer(
                         candidate, evidence, context.search_release, state["calculations"],
                     ):
                         draft, reasons, pruned = candidate, [], True
+                        audit("pruned", round=round_number + 1,
+                            draft=candidate.model_dump(mode="json"))
                         break
                 # Converge on the single repair: drop exactly the claims the verifier rejected,
                 # rather than asking the composer to rewrite a mis-bound claim it cannot edit.
@@ -88,7 +105,15 @@ async def answer(
                     draft.claims[n] for n in verdict.unsupported_claims
                     if 0 <= n < len(draft.claims)
                 ]
-                claims = [claim for claim in claims if claim not in rejected]
+                repaired = {
+                    old.model_dump_json(): new for old, new in zip(
+                        draft.claims, clear_bindings(draft, verdict).claims, strict=True,
+                    ) if old is not new
+                }
+                claims = [
+                    repaired.get(claim.model_dump_json(), claim)
+                    for claim in claims if claim not in rejected
+                ]
                 if not claims:
                     break
         except BudgetExceeded:
@@ -100,12 +125,14 @@ async def answer(
                 candidate, evidence, context.search_release, state["calculations"],
             ):
                 draft, reasons, pruned = candidate, [], True
+                audit("pruned", round="final", draft=candidate.model_dump(mode="json"))
             elif (
                 candidate := findings(draft, verdict, state["calculations"], plan.language)
             ) is not None and not verify_draft(
                 candidate, evidence, context.search_release, state["calculations"],
             ):
                 draft, reasons, listed = candidate, [], True
+                audit("findings", draft=candidate.model_dump(mode="json"))
         if reasons or draft is None:
             status, text, claims = "insufficient_evidence", (
                 "La réponse n'a pas passé la vérification des sources."
@@ -137,6 +164,7 @@ async def answer(
         "role_usage": context.budget.role_usage(),
         "retrieval_mode": context.retrieval_mode,
     })
+    audit("final", answer=result.model_dump(mode="json"))
     return {"answer": result}
 
 
@@ -189,14 +217,30 @@ def prune_ungrounded(
     ]}))
 
 
+def clear_bindings(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft:
+    """The draft whose otherwise supported claims lose only their rejected optional bindings."""
+    fields = {
+        issue.claim: issue.fields for issue in verdict.unsupported_bindings
+        if 0 <= issue.claim < len(draft.claims) and issue.claim not in verdict.unsupported_claims
+        and issue.fields
+    }
+    if not fields:
+        return draft
+    return draft.model_copy(update={"claims": [
+        claim.model_copy(update=dict.fromkeys(fields[n])) if n in fields else claim
+        for n, claim in enumerate(draft.claims)
+    ]})
+
+
 def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
     """Remove verbatim unsupported sentences and rejected claims; None if nothing remains.
 
-    Only deletes text, so it cannot introduce unsupported content; the caller re-runs the
-    deterministic citation contract on the result.
+    Only deletes text or clears rejected optional bindings, so it cannot introduce
+    unsupported content; the caller re-runs the deterministic citation contract.
     """
+    cleared = clear_bindings(draft, verdict)
     if not verdict.unsupported_sentences and not verdict.unsupported_claims:
-        return None
+        return None if cleared is draft else cleared
     content = draft.content
     for sentence in verdict.unsupported_sentences:
         if sentence.strip() and sentence.strip() in content:
@@ -206,7 +250,7 @@ def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
     while True:
         markers = set(re.findall(r"\[([^\[\]]+)\]", content))
         claims = [
-            claim for n, claim in enumerate(draft.claims)
+            claim for n, claim in enumerate(cleared.claims)
             if n not in rejected and set(claim.evidence_ids) <= markers
         ]
         bound = {cid for claim in claims for cid in claim.evidence_ids}
@@ -216,15 +260,15 @@ def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
         for sentence in orphans:
             content = content.replace(sentence, "")
         content = tidy(content)
-    if not content or not claims or content == draft.content.strip():
+    if not content or not claims or (content == draft.content.strip() and cleared is draft):
         return None
     kept = {id(claim): n for n, claim in enumerate(claims)}
     conflicts = [
         conflict.model_copy(update={"claim_indices": indices})
         for conflict in draft.conflicts
         if len(indices := sorted(
-            kept[id(draft.claims[i])] for i in conflict.claim_indices
-            if id(draft.claims[i]) in kept
+            kept[id(cleared.claims[i])] for i in conflict.claim_indices
+            if id(cleared.claims[i]) in kept
         )) >= 2
     ]
     return draft.model_copy(update={"content": content, "claims": claims, "conflicts": conflicts})
@@ -236,6 +280,7 @@ def findings(
     """Unrejected, self-grounded claims listed with citations; None for a blanket rejection."""
     if not verdict.unsupported_claims and not verdict.unsupported_sentences:
         return None
+    draft = clear_bindings(draft, verdict)
     rejected = set(verdict.unsupported_claims)
     lines: list[str] = []
     claims: list[Claim] = []
@@ -264,12 +309,15 @@ def answer_conflicts(
     draft: AnswerDraft, ledger: list[Claim], detected: list[Conflict],
 ) -> list[Conflict]:
     """Composer-identified conflicts plus deterministic ones, indexed into the answer claims."""
-    position = {claim.model_dump_json(): n for n, claim in enumerate(draft.claims)}
+    # Cleared optional bindings must not hide a ledger claim's conflict.
+    exclude = {"date", "conditions", "scope"}
+    position = {claim.model_dump_json(exclude=exclude): n for n, claim in enumerate(draft.claims)}
     result = list(draft.conflicts)
     for conflict in detected:
         indices = sorted({
             position[key] for i in conflict.claim_indices
-            if 0 <= i < len(ledger) and (key := ledger[i].model_dump_json()) in position
+            if 0 <= i < len(ledger) and (key := ledger[i].model_dump_json(exclude=exclude))
+            in position
         })
         if len(indices) >= 2 and all(set(indices) != set(c.claim_indices) for c in result):
             result.append(conflict.model_copy(update={"claim_indices": indices}))

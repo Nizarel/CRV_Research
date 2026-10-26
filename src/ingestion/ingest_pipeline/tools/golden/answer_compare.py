@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from .business import BusinessQuestion, ToolRule
 from .dataset import GoldenQuestion
 
-RUBRIC_VERSION = "stakeholder-answer-v1"
+RUBRIC_VERSION = "stakeholder-answer-v3"
 
 
 class FactComparison(BaseModel):
@@ -408,6 +408,8 @@ async def compare_records(
                         attempt["received_content"] = received_content
                     if type(error) is ValueError:
                         attempt["validation_error"] = str(error)
+                    elif isinstance(getattr(error, "validation_error", None), str):
+                        attempt["validation_error"] = getattr(error, "validation_error")
                 attempt["latency_ms"] = 1000 * (asyncio.get_running_loop().time() - started)
                 attempts.append(attempt)
                 if emit is not None:

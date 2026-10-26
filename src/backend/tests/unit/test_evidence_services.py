@@ -114,10 +114,103 @@ def test_calculator_accepts_unit_spellings_but_not_different_grades_or_dimension
         calculate(ratio, [claim(value="840", unit="tons"), claim(value="800", unit="t")])
 
 
+def test_approximate_inputs_give_an_approximate_result_but_bounds_do_not() -> None:
+    # "environ 8 800 T" is approximate; the derived recovery must say so, not refuse.
+    ledger = [
+        claim(value="840", unit="T"), claim(value="24.6", unit="% Cu"),
+        claim(value="8800", unit="T", qualifier="~"), claim(value="2.78", unit="%"),
+    ]
+    request = CalculationRequest(
+        operation="weighted_recovery", input_claims=[0, 1, 2, 3], target_unit=None,
+    )
+    result = calculate(request, ledger)
+    assert result.approximate and round(result.value, 2) == Decimal("84.47")
+    exact = [*ledger[:2], claim(value="8800", unit="T"), ledger[3]]
+    assert not calculate(request, exact).approximate
+    for bound in ("<", ">="):
+        with pytest.raises(ValueError, match="bounded"):
+            calculate(request, [*ledger[:2], claim(value="8800", unit="T", qualifier=bound),
+                                ledger[3]])
+
+
+def test_weighted_recovery_rejects_reused_claims_and_masses_used_as_grades() -> None:
+    mass = [claim(value="8800", unit="T", qualifier="~"), claim(value="840", unit="T")]
+    reused = CalculationRequest(
+        operation="weighted_recovery", input_claims=[1, 1, 0, 0], target_unit=None,
+    )
+    with pytest.raises(ValueError, match="distinct"):
+        calculate(reused, mass)
+    ledger = [mass[1], claim(value="840", unit="T", evidence_ids=["S2"]), mass[0],
+              claim(value="8800", unit="T", evidence_ids=["S3"])]
+    with pytest.raises(ValueError, match="mass/grade"):
+        calculate(CalculationRequest(
+            operation="weighted_recovery", input_claims=[0, 1, 2, 3], target_unit=None,
+        ), ledger)
+
+
 def test_fusion_deduplicates_chunks_not_versions() -> None:
     other = source(id="S2", chunk_id="c2", content_hash="hash2")
     assert {item.id for item in fuse([[source(), other], [source()]])} == {"S1", "S2"}
     assert fuse([[source(generated=True)]]) == []
+
+
+def test_serial_recovery_and_observed_difference_are_exact_and_cited() -> None:
+    ledger = [claim(value="22.76", unit="%"), claim(value="87.52", unit="%", evidence_ids=["S2"])]
+    result = calculate(CalculationRequest(
+        operation="serial_recovery", input_claims=[0, 1], target_unit=None,
+    ), ledger)
+    assert result.value == Decimal("90.360448") and result.unit == "%"
+    assert result.evidence_ids == ["S1", "S2"]
+    difference = calculate(CalculationRequest(
+        operation="percentage_point_difference", input_claims=[0, 1], target_unit=None,
+    ), [claim(value="94.68", unit="%"), claim(value=result.value, unit="%")])
+    assert difference.value == Decimal("4.319552")
+    assert difference.unit == "percentage points"
+    fractional = calculate(CalculationRequest(
+        operation="serial_recovery", input_claims=[0, 1], target_unit=None,
+    ), [claim(value="0.2276", unit="fraction"), claim(value="0.8752", unit="fraction")])
+    assert fractional.value == result.value
+
+
+@pytest.mark.parametrize(("value", "unit"), [("101", "%"), ("-1", "%"), ("1", "t")])
+def test_serial_recovery_rejects_bad_bounds_or_dimensions(value: str, unit: str) -> None:
+    with pytest.raises(ValueError, match="percentages/fractions"):
+        calculate(CalculationRequest(
+            operation="serial_recovery", input_claims=[0, 1], target_unit=None,
+        ), [claim(value=value, unit=unit), claim(value="87.52", unit="%")])
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_adds_serial_recovery_and_cited_observed_gap() -> None:
+    from types import SimpleNamespace
+
+    from crv_agent.domain.answers import Coverage
+    from crv_agent.orchestration.nodes.research import reconcile
+
+    class Calculator:
+        async def calculation(self, question, claims, budget):
+            return CalculationRequest(
+                operation="serial_recovery", input_claims=[0, 1], target_unit=None,
+                comparison_claim=2,
+            )
+
+    result = await reconcile({
+        "claims": [claim(value="22.76"), claim(value="87.52"), claim(value="94.68")],
+        "coverage": Coverage(), "question": "Verify a published recovery calculation",
+        "plan": SimpleNamespace(intent="calculation"),
+    }, SimpleNamespace(context=SimpleNamespace(models=Calculator(), budget=Budget())))
+    assert [item.value for item in result["calculations"]] == [
+        Decimal("90.360448"), Decimal("4.319552"),
+    ]
+    assert [item.calculation_index for item in result["claims"][-2:]] == [0, 1]
+    assert [item.qualifier for item in result["claims"][-2:]] == [None, None]
+    approximate = await reconcile({
+        "claims": [claim(value="22.76", qualifier="~"), claim(value="87.52"), claim(value="94.68")],
+        "coverage": Coverage(), "question": "Verify a published recovery calculation",
+        "plan": SimpleNamespace(intent="calculation"),
+    }, SimpleNamespace(context=SimpleNamespace(models=Calculator(), budget=Budget())))
+    assert [item.approximate for item in approximate["calculations"]] == [True, True]
+    assert [item.qualifier for item in approximate["claims"][-2:]] == ["~", "~"]
 
 
 @pytest.mark.asyncio
@@ -248,6 +341,57 @@ async def test_composer_conflicts_need_two_selected_claims_that_differ() -> None
     unknown = ComposedConflict(subject="x", quantity="y", claim_numbers=[0, 9])
     draft = await Models([differing, same, unknown]).compose("Q?", ledger, "{}", Budget())
     assert [c.claim_indices for c in draft.conflicts] == [[0, 1]]
+
+
+@pytest.mark.asyncio
+async def test_composer_shows_every_citation_of_a_partly_cited_claim() -> None:
+    from crv_agent.adapters.models import LangChainModels
+    from crv_agent.domain.answers import ComposedAnswer
+
+    class Models(LangChainModels):
+        def __init__(self) -> None:
+            self.output_tokens, self.answer = 10, None
+
+        async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
+            assert '"cite": ["S1", "S2"]' in data
+            return ComposedAnswer(content="87.5 % [S2].", claim_numbers=[0],
+                                  insufficient=False, unanswered=[], conflicts=[])
+
+    ledger = [claim(evidence_ids=["context", "S1"])]
+    draft = await Models().compose("Q?", ledger, "{}", Budget())
+    assert draft.content == "87.5 % [S1][context]."
+    evidence = [source(), source(id="context", content="Le stock intermédiaire qui a un")]
+    assert verify_draft(draft, evidence, "r1") == []
+
+
+@pytest.mark.asyncio
+async def test_verifier_sees_a_context_citation_whole_and_quoted_passages_as_windows() -> None:
+    import json
+
+    from crv_agent.adapters.models import LangChainModels
+    from crv_agent.domain.answers import Verdict
+
+    class Models(LangChainModels):
+        def __init__(self) -> None:
+            self.output_tokens, self.verifier, self.data = 10, None, ""
+
+        async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
+            self.data = data
+            return Verdict(supported=True, reasons=[], unsupported_claims=[])
+
+    quoted = source(content="x" * 2000 + "Recovery 87,5 % at pilot scale." + "y" * 2000)
+    context = source(id="context", content="z" * 3000 + " le stock intermédiaire qui a un")
+    derived = claim(evidence_ids=["S1", "other"], calculation_index=0)
+    other = source(id="other", content="w" * 2000 + "Recovery 87,5 % at pilot scale." + "v" * 2000)
+    draft = AnswerDraft(content="[S1][context][other]", insufficient=False, claims=[
+        claim(evidence_ids=["context", "S1"]), derived,
+    ])
+    models = Models()
+    await models.verify(draft, [quoted, context, other], "{}", Budget())
+    shown = {item["id"]: item["shown_text"] for item in json.loads(models.data)["sources"]}
+    assert shown["context"] == [context.content]
+    assert len(shown["S1"][0]) < len(quoted.content)
+    assert len(shown["other"][0]) < len(other.content)  # derived claims keep focused windows
 
 
 @pytest.mark.asyncio

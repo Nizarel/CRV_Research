@@ -60,6 +60,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--print-stages", action="store_true",
                         help="Also print the stages file gzip+base64 between markers "
                         "(puts exposed source text in the pod log; opt-in for audits)")
+    parser.add_argument("--trace-out", type=Path,
+                        help="Opt-in full SSE trace JSONL, including diagnostic source/draft data")
     parser.add_argument("--split", choices=["dev", "heldout"], default="dev")
     parser.add_argument("--allow-heldout", action="store_true")
     parser.add_argument("--confirm-live", action="store_true")
@@ -89,7 +91,9 @@ def main(argv: list[str] | None = None) -> None:
         questions = [q for q in questions if q.id in args.question_id]
     if not questions:
         parser.error("The selected split has no questions")
-    outputs = [path for path in (args.output, args.answers_out, args.stages_out, args.attempts_out)
+    outputs = [path for path in (
+        args.output, args.answers_out, args.stages_out, args.attempts_out, args.trace_out,
+    )
                if path is not None]
     destinations = [path.resolve() for path in outputs]
     if len(set(destinations)) != len(destinations) or args.dataset.resolve() in destinations:
@@ -102,6 +106,12 @@ def main(argv: list[str] | None = None) -> None:
     answers = args.answers_out.open("w", encoding="utf-8") if args.answers_out else None
     stages = args.stages_out.open("w", encoding="utf-8") if args.stages_out else None
     attempts = args.attempts_out.open("x", encoding="utf-8") if args.attempts_out else None
+    traces = args.trace_out.open("x", encoding="utf-8") if args.trace_out else None
+
+    def emit_trace(record: dict[str, Any]) -> None:
+        if traces is not None:
+            traces.write(json.dumps(record, ensure_ascii=False) + "\n")
+            traces.flush()
 
     def emit_attempt(record: dict[str, Any]) -> None:
         if attempts is not None:
@@ -131,6 +141,7 @@ def main(argv: list[str] | None = None) -> None:
                 return await evaluate(
                     client, questions, concurrency=args.concurrency, emit=emit,
                     arm=args.arm, emit_stages=emit_stages, emit_attempt=emit_attempt,
+                    emit_trace=emit_trace if traces is not None else None,
                 )
             endpoint = os.environ["CRV_OPENAI_ENDPOINT"].rstrip("/")
             if not endpoint.endswith("/openai/v1"):
@@ -148,6 +159,7 @@ def main(argv: list[str] | None = None) -> None:
                         client, questions, LangChainJudge(model),
                         concurrency=args.concurrency, emit=emit,
                         arm=args.arm, emit_stages=emit_stages, emit_attempt=emit_attempt,
+                        emit_trace=emit_trace if traces is not None else None,
                     )
                 finally:
                     # An async token provider yields only an async client.
@@ -164,6 +176,8 @@ def main(argv: list[str] | None = None) -> None:
             stages.close()
         if attempts is not None:
             attempts.close()
+        if traces is not None:
+            traces.close()
     args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     summary = {key: value for key, value in report.items() if key != "records"}
     print(REPORT_BEGIN)

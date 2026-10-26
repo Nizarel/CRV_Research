@@ -50,11 +50,13 @@ def calculate(request: CalculationRequest, claims: list[Claim]) -> Calculation:
         index < 0 or index >= len(claims) for index in request.input_claims
     ):
         raise ValueError("Calculation must reference existing input claims")
+    if len(set(request.input_claims)) != len(request.input_claims):
+        raise ValueError("Calculation inputs must be distinct claims")
     inputs = [claims[index] for index in request.input_claims]
     if any(claim.value is None or not claim.evidence_ids for claim in inputs):
         raise ValueError("Calculation inputs require cited numeric values")
-    if any(claim.qualifier for claim in inputs):
-        raise ValueError("Calculations on qualified/approximate values require explicit review")
+    if any(claim.qualifier not in {None, "~"} for claim in inputs):
+        raise ValueError("Calculations on bounded qualified values require explicit review")
     values = [claim.value for claim in inputs if claim.value is not None]
     if request.operation == "convert" and len(values) == 1:
         source = _UNITS.get(inputs[0].unit or "")
@@ -63,6 +65,22 @@ def calculate(request: CalculationRequest, claims: list[Claim]) -> Calculation:
             raise ValueError("Unknown or dimensionally incompatible units")
         value = values[0] * source[1] / target[1]
         unit = request.target_unit or ""
+    elif (
+        request.operation in {"serial_recovery", "percentage_point_difference"} and len(values) == 2
+    ):
+        normalized = [canonical_value(value, claim.unit) for value, claim in zip(
+            values, inputs, strict=True,
+        )]
+        if any(family != "ratio" or not Decimal(0) <= value <= Decimal(1)
+               for family, value in normalized):
+            raise ValueError("Recovery inputs require percentages/fractions between zero and one")
+        first, second = [value for _, value in normalized]
+        if request.operation == "serial_recovery":
+            value = (first + (Decimal(1) - first) * second) * 100
+            unit = "%"
+        else:
+            value = (first - second) * 100
+            unit = "percentage points"
     elif request.operation in {"ratio", "recovery"} and len(values) == 2:
         factors = scale_factors([inputs[0].unit, inputs[1].unit])
         if factors is None or values[1] == 0:
@@ -80,8 +98,11 @@ def calculate(request: CalculationRequest, claims: list[Claim]) -> Calculation:
     elif request.operation == "weighted_recovery" and len(values) == 4:
         masses = scale_factors([inputs[0].unit, inputs[2].unit])
         grades = scale_factors([inputs[1].unit, inputs[3].unit])
+        kinds = [_family(claim.unit)[0] for claim in inputs]
         if (
             not inputs[0].unit or not inputs[1].unit or masses is None or grades is None
+            or kinds[0].startswith("%") or not kinds[1].startswith("%")
+            or kinds[2].startswith("%") or not kinds[3].startswith("%")
             or values[2] == 0 or values[3] == 0
         ):
             raise ValueError("Weighted recovery needs matching mass/grade units and nonzero feed")
@@ -96,4 +117,5 @@ def calculate(request: CalculationRequest, claims: list[Claim]) -> Calculation:
         operation=request.operation, input_claims=request.input_claims,
         value=value, unit=unit,
         evidence_ids=sorted({cid for claim in inputs for cid in claim.evidence_ids}),
+        approximate=any(claim.qualifier == "~" for claim in inputs),
     )

@@ -173,6 +173,7 @@ async def research(
                 )
         if context.diagnostics:
             audit.append(facet_audit(facet.question, status, result, evidence_by_id))
+            audit[-1].update({"scope_hashes": scope, "strict": strict})
         if status != "completed":
             cut_short.append(facet.question)
         # Early findings, not a verified answer: every streamed claim's quote is located verbatim.
@@ -254,15 +255,15 @@ async def reconcile(
 
     def add_calculation(request: CalculationRequest) -> None:
         try:
-            result = calculate(request, state["claims"])
-            first_input = state["claims"][request.input_claims[0]]
+            result = calculate(request, claims)
+            first_input = claims[request.input_claims[0]]
             claims.append(Claim(
                 text=f"Calculated {result.operation}: {result.value} {result.unit}",
                 evidence_ids=result.evidence_ids, quote=first_input.quote,
                 subject=first_input.subject, quantity=result.operation,
                 value=result.value, unit=result.unit, date=first_input.date,
                 conditions=first_input.conditions, scope=first_input.scope,
-                calculation_index=len(results),
+                calculation_index=len(results), qualifier="~" if result.approximate else None,
             ))
             results.append(result)
         except ValueError as error:
@@ -278,7 +279,20 @@ async def reconcile(
         request = await runtime.context.models.calculation(
             state["question"], state["claims"], runtime.context.budget,
         )
+        previous = len(results)
         add_calculation(request)
+        if (
+            request.operation == "serial_recovery" and len(results) > previous
+            and request.comparison_claim is not None
+        ):
+            comparison = request.comparison_claim
+            if 0 <= comparison < len(state["claims"]) and comparison not in request.input_claims:
+                add_calculation(CalculationRequest(
+                    operation="percentage_point_difference",
+                    input_claims=[comparison, len(claims) - 1], target_unit=None,
+                ))
+            else:
+                gaps.append("Recovery comparison requires a distinct cited observed input claim.")
     return {
         "conflicts": found, "calculations": results, "claims": claims,
         "coverage": state["coverage"].model_copy(update={"gaps": gaps}),

@@ -6,6 +6,8 @@ into one quote or elides text with "[...]", or sets a calculation index on a pla
 repair only replaces the quote with an exact span of shown text (or narrows it to one shown line
 that prints the value) and rebinds the evidence IDs to passages that contain it. A date whose
 year no cited passage prints (a filename year) is cleared rather than failing the claim.
+A quote in the leading fragment of a chunk that continues a sentence from the preceding page
+also cites that preceding chunk, so the subject named before the page break stays checkable.
 ``claim_errors`` still decides acceptance, unchanged.
 """
 
@@ -14,7 +16,7 @@ import unicodedata
 from collections.abc import Sequence
 
 from crv_agent.domain.evidence import Claim, Evidence
-from crv_agent.services.evidence_pack import exposed_text
+from crv_agent.services.evidence_pack import exposed_spans, exposed_text
 from crv_agent.services.verification import stated
 
 _PUNCTUATION = str.maketrans({
@@ -25,6 +27,7 @@ _FRAGMENTS = re.compile(r"\s*(?:\n+|\[\s*(?:…|\.\.\.)\s*\]|…|\.\.\.)\s*")
 _ELLIPSIS = re.compile(r"\s*(?:\[\s*(?:…|\.\.\.)\s*\]|…|\.\.\.)\s*")
 _OCR_MARKS = re.compile(r":(?:un)?selected:")
 _YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)|\n\s*\n")
 MIN_FRAGMENT = 8
 # Longest source span an elided ("[...]") quote may be widened to.
 MAX_STITCH = 800
@@ -81,7 +84,7 @@ def stitch(quote: str, text: str) -> str | None:
 
 def anchor_claim(claim: Claim, shown: Sequence[Evidence]) -> Claim:
     """The claim quoted exactly from, and bound to, the passages that state it."""
-    claim = _anchor(claim, shown)
+    claim = _continuation(_anchor(claim, shown), shown)
     years = _YEAR.findall(claim.date or "")
     texts = [
         text for item in shown if item.id in claim.evidence_ids and not item.generated
@@ -120,3 +123,40 @@ def _anchor(claim: Claim, shown: Sequence[Evidence]) -> Claim:
         )
         return claim.model_copy(update={"quote": span, "evidence_ids": [pid]})
     return claim
+
+
+def _in_leading_fragment(item: Evidence, quote: str) -> bool:
+    """Whether the quote starts in a shown lowercase chunk opening, before its first sentence."""
+    at = item.content.find(quote) if quote else -1
+    if at < 0 or not item.content.lstrip()[:1].islower():
+        return False
+    if not any(start == 0 for start, _ in exposed_spans(item)):
+        return False
+    end = _SENTENCE_END.search(item.content)
+    return end is None or at < end.start()
+
+
+def _continuation(claim: Claim, shown: Sequence[Evidence]) -> Claim:
+    """The claim also citing the unique same-document chunk whose unfinished last sentence
+    the quoted chunk's leading lowercase fragment completes on the same or next page."""
+    by_id = {item.id: item for item in shown if not item.generated}
+    holders = [
+        by_id[cid] for cid in claim.evidence_ids
+        if cid in by_id and _in_leading_fragment(by_id[cid], claim.quote)
+    ]
+    if len(holders) != 1 or not holders[0].pages:
+        return claim
+    holder = holders[0]
+    first_page = min(holder.pages)
+    previous = [
+        item for item in by_id.values()
+        if item.id not in claim.evidence_ids and item.content_hash == holder.content_hash
+        and item.pages and max(item.pages) in {first_page - 1, first_page}
+        and any(end == len(item.content) for _, end in exposed_spans(item))
+        and (tail := item.content.rstrip()) and (tail[-1].isalpha() or tail[-1] == ",")
+    ]
+    if len(previous) != 1:
+        return claim
+    ids = list(claim.evidence_ids)
+    ids.insert(ids.index(holder.id), previous[0].id)
+    return claim.model_copy(update={"evidence_ids": ids})

@@ -22,6 +22,9 @@ assumption in premises. Use procedure only for step-by-step handling of hazardou
 in studies are research lookups. Use calculation when the user asks to derive, compute, check
 consistency of, or verify figures (mass balance, implied recovery, unit conversion). Questions
 about versions, duplicates or which documents belong to a project are catalogue.
+For a request to check a published calculation, first retrieve its exact formula and cited
+operands. Do not replace an arithmetic check with a demand to reconstruct the entire plant
+mass balance unless the user asks for that broader validation.
 External research, uploads, arbitrary code execution and writing unrelated to corpus research
 are out_of_scope.
 Provide at most 6 independent search facets. Keep report codes and sample identifiers exactly.
@@ -50,13 +53,19 @@ truncated or commercial rather than measured.
 COMPOSE_RULES = RESEARCH_RULES + """
 Write the answer content and list, in claim_numbers, the ledger claim numbers it relies on.
 Never re-type claims. Cite with the claim's cite handles, one per bracket, e.g. [S3] or
-[S3][S7]; every selected claim needs at least one of its handles in content. Use square
-brackets only for citations (no [1], no bracketed notes). State numbers
+[S3][S7]; every selected claim needs its handles in content, and a claim with several handles
+is cited with all of them together where it is used (the passages complete each other).
+Use square brackets only for citations (no [1], no bracketed notes). State numbers
 exactly as in the selected claims, with units, dates and conditions. Include coverage limits
 and conflicts from context. Never do arithmetic (no ratios, sums, conversions, recoveries or
 averages of your own): report only numbers from the selected claims or from context
 calculations, labelled derived with cited inputs. If a needed derivation is not supplied, say
 it was not computed deterministically.
+A calculation marked approximate used an approximate cited input: present it as approximate
+(≈ or environ) and name that input.
+When context includes both a computed recovery and its deterministic percentage-point
+comparison with an observed value, report both checks and cite their inputs. The cause of
+a discrepancy may remain unknown even when its numerical size has been computed.
 Set insufficient true when the ledger does not establish the main fact, value or document the
 question asks for, or when the claims contradict the question's premise (correct the premise).
 Still report related evidence and what is missing. Set insufficient false when the main ask is
@@ -83,6 +92,10 @@ or use of commercial proposals as measured results. Return supported and concret
 List in unsupported_claims the zero-based indices of draft.claims whose quote, value or
 bindings (subject, date, conditions, scope) the sources do not support, and in
 unsupported_sentences each unsupported content sentence copied verbatim.
+When a claim's quote, value, subject and text are supported and only its optional date,
+conditions or scope field is not (for example a receipt date recorded as the observation
+date), list that claim index and those fields in unsupported_bindings instead of
+unsupported_claims; such fields are cleared and the claim is kept.
 Set supported false only for factual errors: unsupported or wrong facts, numbers,
 attributions or bindings, missing citations, undeclared conflicts or unsupported absence
 claims. Wording nuances that do not change a fact are notes in reasons, not failures.
@@ -105,6 +118,11 @@ Return at most max_claims claims, most relevant first; do not repeat claims_alre
 optional fields null when not stated; keep text to one short sentence.
 Bind each numeric value to its quantity, unit, sample/subject, date, conditions and scope.
 Use value null for ranges, words or values you cannot copy as one number.
+For a calculation facet, extract each printed operand as a separate cited numeric claim,
+with its quantity and role, not one value-null claim that combines every number.
+Also extract the printed result and any printed observed,
+actual or measured counterpart of that result as separate claims, so both can be compared.
+Derived arithmetic belongs to the deterministic calculator.
 Prefer primary study reports; periodic summaries are secondary, inferred from filenames.
 Commercial offers and templates are not measured results. Never merge divergent values.
 List gaps for facet aspects the passages do not support. If an important aspect is missing

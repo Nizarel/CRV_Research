@@ -81,6 +81,49 @@ async def test_evaluator_consumes_verified_api_answers_and_reports_missing_gates
         )])
     assert report["questions"] == 1
     assert report["gates_passed"] is False
+    assert report["metrics"]["research_complete"]["rate"] == 1  # type: ignore[index]
+    assert report["facet_errors"] == {}
+
+
+@pytest.mark.asyncio
+async def test_completed_turns_with_failed_research_facets_are_reported() -> None:
+    from dataclasses import replace
+
+    from crv_agent.domain.evidence import WorkerResult
+    from crv_agent.domain.execution import Budget
+    from crv_agent.domain.planning import Facet
+    from tests.fakes import FakeWorker
+
+    class TwoFacets(FakeModels):
+        async def plan(self, question: str, history: list[str], budget: Budget):
+            result = await super().plan(question, history, budget)
+            return result.model_copy(update={
+                "intent": "comparison", "facets": [Facet(question="ok"), Facet(question="bad")],
+            })
+
+    class RateLimitError(Exception):
+        pass
+
+    class Throttled(FakeWorker):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
+            if question.startswith("bad"):
+                raise RateLimitError("429")
+            return WorkerResult(claims=[CLAIM], gaps=[]), [SOURCE]
+
+    app = create_app(replace(services(TwoFacets()), worker=Throttled()))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+    ) as client:
+        report = await evaluate(client, [GoldenQuestion(
+            id="Q", question="Compare", category="C", split="dev", key_facts=[],
+        )])
+    assert report["metrics"]["turn_completed"]["rate"] == 1  # type: ignore[index]
+    assert report["metrics"]["research_complete"]["rate"] == 0  # type: ignore[index]
+    assert report["facet_errors"] == {"RateLimitError": 1}
+    assert report["records"][0]["facet_errors"] == ["RateLimitError"]  # type: ignore[index]
 
 
 @pytest.mark.asyncio
@@ -250,6 +293,7 @@ async def test_labelled_arm_exports_answer_exposed_and_ledger_stages_with_role_u
 
     stages: list[dict[str, object]] = []
     answers: list[dict[str, object]] = []
+    traces: list[dict[str, object]] = []
     app = create_app(replace(services(Recording()), diagnostics=True))
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test",
@@ -257,7 +301,10 @@ async def test_labelled_arm_exports_answer_exposed_and_ledger_stages_with_role_u
         report = await evaluate(client, [GoldenQuestion(
             id="Q4", question="Recovery?", category="A", split="dev",
             key_facts=[KeyFact(text="Recovery 87.5 %")],
-        )], emit=answers.append, arm="R1", emit_stages=stages.extend)
+        )], emit=answers.append, arm="R1", emit_stages=stages.extend, emit_trace=traces.append)
+    assert {item["event"] for item in traces} >= {"diagnostics", "answer_diagnostics", "answer"}
+    assert all(item["id"] == "Q4" and item["arm"] == "R1" for item in traces)
+    assert all(item["request_id"] and item["thread_id"] for item in traces)
     assert report["arm"] == "R1"
     assert report["first_finding_seconds_p50"] is not None
     assert set(report["step_seconds_p50"]) == {  # type: ignore[arg-type]

@@ -36,11 +36,18 @@ class ComposedAnswer(Contract):
     conflicts: list[ComposedConflict]
 
 
+class BindingIssue(Contract):
+    claim: int
+    fields: list[Literal["date", "conditions", "scope"]]
+
+
 class Verdict(Contract):
     supported: bool
     reasons: list[str]
     # Indices into draft.claims that the sources do not support (dropped before repair).
     unsupported_claims: list[int] = []
+    # Otherwise supported claims whose listed optional bindings are cleared, not dropped.
+    unsupported_bindings: list[BindingIssue] = []
     # Verbatim content sentences that are unsupported (pruned if the final draft fails).
     unsupported_sentences: list[str] = []
 

@@ -13,7 +13,7 @@ from crv_agent.domain.execution import Budget, estimate_tokens
 from crv_agent.domain.planning import QueryPlan
 from crv_agent.orchestration.middleware import UsageRecorder
 from crv_agent.orchestration.prompts import COMPOSE_RULES, PLAN_RULES, RERANK_RULES, VERIFY_RULES
-from crv_agent.services.evidence_pack import quote_windows
+from crv_agent.services.evidence_pack import exposed_text, quote_windows
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -91,6 +91,11 @@ class LangChainModels:
         selected = [
             claims[n] for n in dict.fromkeys(composed.claim_numbers) if 0 <= n < len(claims)
         ]
+        for claim in selected:
+            present = [e for e in claim.evidence_ids if f"[{e}]" in content]
+            missing = "".join(f"[{e}]" for e in claim.evidence_ids if f"[{e}]" not in content)
+            if present and missing:
+                content = content.replace(f"[{present[0]}]", f"[{present[0]}]{missing}", 1)
         position = {id(claim): n for n, claim in enumerate(selected)}
         conflicts = []
         for item in composed.conflicts:
@@ -113,6 +118,13 @@ class LangChainModels:
     async def verify(
         self, draft: AnswerDraft, evidence: list[Evidence], context: str, budget: Budget,
     ) -> Verdict:
+        def shown(item: Evidence) -> list[str]:
+            citing = [c for c in draft.claims if item.id in c.evidence_ids]
+            # A passage cited as context for a quote it does not hold is shown whole.
+            if any(c.calculation_index is None and c.quote not in item.content for c in citing):
+                return exposed_text(item)
+            return quote_windows(item, [c.quote for c in citing])
+
         return await self._invoke(
             self.verifier, Verdict, VERIFY_RULES,
             json.dumps({
@@ -124,9 +136,7 @@ class LangChainModels:
                         **e.model_dump(
                             mode="json", exclude={"content", "exposed", "caption"},
                         ),
-                        "shown_text": quote_windows(e, [
-                            c.quote for c in draft.claims if e.id in c.evidence_ids
-                        ]),
+                        "shown_text": shown(e),
                     } for e in evidence
                 ],
                 "calculation_and_coverage_context": context,
@@ -141,6 +151,12 @@ class LangChainModels:
             "Select a typed calculation on cited claim indices (zero-based). Operations: "
             "convert, ratio, recovery (numerator/denominator * 100), sum, "
             "weighted_recovery (concentrate mass, concentrate grade, feed mass, feed grade). "
+            "serial_recovery (first-stage recovery, downstream recovery of remaining metal); "
+            "percentage_point_difference (first recovery minus second recovery). "
+            "Recovery inputs must be cited percentages or fractions, not invented constants. "
+            "For serial_recovery, set comparison_claim to the separate cited observed/global "
+            "actual recovery index when supplied, so its difference is also computed; "
+            "otherwise null. "
             "Do not invent inputs. Ambiguous or unsupported computations use operation='unknown'.",
             json.dumps({
                 "question": question, "claims": [c.model_dump(mode="json") for c in claims],

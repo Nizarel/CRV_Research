@@ -199,11 +199,21 @@ def test_diagnostics_event_streams_ledger_and_exposed_text_only_when_enabled(
             json.loads(lines[2].removeprefix("data: "))
             for lines in blocks if lines[1] == "event: diagnostics"
         ]
+        answer_audit = [
+            json.loads(lines[2].removeprefix("data: "))
+            for lines in blocks if lines[1] == "event: answer_diagnostics"
+        ]
         sequences = [json.loads(lines[2].removeprefix("data: "))["sequence"] for lines in blocks]
     assert sequences == sorted(set(sequences))
     if not enabled:
         assert found == []
+        assert answer_audit == []
         return
+    assert answer_audit[0]["stage"] == "input"
+    verified = next(item for item in answer_audit if item["stage"] == "verified")
+    assert verified["draft"]["content"]
+    assert verified["verifier"]["supported"] is True
+    assert answer_audit[-1]["stage"] == "final"
     [payload] = found
     assert payload["ledger"] == [CLAIM.model_dump(mode="json")]
     assert payload["exposed"] == [{
@@ -212,6 +222,8 @@ def test_diagnostics_event_streams_ledger_and_exposed_text_only_when_enabled(
     }]
     [facet] = payload["audit"]
     assert (facet["facet"], facet["status"], facet["rounds"]) == ("Recovery?", "completed", [])
+    assert facet["scope_hashes"] == []
+    assert facet["strict"] is False
     assert [(c["outcome"], c["errors"]) for c in facet["claims"]] == [("accepted", [])]
 
 
@@ -501,6 +513,81 @@ async def test_repair_drops_only_verifier_rejected_claims() -> None:
     )
     assert len(models.ledgers) == 2 and bad not in models.ledgers[1]
     assert result["answer"].claims == [good]
+
+
+@pytest.mark.asyncio
+async def test_repair_clears_only_rejected_optional_bindings_and_keeps_the_claim() -> None:
+    from crv_agent.domain.answers import AnswerDraft, BindingIssue, Verdict
+
+    received = CLAIM.model_copy(update={"date": "à réception", "scope": "lot A"})
+
+    class Models(FakeModels):
+        def __init__(self) -> None:
+            super().__init__(intent="synthesis")
+            self.ledgers: list[list[object]] = []
+
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.ledgers.append(list(claims))
+            return AnswerDraft(content="Recovery 87.5 % [S1]", claims=list(claims),
+                               insufficient=False)
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            if any(claim.date for claim in draft.claims):
+                return Verdict(supported=False, reasons=["receipt date is not the test date"],
+                               unsupported_bindings=[BindingIssue(claim=0, fields=["date"])])
+            return Verdict(supported=True, reasons=[])
+
+    class Dated(FakeWorker):
+        async def run(
+            self, question: str, release: str, hashes: list[str], budget: Budget,
+            *, strict: bool = False,
+        ):
+            from crv_agent.domain.evidence import WorkerResult
+
+            await budget.reserve(retrieval=1)
+            return WorkerResult(claims=[received], gaps=[]), [SOURCE]
+
+    models = Models()
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=models, knowledge=FakeKnowledge(), worker=Dated(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    kept = received.model_copy(update={"date": None})
+    assert models.ledgers == [[received], [kept]]
+    assert result["answer"].status == "answered" and result["answer"].claims == [kept]
+
+
+def test_prune_clears_rejected_bindings_and_keeps_conflicts_of_the_cleared_claims() -> None:
+    from decimal import Decimal
+
+    from crv_agent.domain.answers import AnswerDraft, BindingIssue, Conflict, Verdict
+    from crv_agent.orchestration.nodes.answer import answer_conflicts, findings, prune
+
+    dated = CLAIM.model_copy(update={"date": "2018", "conditions": "after filtration"})
+    other = CLAIM.model_copy(update={
+        "value": Decimal("80"), "quote": "Recovery 80 %", "text": "80 %",
+    })
+    conflict = Conflict(subject="sample", quantity="recovery", claim_indices=[0, 1])
+    draft = AnswerDraft(content="Recovery 87.5 % [S1].", claims=[dated, other],
+                        insufficient=False, conflicts=[conflict])
+    issue = BindingIssue(claim=0, fields=["date"])
+    only = prune(draft, Verdict(supported=False, reasons=["x"], unsupported_bindings=[issue]))
+    assert only is not None and only.content == draft.content
+    assert only.claims[0] == dated.model_copy(update={"date": None}) and only.claims[1] is other
+    assert answer_conflicts(only.model_copy(update={"conflicts": []}), [dated, other], [
+        conflict,
+    ]) == [conflict]
+    both = Verdict(supported=False, reasons=["x"], unsupported_claims=[0],
+                   unsupported_bindings=[issue])
+    assert prune(draft, both) is None  # a rejected claim is dropped, not repaired
+    listed = findings(draft, Verdict(
+        supported=False, reasons=["x"], unsupported_claims=[1], unsupported_bindings=[issue],
+    ), [], "en")
+    assert listed is not None and listed.claims == [dated.model_copy(update={"date": None})]
 
 
 @pytest.mark.asyncio

@@ -144,6 +144,55 @@ def test_fabricated_excerpt_or_missing_index_cannot_pass() -> None:
         validate_verdict(question(), "Actual answer", bad)
 
 
+def indexed_verdict(start_line=1, end_line=1) -> dict:
+    data = verdict().model_dump(mode="json")
+    data["facts"] = [{
+        "index": 1, "result": "matched", "start_line": start_line,
+        "end_line": end_line, "explanation": "Semantic match",
+    }]
+    return data
+
+
+def test_indexed_quotes_preserve_original_markdown_unicode_and_line_endings() -> None:
+    from ingest_pipeline.tools.golden.copilot_judge import indexed_comparison
+
+    content = "Heading\r\n**L\u2019\u00e9chantillon** : 42\r\n- second line\n"
+    result = indexed_comparison(json.dumps(indexed_verdict(2, 3)), question(), content)
+    assert result.facts[0].generated_excerpt == content.removeprefix("Heading\r\n")
+    assert result.facts[0].expected_excerpt == question().key_facts[0].text
+    validate_verdict(question(), content, result)
+
+
+@pytest.mark.parametrize(("start_line", "end_line"), [
+    (0, 1), (1, 2), (2, 1), (None, 1), (1, None), (True, 1),
+])
+def test_indexed_quotes_reject_invalid_or_fabricated_line_ranges(start_line, end_line) -> None:
+    from ingest_pipeline.tools.golden.copilot_judge import indexed_comparison
+
+    with pytest.raises(ValueError, match=r"line range is invalid|valid integer"):
+        indexed_comparison(json.dumps(indexed_verdict(start_line, end_line)), question(), "Actual")
+
+
+def test_indexed_quotes_still_reject_missing_evidence_indices_and_inconsistent_passes() -> None:
+    from ingest_pipeline.tools.golden.copilot_judge import indexed_comparison
+
+    missing = indexed_verdict(None, None)
+    with pytest.raises(ValueError, match="requires a generated excerpt"):
+        indexed_comparison(json.dumps(missing), question(), "Actual")
+    duplicate = indexed_verdict()
+    duplicate["facts"] *= 2
+    with pytest.raises(ValueError, match="exactly once"):
+        indexed_comparison(json.dumps(duplicate), question(), "Actual")
+    inconsistent = indexed_verdict()
+    inconsistent["expected_behavior_met"] = False
+    with pytest.raises(ValueError, match="contradicts"):
+        indexed_comparison(json.dumps(inconsistent), question(), "Actual")
+    invented = indexed_verdict()
+    invented["facts"][0]["generated_excerpt"] = "not in the source"
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        indexed_comparison(json.dumps(invented), question(), "Actual")
+
+
 def test_failed_generation_and_missing_rows_stay_in_denominator(tmp_path: Path) -> None:
     failed = {**answer(), "execution_status": "timeout", "schema_valid": False}
     judge = FakeJudge()
@@ -217,6 +266,7 @@ def test_failed_sdk_call_or_invalid_json_retains_provider_usage(monkeypatch, sta
     assert attempts[0]["usage"]["events"][0]["data"]["inputTokens"] == 12
     if status == "ok":
         assert attempts[0]["received_content"] == "not JSON"
+        assert "Invalid JSON" in attempts[0]["validation_error"]
     assert rows[0]["judge_errors"] == 1
     assert not rows[0]["task_success"]
 
@@ -273,6 +323,27 @@ def test_business_cli_import_and_loader_preserve_metadata(tmp_path: Path) -> Non
     [loaded] = load_golden(str(output))
     assert isinstance(loaded, BusinessQuestion)
     assert loaded.expected == "Exact reference"
+
+
+def test_judge_receives_frozen_reference_issues_without_assistant_review_labels() -> None:
+    from ingest_pipeline.tools.golden.copilot_judge import judge_payload
+
+    original = question()
+    annotated = original.model_copy(update={
+        "evaluation": original.evaluation.model_copy(update={
+            "review_notes": ("Reference contains an unresolved difference/ratio conflict",),
+        }),
+    })
+    payload = judge_payload(annotated, "Actual answer")
+    assert payload["expected_answer"] == original.expected
+    assert payload["reference_elements"][0]["text"] == original.key_facts[0].text
+    assert payload["reference_review"] == {
+        "status": "proposed",
+        "notes": ["Reference contains an unresolved difference/ratio conflict"],
+    }
+    assert payload["generated_answer"] == "Actual answer"
+    assert "expected_verdict" not in payload
+    assert "answer_status" not in payload
 
 
 def test_versioned_cost_uses_provider_usage_and_does_not_double_bill_cache() -> None:
