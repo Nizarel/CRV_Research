@@ -1,0 +1,33 @@
+{
+  "questions": 18,
+  "task_success": 0,
+  "task_success_rate": 0.0,
+  "comparison_verdicts": {
+    "partial": 16,
+    "fail": 1,
+    "needs_review": 1
+  },
+  "answer_statuses": {
+    "answered": 14,
+    "insufficient_evidence": 4
+  },
+  "execution_statuses": {
+    "completed": 18
+  },
+  "status_vs_comparison": {
+    "answered:partial": 14,
+    "insufficient_evidence:partial": 2,
+    "insufficient_evidence:fail": 1,
+    "insufficient_evidence:needs_review": 1
+  },
+  "judge_errors": 0,
+  "fact_recall_measured": 18,
+  "latency_measured": 18,
+  "latency_ms_p50": 40921.79020000185,
+  "latency_ms_p95": 73854.7222000052,
+  "tool_metrics_measured": 0,
+  "token_metrics_measured": 18,
+  "agent_cost_status": "unmeasured",
+  "agent_cost_known_subtotals": {},
+  "production_deployed": false
+}

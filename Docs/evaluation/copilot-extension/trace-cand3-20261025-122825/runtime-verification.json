@@ -1,0 +1,7 @@
+{
+  "native_config_sha256": "f8b0a202abaf38d88b98938f9365aa7977dc1825698a14ba9743c0ce9e386373",
+  "run": "trace-cand3-20261025-122825",
+  "mounted_source_hashes_verified": true,
+  "source_archive_sha256": "d8fe7299c55228d721f3ea452ddfe9a20c8fa3bd1514b858cfdb2ab53afccd93",
+  "image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f"
+}

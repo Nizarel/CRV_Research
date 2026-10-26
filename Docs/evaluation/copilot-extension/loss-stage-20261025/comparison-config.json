@@ -1,0 +1,31 @@
+{
+  "production_changed": false,
+  "judge_repeats": 3,
+  "created_at": "2026-10-25T19:10:54.5817821Z",
+  "planned_judgments": 54,
+  "native_config_sha256": "f8b0a202abaf38d88b98938f9365aa7977dc1825698a14ba9743c0ce9e386373",
+  "purpose": "targeted development comparison, not held-out evaluation",
+  "runs": [
+    {
+      "answers_sha256": "3ce9ae29da6779a7e5043c98e7c84e0710d21c6442ac510ecdb48d25690969b5",
+      "run": "trace-base-20261025-113847"
+    },
+    {
+      "answers_sha256": "9057c8f6c1b86516871c7ff8bd258d7c094227957426a2e5b969c844cab5b99c",
+      "run": "trace-cand-20261025-115233"
+    },
+    {
+      "answers_sha256": "bf9bb0bc88a35f9a4397846ec584afa68bf1d8c7a69d942513f919b8ee59bf92",
+      "run": "trace-cand2-20261025-120223"
+    }
+  ],
+  "question_ids": [
+    "Q77",
+    "Q138",
+    "Q155",
+    "Q184",
+    "Q398",
+    "Q481"
+  ],
+  "judge_model": "claude-haiku-5.5"
+}

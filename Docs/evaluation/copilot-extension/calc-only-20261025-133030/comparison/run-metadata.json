@@ -1,0 +1,19 @@
+{
+  "dataset_sha256": "1730faf9a9b81eee5c38d0c5cf838a71c8912e3737fbd655ac0da9e9cf1e6960",
+  "answers_sha256": "dec8587146d046368684c925b9d3a24a39a8064f66682846a912b83c33b9f62d",
+  "model": "claude-haiku-5.5",
+  "transport": "sdk-node",
+  "rubric": "stakeholder-answer-v3",
+  "repeats": 3,
+  "only": [
+    "Q138",
+    "Q155",
+    "Q184",
+    "Q398",
+    "Q481",
+    "Q77"
+  ],
+  "schema": "comparison-v1",
+  "telemetry_sha256": null,
+  "price_book": null
+}

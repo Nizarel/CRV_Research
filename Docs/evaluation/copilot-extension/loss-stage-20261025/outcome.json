@@ -1,0 +1,225 @@
+{
+  "questions_per_arm": 6,
+  "arms": [
+    {
+      "arm": "TRACE_BASE",
+      "run": "trace-base-20261025-113847",
+      "questions": 6,
+      "schema_valid": 6,
+      "verdicts": [
+        {
+          "Name": "needs_review",
+          "Count": 1
+        },
+        {
+          "Name": "partial",
+          "Count": 5
+        }
+      ],
+      "mean_reference_element_recall": 0.25317460317460316,
+      "latency_p50_seconds": 28.913514599989867,
+      "latency_p95_seconds": 43.80661939999845,
+      "input_tokens": 305067.0,
+      "output_tokens": 18968.0,
+      "model_calls": 30.0,
+      "calculation_operations": [],
+      "conflict_cases": []
+    },
+    {
+      "arm": "TRACE_CAND",
+      "run": "trace-cand-20261025-115233",
+      "questions": 6,
+      "schema_valid": 6,
+      "verdicts": [
+        {
+          "Name": "fail",
+          "Count": 1
+        },
+        {
+          "Name": "partial",
+          "Count": 5
+        }
+      ],
+      "mean_reference_element_recall": 0.3325396825396825,
+      "latency_p50_seconds": 40.97924500000954,
+      "latency_p95_seconds": 60.05423229999724,
+      "input_tokens": 426661.0,
+      "output_tokens": 26574.0,
+      "model_calls": 43.0,
+      "calculation_operations": [
+        "serial_recovery",
+        "percentage_point_difference"
+      ],
+      "conflict_cases": [
+        "Q138",
+        "Q398"
+      ]
+    },
+    {
+      "arm": "TRACE_CAND2",
+      "run": "trace-cand2-20261025-120223",
+      "questions": 6,
+      "schema_valid": 6,
+      "verdicts": [
+        {
+          "Name": "partial",
+          "Count": 6
+        }
+      ],
+      "mean_reference_element_recall": 0.3593915343915344,
+      "latency_p50_seconds": 47.87680430000182,
+      "latency_p95_seconds": 73.8547222000052,
+      "input_tokens": 380917.0,
+      "output_tokens": 27388.0,
+      "model_calls": 41.0,
+      "calculation_operations": [
+        "serial_recovery",
+        "percentage_point_difference"
+      ],
+      "conflict_cases": [
+        "Q184"
+      ]
+    },
+    {
+      "arm": "TRACE_CAND3",
+      "run": "trace-cand3-20261025-122825",
+      "questions": 6,
+      "schema_valid": 6,
+      "verdicts": [
+        {
+          "Name": "needs_review",
+          "Count": 1
+        },
+        {
+          "Name": "partial",
+          "Count": 5
+        }
+      ],
+      "mean_reference_element_recall": 0.33121693121693124,
+      "latency_p50_seconds": 53.03601750000962,
+      "latency_p95_seconds": 61.03112240000337,
+      "input_tokens": 392588.0,
+      "output_tokens": 26782.0,
+      "model_calls": 42.0,
+      "calculation_operations": [
+        "serial_recovery",
+        "percentage_point_difference"
+      ],
+      "conflict_cases": []
+    }
+  ],
+  "judge_attempts": 72,
+  "reused_judge_attempts": 54,
+  "new_final_judge_attempts": 18,
+  "judge_rejections": [
+    {
+      "id": "Q184",
+      "arm": "TRACE_CAND3",
+      "repeat": 0,
+      "error": "JudgeCallError",
+      "validation_error": "1 validation error for IndexedComparisonVerdict\nfacts.1.explanations\n  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden"
+    }
+  ],
+  "candidate3_case_verdicts": [
+    {
+      "id": "Q138",
+      "comparison_verdict": "partial",
+      "reference_fact_recall": 0.4444444444444444,
+      "comparison_issues": [
+        "The conference themes (national strategies and battery state of the art) are omitted.",
+        "Line 1 describes the association as 'association internationale des batteries lithium-ion', which is not in the reference and is unverified.",
+        "Élément de référence 3 absent : thèmes de la conférence non mentionnés.",
+        "Le rôle de Khalil Amine diffère : « présidée par » dans la référence, « sur invitation » dans la réponse.",
+        "Fact 1 omits that the conference was presided over by Khalil Amine; the answer only says he invited the contribution.",
+        "Fact 3 (conference themes on national strategies and battery state of the art) is absent from the answer."
+      ]
+    },
+    {
+      "id": "Q155",
+      "comparison_verdict": "partial",
+      "reference_fact_recall": 0.14285714285714285,
+      "comparison_issues": [
+        "The answer attributes 2.61 to an unspecified sample, while the reference ties it to OREAS 293.",
+        "The certified reference OREAS 293 (2.67 ± 0.10) and the 2.69 result are not presented.",
+        "The answer omits the training context and the mass-balance use of the three points.",
+        "Only two of four measured densities (2.61 and 2.57) are reported; 2.60 and 2.69 are missing.",
+        "The 2.61 value is not attributed to OREAS 293, although the reference assigns all four values to that certified sample.",
+        "Training details (theoretical and practical sessions, M. Chargui's habilitation) and the AF/CF/RF mass-balance use are absent.",
+        "Quatre valeurs sur cinq sont incomplètes ou absentes (2,61 non attribuée, 2,60 et 2,69 absentes).",
+        "La formation de M. Chargui et les points AF, CF, RF sont absents.",
+        "La réponse ne fournit pas la valeur certifiée OREAS 293 (2,67 ± 0,10)."
+      ]
+    },
+    {
+      "id": "Q184",
+      "comparison_verdict": "needs_review",
+      "reference_fact_recall": 0.5,
+      "comparison_issues": [
+        "YAK R01 composition and mass are entirely omitted, despite being a core requested finding.",
+        "AZAGNIE 1 sample is not mentioned.",
+        "The DRX Panalytical X'PERT instrument and 5-70° 2θ parameters are not stated; the answer instead describes a generic 'DRX avec calcul normatif' that is not in the reference.",
+        "The answer's claim that the ALEPE table had a verification gap is an unverified meta-comment about the retrieval process.",
+        "Le YAK R01 est absent, alors qu'il fait partie de la réponse attendue.",
+        "Le troisième échantillon AZAGNIE 1 n'est pas cité.",
+        "La méthode DRX est décrite sans l'instrument ni la plage angulaire de la référence.",
+        "La ligne 5 est une ligne de tableau vide.",
+        "La phrase sur une « lacune de vérification » est un commentaire méta qui ne correspond à aucun fait de la référence."
+      ]
+    },
+    {
+      "id": "Q398",
+      "comparison_verdict": "partial",
+      "reference_fact_recall": 0.0,
+      "comparison_issues": [
+        "Omits the negative results for KH/18/1108 and KH/18/0978.",
+        "Hedges the positive organic-matter finding for KH/18/0920 and KH/18/1037 instead of stating it as reported.",
+        "Omits the cathode observation for KH/18/1037.",
+        "Correctly flags the conflict between the report's non-presence conclusion and the lot-level observations.",
+        "Negative findings for KH/18/1108 and KH/18/0978 are omitted.",
+        "Surface-of-filtered-solution observation is not stated for KH/18/0920 and KH/18/1037; presence is heavily hedged.",
+        "Cathode observation for KH/18/1037 is absent.",
+        "Line 5 cites an unidentified later document, which is not part of the reference and cannot be verified from the supplied material.",
+        "Omits the negative findings for KH/18/1108 and KH/18/0978.",
+        "Hedges the positive organic-matter observations for KH/18/0920 and KH/18/1037 rather than reporting them directly.",
+        "Correctly flags the conflict between the lot-level observations and the report's non-presence conclusion."
+      ]
+    },
+    {
+      "id": "Q481",
+      "comparison_verdict": "partial",
+      "reference_fact_recall": 0.5,
+      "comparison_issues": [
+        "Fact 2 omits the reference's interpretation of possible balance or sampling discrepancies.",
+        "The answer's reference to the 21 May cut-off date is extra context not in the reference and cannot be verified from the supplied data.",
+        "The suggested explanation (écarts de bilan ou d'échantillonnage) is absent from the answer.",
+        "The answer's note that the report covers performance as of 21 May is extra context not in the reference and is unverified against the source.",
+        "Le fait 2 ne mentionne pas la cause probable (écarts de bilan ou d'échantillonnage) indiquée par la référence."
+      ]
+    },
+    {
+      "id": "Q77",
+      "comparison_verdict": "partial",
+      "reference_fact_recall": 0.4,
+      "comparison_issues": [
+        "The intermediate ore stock (about 500 kt at 0.8% Cu) is missing.",
+        "The quartzite facies finding is missing.",
+        "The malachite fineness comparison with DRC/Zambia is missing.",
+        "The intermediate ore stock of about 500 kt at 0.8% Cu is missing.",
+        "The statement that quartzite facies make up most of the quarry reserves is missing.",
+        "The comparison of malachite fineness with DRC/Zambia is missing.",
+        "The report reference CR/AF/AG/PV/19/18 is not cited (not required).",
+        "The answer correctly identifies the expert and the Colline B red ore stock, so it contains useful core findings."
+      ]
+    }
+  ],
+  "targeted_gate_passed": false,
+  "production_promotion": false,
+  "development_53_started": false,
+  "heldout_23_started": false,
+  "full_466_started": false,
+  "gate_reasons": [
+    "All reviewed answers remain incomplete or review-required under the fixed rubric",
+    "Conflict behavior is not consistently retained",
+    "Candidate latency exceeds the trace baseline; no production promotion"
+  ]
+}

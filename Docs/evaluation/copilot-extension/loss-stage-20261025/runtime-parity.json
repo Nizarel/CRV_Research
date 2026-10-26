@@ -1,0 +1,29 @@
+{
+  "deployed_source_corruption": false,
+  "initial_console_readback_mojibake_detected": true,
+  "actual_mounted_baseline_answer_hash_verified": true,
+  "archive_readback_encoding": "utf-8",
+  "runs": [
+    {
+      "native_config_sha256": "f8b0a202abaf38d88b98938f9365aa7977dc1825698a14ba9743c0ce9e386373",
+      "mounted_source_hashes_verified": true,
+      "source_archive_sha256": "c81f023c68e667895a73421ace2ac3ec4b7be151ea6f29373621668f906cf118",
+      "run": "trace-base-20261025-113847",
+      "image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f"
+    },
+    {
+      "native_config_sha256": "f8b0a202abaf38d88b98938f9365aa7977dc1825698a14ba9743c0ce9e386373",
+      "mounted_source_hashes_verified": true,
+      "source_archive_sha256": "0a8fdb02a85ef1a4ff356ca731f2c579d342cfc458f289143bb336dea39be7af",
+      "run": "trace-cand-20261025-115233",
+      "image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f"
+    },
+    {
+      "native_config_sha256": "f8b0a202abaf38d88b98938f9365aa7977dc1825698a14ba9743c0ce9e386373",
+      "mounted_source_hashes_verified": true,
+      "source_archive_sha256": "34e08c53acc9f8e3e2c13ec5a627752e20653bfda30f116bbe06ddbc92daa5cb",
+      "run": "trace-cand2-20261025-120223",
+      "image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f"
+    }
+  ]
+}

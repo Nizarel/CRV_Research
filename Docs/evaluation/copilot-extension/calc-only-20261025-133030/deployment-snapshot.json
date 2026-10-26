@@ -1,0 +1,40 @@
+{
+  "run_id": "calc-only-20261025-133030",
+  "captured_at": "2026-10-25T20:31:19.0715888Z",
+  "source_deployment": "crv-research-web",
+  "isolated_deployment": "crv-eval-calc-only-20261025-133030",
+  "namespace": "crv",
+  "agent_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f",
+  "agent_model_endpoint": "https://manadry.cognitiveservices.azure.com/",
+  "retrieval_model_endpoint": "https://cog-awmc6icu2kueq.cognitiveservices.azure.com/",
+  "secret_reference": "https://kv-awmc6icu2kueq.vault.azure.net/secrets/manadry-di-key",
+  "settings_sha256": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+  "infrastructure_sha256": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+  "package_root": "/usr/local/lib/python3.12/site-packages/crv_agent",
+  "diagnostics_enabled": true,
+  "module_overlays": {
+    "orchestration/prompts.py": "16c5f2e8d42369f155ac1b507bafa8d73bacb9da443ce20b76c1c5a65f1887c5",
+    "orchestration/nodes/answer.py": "6310b34dabcb7e78f753700bf458a0252c9e44324265bd880db20240f5c63b1a",
+    "domain/evidence.py": "cc2c7a90f922eefab8f965c5b67dabe6a5e53e588f9435ae8718b9f9a1be3631",
+    "adapters/models.py": "18b8b28335f4251cf094635ea76ffa361c11efe8d6af6cab36ce4a63942b2947",
+    "orchestration/nodes/research.py": "a9eaef668e66cac5beb823fb65b0bf5d977c5f30ea5a2dcf48e159fe290dcb3b",
+    "runtime/infrastructure.py": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+    "api/app.py": "7ec28931607c37eee50b85887c6479afe66deea67a9bcb4e14079194bd4aafb2",
+    "runtime/settings.py": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+    "services/calculation.py": "26c16b593610732b97b673afd9d0840c659888c545107fb78a48fb2ba4b3b493"
+  },
+  "overlay_root": "Docs/evaluation/copilot-extension/calc-only-20261025-133030/overlay",
+  "judge": {
+    "provider": "github-copilot-sdk",
+    "sdk_version": "1.0.26",
+    "model": "claude-haiku-5.5"
+  },
+  "resources": {
+    "credential": "crv-eval-calc-only-20261025-133030-model",
+    "deployment": "crv-eval-calc-only-20261025-133030",
+    "code_config": "crv-eval-calc-only-20261025-133030-code",
+    "native_config": "crv-eval-calc-only-20261025-133030-native"
+  },
+  "production_deployment_changed": false,
+  "secret_version": "d53a1a92693c4077921d240645de412e"
+}

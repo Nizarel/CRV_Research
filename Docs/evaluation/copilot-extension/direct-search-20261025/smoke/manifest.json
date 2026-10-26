@@ -1,0 +1,18 @@
+{
+  "started_at": "2026-10-25T15:20:00.273105+00:00",
+  "comparisons_sha256": "3409530cb49af9a4ae506161702b5b2ade2e31138bdc160ad5d8ddc551a12405",
+  "endpoint": "https://gptkb-awmc6icu2kueq.search.windows.net",
+  "index": "crv-evidence-v1",
+  "release": "crv-v1",
+  "top": 10,
+  "concurrency": 2,
+  "selected_ids": [
+    "Q398"
+  ],
+  "statuses": {
+    "partial": 1
+  },
+  "oracle_warning": "Reference-informed lookups are not fair retrieval or answer-quality scores",
+  "scope": "Azure AI Search directly, no agent/KG scoping or answer generation",
+  "source_passages_saved": true
+}

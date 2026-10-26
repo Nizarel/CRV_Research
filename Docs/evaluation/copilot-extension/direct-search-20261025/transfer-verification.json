@@ -1,0 +1,64 @@
+{
+  "temporary_files_removed": true,
+  "artifacts": [
+    {
+      "artifact": "followup-Q304",
+      "sha256": "5e75dfbd12149c1fb8c349a8ac600a3fc7d1ad8518d963aaa29688cc484a70bd"
+    },
+    {
+      "artifact": "followup-Q123",
+      "sha256": "c2f61550139d5df7e8df477fd951813d965edfdc77e5944a2c51ca12849d81ee"
+    },
+    {
+      "artifact": "followup-Q111",
+      "sha256": "ccd1ff9b10e3f272cde6b8603a2912276314bf95e76957cddf7927eeb611dd1b"
+    },
+    {
+      "artifact": "followup-Q129",
+      "sha256": "37975f1061a47a6a2c37968ddcc3d164d749286d0ef00fbc0169a33d35f354e4"
+    },
+    {
+      "artifact": "followup-Q353",
+      "sha256": "6775d8ad2b838c64f6cfdfab789df22c06f093f0b7e431c71b1389692f755214"
+    },
+    {
+      "artifact": "followup-Q184",
+      "sha256": "e65a29d82972aae919b9ef2d3a3854d915fbe49e7ae74b50ad592563a171538d"
+    },
+    {
+      "artifact": "followup-Q226",
+      "sha256": "05f7e69b304ec10493f32eacaa14bef2feae854f6623af8664c1107cf61ec39d"
+    },
+    {
+      "artifact": "followup-Q398",
+      "sha256": "bb5fbb9b8c173499e0d897f629c815bdd9a0e8650b1c8e9948a87439f2b79cd5"
+    },
+    {
+      "artifact": "retrieval",
+      "sha256": "fa809fb6a22fdbfcb21caef8c1d2408a05c9a14c284678367a01cfc36a040a0a"
+    },
+    {
+      "artifact": "followup-Q77",
+      "sha256": "f141a1038bea588ecb9c07b4a9a406952cc5f962cd67020af743957f7e2a88df"
+    },
+    {
+      "artifact": "followup-Q138",
+      "sha256": "195396b8c9ff794742e540122c6366c998fc52f79a752592e50e073c7b70b1a5"
+    },
+    {
+      "artifact": "followup-Q111-complete",
+      "sha256": "bc103404f054c6a3908848cf5806aea26e20dee7f62c0bc0c9a1f4b5303deffd"
+    },
+    {
+      "artifact": "followup-Q123-complete",
+      "sha256": "2dc6173e5fec4194ea2457c54f63bc2806c703a6295a7d4e2c4e464df3aa7023"
+    },
+    {
+      "artifact": "smoke",
+      "sha256": "c3fd987cb01c391cb29898e166dea5e6fe2b1c94c68e4e4529d12e8f1c195b2f"
+    }
+  ],
+  "all_remote_local_hashes_match": true,
+  "verified_at": "2026-10-25T15:42:18.6354789Z",
+  "executed_script_sha256": "d032f2dd1a83868294a93d518a65ec1dc861ec90a8aef9d1c142d0f783a37a28"
+}

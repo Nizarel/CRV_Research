@@ -1,0 +1,41 @@
+{
+  "run_id": "cont-20261025-1430",
+  "captured_at": "2026-10-25T21:00:34.0657670Z",
+  "source_deployment": "crv-research-web",
+  "isolated_deployment": "crv-eval-cont-20261025-1430",
+  "namespace": "crv",
+  "agent_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f",
+  "agent_model_endpoint": "https://manadry.cognitiveservices.azure.com/",
+  "retrieval_model_endpoint": "https://cog-awmc6icu2kueq.cognitiveservices.azure.com/",
+  "secret_reference": "https://kv-awmc6icu2kueq.vault.azure.net/secrets/manadry-di-key",
+  "settings_sha256": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+  "infrastructure_sha256": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+  "package_root": "/usr/local/lib/python3.12/site-packages/crv_agent",
+  "diagnostics_enabled": true,
+  "module_overlays": {
+    "orchestration/nodes/research.py": "a9eaef668e66cac5beb823fb65b0bf5d977c5f30ea5a2dcf48e159fe290dcb3b",
+    "services/calculation.py": "26c16b593610732b97b673afd9d0840c659888c545107fb78a48fb2ba4b3b493",
+    "adapters/models.py": "9710d0e270d864fc3115e00c0982524605bfa1ef35012c85b981dd821781cfbc",
+    "services/anchoring.py": "1bdcc042b5db6baae8cf1941911c471e1bcfc2dd3d09a8d9fa96c2299749e37a",
+    "orchestration/prompts.py": "16c5f2e8d42369f155ac1b507bafa8d73bacb9da443ce20b76c1c5a65f1887c5",
+    "api/app.py": "7ec28931607c37eee50b85887c6479afe66deea67a9bcb4e14079194bd4aafb2",
+    "domain/evidence.py": "cc2c7a90f922eefab8f965c5b67dabe6a5e53e588f9435ae8718b9f9a1be3631",
+    "runtime/infrastructure.py": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+    "orchestration/nodes/answer.py": "6310b34dabcb7e78f753700bf458a0252c9e44324265bd880db20240f5c63b1a",
+    "runtime/settings.py": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d"
+  },
+  "overlay_root": "Docs/evaluation/copilot-extension/cont-20261025-1430/overlay",
+  "judge": {
+    "sdk_version": "1.0.26",
+    "model": "claude-haiku-5.5",
+    "provider": "github-copilot-sdk"
+  },
+  "resources": {
+    "code_config": "crv-eval-cont-20261025-1430-code",
+    "native_config": "crv-eval-cont-20261025-1430-native",
+    "credential": "crv-eval-cont-20261025-1430-model",
+    "deployment": "crv-eval-cont-20261025-1430"
+  },
+  "production_deployment_changed": false,
+  "secret_version": "d53a1a92693c4077921d240645de412e"
+}

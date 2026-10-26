@@ -1,0 +1,12 @@
+{
+  "run": "calc-only-20261025-133030",
+  "deleted": [
+    "deployment.apps/crv-eval-calc-only-20261025-133030",
+    "configmap/crv-eval-calc-only-20261025-133030-code",
+    "configmap/crv-eval-calc-only-20261025-133030-native",
+    "secret/crv-eval-calc-only-20261025-133030-model"
+  ],
+  "remaining": [],
+  "production_deployment_changed": false,
+  "deleted_at": "2026-10-25T21:33:37.3008410Z"
+}

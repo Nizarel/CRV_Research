@@ -1,0 +1,440 @@
+{
+  "calibration_id": "calibration-20261025-v2",
+  "attempts": 72,
+  "valid_attempts": 71,
+  "valid_fraction": 0.9861111111111112,
+  "cases_with_valid_majority": 24,
+  "raw_majority_review_agreement_count": 19,
+  "raw_majority_review_agreement_fraction": 0.7916666666666666,
+  "aggregate_review_agreement_count": 18,
+  "critical_false_pass_attempts": 0,
+  "checks": {
+    "complete_72_unique_attempts": true,
+    "valid_attempt_fraction": true,
+    "every_case_has_valid_majority": true,
+    "frozen_review_agreement": false,
+    "no_critical_false_passes": true,
+    "source_hashes_unchanged": true
+  },
+  "promotion_gate_passed": false,
+  "reviewer": "GitHub Copilot assistant, not stakeholder-approved truth",
+  "full_rejudge_started": false,
+  "cases": [
+    {
+      "id": "Q77",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Expert and both stock tonnages/grades are present, but the intermediate-stock name, quartzite reserves, malachite comparison and meeting details are missing or explicitly unconfirmed."
+    },
+    {
+      "id": "Q93",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Both performance targets and all three variants are covered. The reference also requires circuit diagnosis and integral flow analysis, which are omitted; source identifier and requesting directorate are background rather than independent correctness failures."
+    },
+    {
+      "id": "Q101",
+      "expected_verdict": "pass",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": false,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": false,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "All six samples, ICP-AES, mercury and carbon-sulfur methods, static PA/PN tests and EN12457 leaching are present. The reference does not explicitly require leaching every sample; the answer's subset qualification is not by itself a contradiction. Source groundedness is not certified."
+    },
+    {
+      "id": "Q109",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Date, copper/silver/arsenic values, gangue, chalcopyrite and main oxide values match. The Calamine crushing location and dense-liquid-to-DMS sequence are omitted. Bi/Sb detection limits are more qualified than the reference's word absent and are not automatically zero or a critical error."
+    },
+    {
+      "id": "Q129",
+      "expected_verdict": "needs_review",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": false,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The frozen reference conflates PN minus PA with PN/PA, which have different meanings and units. The answer correctly separates them but omits reference chemistry and analytical workflow. Business clarification is required, not a silent reference rewrite."
+    },
+    {
+      "id": "Q138",
+      "expected_verdict": "fail",
+      "judge_majority": "fail",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "fail",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "fail",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The answer does not establish conference participation, organizers/chair, two posters or themes. Mentioning a report reviser does not answer the requested participation. This is a reference-coverage failure, not proof the abstention is unsafe or fabricated."
+    },
+    {
+      "id": "Q145",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Recovery, grade, throughput and improvement objectives are substantially covered. The two tailings inventories, their dates/tonnages/grades, overall gold issue and stripping-stock quantity/grade are missing."
+    },
+    {
+      "id": "Q156",
+      "expected_verdict": "pass",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": false,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": false,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "All completed sampling/access/protection/weighbridge/QA-QC actions and both remaining corrections are covered, including access scheduled with the thickener-pump review. Missing project title or owner is contextual, not a failure of the requested action comparison."
+    },
+    {
+      "id": "Q193",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Hydro extractor, organic-effluent treatment, noise/lighting, training and labeling follow-up are covered. Restaurant work and its completed status are missing, and the answer does not establish the requested meeting period."
+    },
+    {
+      "id": "Q236",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "All three definitions are substantively correct, but the reference also includes annex-listed projects' EIA applicability, which is omitted. The answer's official-version/current-law caveat is not itself an error."
+    },
+    {
+      "id": "Q237",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The broader evaluation framework, strategic assessment and low-impact notice are covered. Existing-installation audit purpose, terms of reference and mining examples/public-inquiry context are incomplete. The applicability caveat is not automatically false."
+    },
+    {
+      "id": "Q279",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The answer avoids inventing a current copper price and states it is outside this backend. It omits the required market-source redirect and includes an irrelevant hazardous-protocol warning."
+    },
+    {
+      "id": "Q281",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "valid_attempts": 2,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 2
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": false,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The answer explicitly says available sources cannot establish CRMA obligations and points to the official text. General external knowledge is permitted but not required. A dangling reference to figures is a presentation defect, not a supplied false legal obligation."
+    },
+    {
+      "id": "Q282",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The answer states the GISTM text/version is absent and explicitly prevents attributing internal practices to GISTM requirements. Related internal examples need not be exactly the illustrative examples in the reference."
+    },
+    {
+      "id": "Q284",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The answer corrects the lack of an identified Bleida EIA and distinguishes a 2025 geochemical/DMA study. It does not offer the 2019/2023/2025 alternatives or clearly name the available sites' EIA set as the reference requests."
+    },
+    {
+      "id": "Q291",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Work Index meaning, units and comparative practice are discussed, but the Bond equation and cited internal example values are absent. The reference permits labeled external theory whereas the deployed product is corpus-only; do not resolve that policy discrepancy by inventing sources."
+    },
+    {
+      "id": "Q304",
+      "expected_verdict": "needs_review",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": false,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The reference announces four lots but describes only three. The answer also omits several lot-specific dimensions and sampling details. The inconsistency requires business review, not penalizing an unverified fourth-lot detail as automatically false."
+    },
+    {
+      "id": "Q325",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "All principal diagnostic, optimization and sampling objectives are covered. The reference additionally requires the nearly exhausted digue-3 context and sampled-stream list, which are missing."
+    },
+    {
+      "id": "Q345",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 2
+        },
+        {
+          "Name": "partial",
+          "Count": 1
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": false,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Client-conforming calcium molybdate, simpler/less-risky sodium-sulfate process with unfinished calcium work, and promising final Co/Mn D2EHPA results all match. Extra preliminary values are qualified and not automatically contradicted by their absence from the reference."
+    },
+    {
+      "id": "Q346",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Epoxy ratio, diamond sawing, silicon-carbide preparation, glass mounting and approximately 30-micron finishing are present. Polished-section options are omitted. The quoted grit ordering needs source review and is not independently certified here."
+    },
+    {
+      "id": "Q398",
+      "expected_verdict": "fail",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": false,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": false,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The answer supplies only report/date metadata. It does not name the positive and negative lots, the dark cathode or the explicit contradiction in the report conclusion; none of the question's core requested discrimination is answered."
+    },
+    {
+      "id": "Q408",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 2
+        },
+        {
+          "Name": "fail",
+          "Count": 1
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": false,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "Some characterization, leaching and organic-matter checks appear, but numerical radiometry, AA/ICP, Cl/F, humidity, detailed protocol and possible control cathode are missing. The qualification about systematic application may be reasonable but does not satisfy the full reference."
+    },
+    {
+      "id": "Q481",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The formula, published 90.36 percent result and distinct 94.68 percent value are present. The answer explicitly does not recompute the arithmetic and omits the approximately 4.3-point gap and balance/sampling interpretation required by the reference."
+    },
+    {
+      "id": "Q511",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0,
+      "review_rationale": "The March-5 crisis, shutdown following the CTT Guemassa case and continuity plan all match. Additional qualified operational details are not automatically false or outside scope."
+    }
+  ]
+}

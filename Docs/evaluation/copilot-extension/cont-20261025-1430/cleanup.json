@@ -1,0 +1,12 @@
+{
+  "run": "cont-20261025-1430",
+  "deleted": [
+    "deployment.apps/crv-eval-cont-20261025-1430",
+    "configmap/crv-eval-cont-20261025-1430-code",
+    "configmap/crv-eval-cont-20261025-1430-native",
+    "secret/crv-eval-cont-20261025-1430-model"
+  ],
+  "remaining": [],
+  "production_deployment_changed": false,
+  "deleted_at": "2026-10-25T21:24:18.9819679Z"
+}

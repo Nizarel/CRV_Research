@@ -1,0 +1,40 @@
+{
+  "run_id": "trace-cand-20261025-115233",
+  "captured_at": "2026-10-25T18:52:37.4328289Z",
+  "source_deployment": "crv-research-web",
+  "isolated_deployment": "crv-eval-trace-cand-20261025-115233",
+  "namespace": "crv",
+  "agent_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f",
+  "agent_model_endpoint": "https://manadry.cognitiveservices.azure.com/",
+  "retrieval_model_endpoint": "https://cog-awmc6icu2kueq.cognitiveservices.azure.com/",
+  "secret_reference": "https://kv-awmc6icu2kueq.vault.azure.net/secrets/manadry-di-key",
+  "settings_sha256": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+  "infrastructure_sha256": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+  "package_root": "/usr/local/lib/python3.12/site-packages/crv_agent",
+  "diagnostics_enabled": true,
+  "module_overlays": {
+    "orchestration/nodes/research.py": "2c11ac766104dc47a970e9068ef34c3b7224c134d03489685a179ada168cb5fa",
+    "orchestration/nodes/answer.py": "7fb23d928e3a161a692b8530c6163aa4cc9c990f940bbbb53823448d230dac7d",
+    "orchestration/prompts.py": "1e444a18e3ac0ebd39d6b2eb4240345d57eaf3242663f3f8c8f340504fa728e5",
+    "services/calculation.py": "bbadebcc3401c384fcedf0705807fc112b027040f6d0c4d06a8d81d83bb24453",
+    "api/app.py": "7ec28931607c37eee50b85887c6479afe66deea67a9bcb4e14079194bd4aafb2",
+    "runtime/settings.py": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+    "runtime/infrastructure.py": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+    "orchestration/extraction.py": "4b1fbdf420cda7b1d5bfeed87ec5a8af9a041c71e2dbcfd92239b88564d8230e",
+    "domain/evidence.py": "ff3cf568457ea2e095ad804e49b0b23d4f75d4d7bdcbfbbff9e45df6d2173d92",
+    "adapters/models.py": "f164a7e3cecf20948cc9b99094f718c59fec53105fdcbbbdc478d36afea51d4b"
+  },
+  "judge": {
+    "model": "claude-haiku-5.5",
+    "sdk_version": "1.0.26",
+    "provider": "github-copilot-sdk"
+  },
+  "resources": {
+    "code_config": "crv-eval-trace-cand-20261025-115233-code",
+    "native_config": "crv-eval-trace-cand-20261025-115233-native",
+    "deployment": "crv-eval-trace-cand-20261025-115233",
+    "credential": "crv-eval-trace-cand-20261025-115233-model"
+  },
+  "production_deployment_changed": false,
+  "secret_version": "d53a1a92693c4077921d240645de412e"
+}

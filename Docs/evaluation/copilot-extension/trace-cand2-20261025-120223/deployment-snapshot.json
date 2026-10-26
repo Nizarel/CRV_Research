@@ -1,0 +1,40 @@
+{
+  "run_id": "trace-cand2-20261025-120223",
+  "captured_at": "2026-10-25T19:02:30.1348254Z",
+  "source_deployment": "crv-research-web",
+  "isolated_deployment": "crv-eval-trace-cand2-20261025-120223",
+  "namespace": "crv",
+  "agent_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f",
+  "agent_model_endpoint": "https://manadry.cognitiveservices.azure.com/",
+  "retrieval_model_endpoint": "https://cog-awmc6icu2kueq.cognitiveservices.azure.com/",
+  "secret_reference": "https://kv-awmc6icu2kueq.vault.azure.net/secrets/manadry-di-key",
+  "settings_sha256": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+  "infrastructure_sha256": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+  "package_root": "/usr/local/lib/python3.12/site-packages/crv_agent",
+  "diagnostics_enabled": true,
+  "module_overlays": {
+    "api/app.py": "7ec28931607c37eee50b85887c6479afe66deea67a9bcb4e14079194bd4aafb2",
+    "orchestration/nodes/answer.py": "7fb23d928e3a161a692b8530c6163aa4cc9c990f940bbbb53823448d230dac7d",
+    "orchestration/nodes/research.py": "2c11ac766104dc47a970e9068ef34c3b7224c134d03489685a179ada168cb5fa",
+    "services/calculation.py": "bbadebcc3401c384fcedf0705807fc112b027040f6d0c4d06a8d81d83bb24453",
+    "domain/evidence.py": "ff3cf568457ea2e095ad804e49b0b23d4f75d4d7bdcbfbbff9e45df6d2173d92",
+    "runtime/settings.py": "fbca5068e3efbdbd2bd22acb4e72edf51f33d25466da4e6acd86079ffb6cc94d",
+    "orchestration/extraction.py": "6f2a3a0fae18dcfa877a7abdf2a26747a8d9772d9e9ba424f58c0e4a5f9206c6",
+    "runtime/infrastructure.py": "3c51dfae22ca1928828b2198f903d680fe6a2bb343e686e700dfe9ec22e25a32",
+    "adapters/models.py": "f164a7e3cecf20948cc9b99094f718c59fec53105fdcbbbdc478d36afea51d4b",
+    "orchestration/prompts.py": "5d0bedd96ad123187913b66886859f364958e8d414bf47e51125b4172615d6b0"
+  },
+  "judge": {
+    "sdk_version": "1.0.26",
+    "provider": "github-copilot-sdk",
+    "model": "claude-haiku-5.5"
+  },
+  "resources": {
+    "code_config": "crv-eval-trace-cand2-20261025-120223-code",
+    "deployment": "crv-eval-trace-cand2-20261025-120223",
+    "native_config": "crv-eval-trace-cand2-20261025-120223-native",
+    "credential": "crv-eval-trace-cand2-20261025-120223-model"
+  },
+  "production_deployment_changed": false,
+  "secret_version": "d53a1a92693c4077921d240645de412e"
+}

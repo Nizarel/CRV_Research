@@ -1,0 +1,12 @@
+{
+  "full_rejudge_started": false,
+  "reviewer_labels_sent_to_judge": false,
+  "started_at": "2026-10-25T14:22:52.3740309Z",
+  "hashes": {
+    "selection.json": "0297b81f04123dd8b64d169021afb44b31a3a997a96fbe1214ca3ff943162f1d",
+    "reference-review.jsonl": "93893e2d7e313e5cebbaf0095cc4655f0810bffe290d498eee0c12533639cf8a",
+    "src/ingestion/ingest_pipeline/tools/golden/answer_compare.py": "80876ed32bfe88c693c5e5eaf72cf87c1d2971599387845e1d64c0b47a7ae214",
+    "src/ingestion/ingest_pipeline/tools/golden/copilot_judge.py": "76af566ea9580c0f0faec77150a81a7ac29a66e97b880baa0462e68c1e92cf8b",
+    "src/ingestion/ingest_pipeline/tools/golden/copilot_sdk_bridge.mjs": "53dd331d9a0a4d18815da6447c4b08b1d5c5ecf9920fcd0cef7e3ebc82fdaf11"
+  }
+}

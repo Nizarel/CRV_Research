@@ -1,0 +1,22 @@
+{
+  "deployment": "crv-research-web",
+  "container": "backend",
+  "rollback_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f",
+  "release_image": "acrcrvscus.azurecr.io/crv-research-agent@sha256:ebde6c5aa508eef5ca8f761c66874a908efed6b11d2a7bf19e0b24a3a52973ae",
+  "release_tag": "rd31",
+  "previous_revision": "16",
+  "started_at": "2026-10-26T00:43:29.0850518Z",
+  "completed_at": "2026-10-26T00:45:16.5472822Z",
+  "verification": {
+    "pod_ready": true,
+    "restarts": 0,
+    "live_module_hashes_match_tested": true,
+    "crv_agent_check_failures": [],
+    "search_release": "crv-v1",
+    "kg_documents": 1848,
+    "service_api_ready": "200 ready",
+    "web_healthz": 200,
+    "image_diff_vs_rollback": "exactly 8 modules",
+    "live_chat_smoke": "not run: API cannot delete test conversations from shared history"
+  }
+}

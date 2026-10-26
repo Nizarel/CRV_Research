@@ -1,0 +1,12 @@
+{
+  "run": "comb-20261025-1501",
+  "deleted": [
+    "deployment.apps/crv-eval-comb-20261025-1501",
+    "configmap/crv-eval-comb-20261025-1501-code",
+    "configmap/crv-eval-comb-20261025-1501-native",
+    "secret/crv-eval-comb-20261025-1501-model"
+  ],
+  "remaining": [],
+  "production_deployment_changed": false,
+  "deleted_at": "2026-10-25T23:02:02.1461091Z"
+}

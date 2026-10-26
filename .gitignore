@@ -15,3 +15,6 @@ htmlcov/
 .env
 .env.*
 !.env.example
+
+# Raw evaluation dumps (answers, judge responses, search hits) stay local; force-add linked ones.
+Docs/evaluation/copilot-extension/**/*.jsonl

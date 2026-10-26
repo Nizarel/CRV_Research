@@ -1,0 +1,260 @@
+{
+ "Q1": [
+  "not_extracted",
+  "not_retrieved",
+  "not_extracted"
+ ],
+ "Q2": [
+  "not_retrieved",
+  "not_retrieved",
+  "not_retrieved"
+ ],
+ "Q4": [
+  "answered",
+  "answered"
+ ],
+ "Q5": [
+  "not_answered",
+  "answered",
+  "not_retrieved",
+  "not_extracted"
+ ],
+ "Q7": [
+  "answered"
+ ],
+ "Q8": [
+  "not_extracted"
+ ],
+ "Q10": [
+  "answered",
+  "answered"
+ ],
+ "Q11": [
+  "not_extracted"
+ ],
+ "Q13": [
+  "not_extracted",
+  "not_retrieved",
+  "not_extracted"
+ ],
+ "Q14": [
+  "answered",
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q16": [
+  "answered",
+  "answered"
+ ],
+ "Q17": [
+  "answered",
+  "answered",
+  "answered"
+ ],
+ "Q19": [
+  "not_retrieved"
+ ],
+ "Q20": [
+  "not_answered"
+ ],
+ "Q22": [
+  "not_extracted",
+  "not_extracted",
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q23": [
+  "answered"
+ ],
+ "Q25": [
+  "not_answered"
+ ],
+ "Q26": [
+  "not_answered",
+  "not_answered"
+ ],
+ "Q28": [
+  "answered"
+ ],
+ "Q29": [
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q31": [
+  "not_answered",
+  "not_extracted",
+  "not_extracted",
+  "answered",
+  "not_answered",
+  "not_extracted",
+  "not_answered",
+  "not_answered"
+ ],
+ "Q32": [
+  "answered",
+  "answered",
+  "not_extracted",
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q34": [
+  "not_extracted",
+  "answered",
+  "not_extracted",
+  "not_answered",
+  "not_extracted"
+ ],
+ "Q35": [
+  "not_extracted"
+ ],
+ "Q37": [
+  "answered",
+  "answered",
+  "answered"
+ ],
+ "Q38": [
+  "not_extracted",
+  "not_answered",
+  "not_answered",
+  "answered",
+  "not_answered",
+  "not_answered"
+ ],
+ "Q40": [
+  "not_extracted",
+  "not_extracted",
+  "not_extracted",
+  "not_retrieved",
+  "answered",
+  "not_answered"
+ ],
+ "Q41": [
+  "not_extracted",
+  "not_answered",
+  "answered",
+  "not_extracted",
+  "answered",
+  "not_answered"
+ ],
+ "Q43": [
+  "not_extracted",
+  "not_extracted",
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q44": [
+  "not_extracted",
+  "answered",
+  "not_extracted",
+  "not_retrieved"
+ ],
+ "Q45": [
+  "not_extracted",
+  "answered"
+ ],
+ "Q46": [
+  "answered",
+  "not_retrieved",
+  "not_retrieved",
+  "answered",
+  "answered",
+  "not_answered",
+  "not_retrieved",
+  "not_retrieved",
+  "not_retrieved",
+  "not_answered",
+  "not_retrieved",
+  "not_answered",
+  "answered",
+  "not_extracted"
+ ],
+ "Q48": [
+  "answered",
+  "answered",
+  "not_retrieved",
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q49": [
+  "not_answered",
+  "not_answered",
+  "not_extracted",
+  "not_extracted"
+ ],
+ "Q51": [
+  "not_answered",
+  "not_extracted",
+  "answered",
+  "not_extracted"
+ ],
+ "Q52": [
+  "not_retrieved",
+  "not_answered",
+  "not_retrieved"
+ ],
+ "Q53": [
+  "not_retrieved",
+  "not_answered",
+  "answered",
+  "answered",
+  "not_extracted"
+ ],
+ "Q54": [
+  "answered",
+  "answered",
+  "not_answered"
+ ],
+ "Q55": [
+  "not_retrieved",
+  "answered"
+ ],
+ "Q58": [
+  "answered",
+  "answered"
+ ],
+ "Q59": [
+  "not_retrieved",
+  "answered",
+  "answered",
+  "not_answered"
+ ],
+ "Q60": [
+  "not_extracted"
+ ],
+ "Q61": [
+  "not_extracted"
+ ],
+ "Q63": [
+  "answered",
+  "not_answered"
+ ],
+ "Q64": [
+  "not_retrieved",
+  "not_retrieved",
+  "not_retrieved"
+ ],
+ "Q65": [
+  "answered",
+  "answered",
+  "not_extracted"
+ ],
+ "Q67": [],
+ "Q69": [
+  "not_extracted"
+ ],
+ "Q70": [
+  "not_answered"
+ ],
+ "Q71": [
+  "not_retrieved",
+  "not_answered"
+ ],
+ "Q72": [],
+ "Q74": [
+  "not_extracted"
+ ],
+ "Q75": [
+  "not_answered",
+  "not_extracted"
+ ]
+}

@@ -1,0 +1,13 @@
+{
+  "questions": 1,
+  "queries": 1,
+  "query_errors": {},
+  "empty_queries": 0,
+  "hits_saved": 16,
+  "unique_passages": 16,
+  "arms": {
+    "document_followup": 1
+  },
+  "completed_at": "2026-10-25T15:32:31.866749+00:00",
+  "semantic_completeness": "not_scored"
+}

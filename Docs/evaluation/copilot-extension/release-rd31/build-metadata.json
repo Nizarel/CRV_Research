@@ -1,0 +1,48 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/acrcrvscus.azurecr.io/crv-research-agent?digest=sha256:24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f\u0026platform=linux%2Famd64",
+        "digest": {
+          "sha256": "24a3d5e70b37c9e3176e5963c2238c140722ce5474e1b219a5b45289ae4db04f"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "entryPoint": "Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ]
+      },
+      "environment": {
+        "platform": "linux/arm64"
+      }
+    }
+  },
+  "buildx.build.ref": "amd64-builder/amd64-builder0/ngp1lf6w82zf1ow96tl20riua",
+  "containerimage.config.digest": "sha256:6daf3ebcd9d899aba251d3a1c40c891ee90745192aed2dfbbf7802f4114ab2e5",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:ebde6c5aa508eef5ca8f761c66874a908efed6b11d2a7bf19e0b24a3a52973ae",
+    "size": 3254,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  },
+  "containerimage.digest": "sha256:ebde6c5aa508eef5ca8f761c66874a908efed6b11d2a7bf19e0b24a3a52973ae",
+  "image.name": "acrcrvscus.azurecr.io/crv-research-agent:rd31"
+}

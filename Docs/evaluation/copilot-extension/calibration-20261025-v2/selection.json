@@ -1,0 +1,33 @@
+{
+  "calibration_id": "calibration-20261025-v2",
+  "baseline_run": "manadry-20261024-190257",
+  "dataset_sha256": "1730faf9a9b81eee5c38d0c5cf838a71c8912e3737fbd655ac0da9e9cf1e6960",
+  "answers_sha256": "7b3e120f34a4e9b85b0bb1aed7c25604c24638ac6bca2ab293b6ca85b54bae8f",
+  "question_ids": [
+    "Q77", "Q93", "Q101", "Q109", "Q129", "Q138",
+    "Q145", "Q156", "Q193", "Q236", "Q237", "Q279",
+    "Q281", "Q282", "Q284", "Q291", "Q304", "Q325",
+    "Q345", "Q346", "Q398", "Q408", "Q481", "Q511"
+  ],
+  "selection_rule": "All twelve baseline-unscorable cases plus twelve quote, numeric, scope, conflict, ambiguous-reference and positive controls; no original held-out questions.",
+  "judge": {
+    "provider": "github-copilot-sdk",
+    "sdk_version": "1.0.26",
+    "model": "claude-haiku-5.5",
+    "rubric": "stakeholder-answer-v2",
+    "repeats": 3,
+    "concurrency": 2,
+    "planned_attempts": 72
+  },
+  "reviewer": "GitHub Copilot assistant",
+  "stakeholder_approved": false,
+  "review_policy": "Freeze reference-based review labels before SDK calls; do not treat assistant agreement as certified domain accuracy. Keep golden references and baseline answers unchanged.",
+  "gates": {
+    "minimum_valid_attempt_fraction": 0.98,
+    "minimum_cases_with_valid_majority": 24,
+    "minimum_assistant_review_agreement_fraction": 0.90,
+    "maximum_critical_inconsistencies": 0,
+    "require_source_hashes_unchanged": true
+  },
+  "full_rejudge_started": false
+}

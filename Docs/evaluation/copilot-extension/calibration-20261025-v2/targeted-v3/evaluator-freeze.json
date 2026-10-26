@@ -1,0 +1,13 @@
+{
+  "hashes": {
+    "src/ingestion/ingest_pipeline/tools/golden/copilot_judge.py": "1cf993e6ee25b5fc88906182d7590c12a151237542599fd769869197025ced97",
+    "Docs/evaluation/copilot-extension/calibration-20261025-v2/reference-review.jsonl": "93893e2d7e313e5cebbaf0095cc4655f0810bffe290d498eee0c12533639cf8a",
+    "src/ingestion/ingest_pipeline/tools/golden/answer_compare.py": "444ac80a93abc7e05f281fe3b5733608eb090e82e6985e9ec7f7f6dea1668b92",
+    "src/ingestion/ingest_pipeline/tools/golden/copilot_sdk_bridge.mjs": "53dd331d9a0a4d18815da6447c4b08b1d5c5ecf9920fcd0cef7e3ebc82fdaf11"
+  },
+  "source_answers_unchanged": true,
+  "started_at": "2026-10-25T14:52:07.9812633Z",
+  "purpose": "targeted diagnostic, not full calibration or promotion",
+  "planned_attempts": 18,
+  "labels_sent_to_judge": false
+}

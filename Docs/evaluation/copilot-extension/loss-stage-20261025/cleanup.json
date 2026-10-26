@@ -1,0 +1,12 @@
+{
+  "production_changed": false,
+  "isolated_runs_removed": [
+    "trace-base-20261025-113847",
+    "trace-cand-20261025-115233",
+    "trace-cand2-20261025-120223",
+    "trace-cand3-20261025-122825"
+  ],
+  "web_ready_replicas": 1,
+  "credential_values_exported": false,
+  "completed_at": "2026-10-25T19:36:18.4300560Z"
+}

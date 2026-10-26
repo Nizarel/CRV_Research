@@ -1,0 +1,661 @@
+{
+  "arm": "DEV_BASE2",
+  "questions": 6,
+  "records": [
+    {
+      "id": "Q17",
+      "category": "A",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true,
+        "research_complete": true
+      },
+      "answer_status": "answered",
+      "turn_error": null,
+      "judge_error": null,
+      "facet_errors": [],
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 8,
+        "model_calls": 6,
+        "reserved_tokens": 139890,
+        "input_tokens": 93784,
+        "output_tokens": 7219,
+        "cached_tokens": 0,
+        "reasoning_tokens": 541
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 1,
+          "input_tokens": 5088,
+          "output_tokens": 1093,
+          "cached_tokens": 0,
+          "reasoning_tokens": 216,
+          "seconds": 16.666,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 642,
+          "output_tokens": 205,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 4.603,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 1,
+          "input_tokens": 11806,
+          "output_tokens": 279,
+          "cached_tokens": 0,
+          "reasoning_tokens": 70,
+          "seconds": 7.928,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "worker": {
+          "calls": 3,
+          "input_tokens": 76248,
+          "output_tokens": 5642,
+          "cached_tokens": 0,
+          "reasoning_tokens": 255,
+          "seconds": 26.354,
+          "models": {
+            "gpt-5.6-luna-2026-07-09": 3
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 4.658,
+        "research": 12.045,
+        "reconcile": 0.276,
+        "answer": 24.48
+      },
+      "first_progress_seconds": 0.6019884999986971,
+      "first_finding_seconds": 13.349033599995892,
+      "first_answer_seconds": 42.201507299992954,
+      "total_seconds": 42.20289439999033
+    },
+    {
+      "id": "Q29",
+      "category": "A",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true,
+        "research_complete": true
+      },
+      "answer_status": "insufficient_evidence",
+      "turn_error": null,
+      "judge_error": null,
+      "facet_errors": [],
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 14,
+        "model_calls": 9,
+        "reserved_tokens": 211359,
+        "input_tokens": 148453,
+        "output_tokens": 5419,
+        "cached_tokens": 0,
+        "reasoning_tokens": 1068
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 1,
+          "input_tokens": 3657,
+          "output_tokens": 542,
+          "cached_tokens": 0,
+          "reasoning_tokens": 136,
+          "seconds": 10.0,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 652,
+          "output_tokens": 247,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 5.971,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 1,
+          "input_tokens": 6185,
+          "output_tokens": 469,
+          "cached_tokens": 0,
+          "reasoning_tokens": 72,
+          "seconds": 9.097,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "worker": {
+          "calls": 6,
+          "input_tokens": 137959,
+          "output_tokens": 4161,
+          "cached_tokens": 0,
+          "reasoning_tokens": 860,
+          "seconds": 88.706,
+          "models": {
+            "gpt-5.6-luna-2026-07-09": 4,
+            "gpt-5.6-terra-2026-07-09": 2
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 6.01,
+        "research": 42.648,
+        "reconcile": 0.325,
+        "answer": 18.9
+      },
+      "first_progress_seconds": 0.8650282000016887,
+      "first_finding_seconds": 15.868763100006618,
+      "first_answer_seconds": 68.92963030000101,
+      "total_seconds": 68.933629200008
+    },
+    {
+      "id": "Q31",
+      "category": "B",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true,
+        "research_complete": true
+      },
+      "answer_status": "partial",
+      "turn_error": null,
+      "judge_error": null,
+      "facet_errors": [],
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 6,
+        "model_calls": 10,
+        "reserved_tokens": 255100,
+        "input_tokens": 163995,
+        "output_tokens": 13940,
+        "cached_tokens": 0,
+        "reasoning_tokens": 1113
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 2,
+          "input_tokens": 14216,
+          "output_tokens": 2149,
+          "cached_tokens": 0,
+          "reasoning_tokens": 485,
+          "seconds": 42.9,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 2
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 655,
+          "output_tokens": 366,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 7.823,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 2,
+          "input_tokens": 23784,
+          "output_tokens": 1608,
+          "cached_tokens": 0,
+          "reasoning_tokens": 191,
+          "seconds": 31.879,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 2
+          }
+        },
+        "worker": {
+          "calls": 5,
+          "input_tokens": 125340,
+          "output_tokens": 9817,
+          "cached_tokens": 0,
+          "reasoning_tokens": 437,
+          "seconds": 131.288,
+          "models": {
+            "gpt-5.6-luna-2026-07-09": 4,
+            "gpt-5.6-terra-2026-07-09": 1
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 7.865,
+        "research": 48.224,
+        "reconcile": 0.311,
+        "answer": 74.653
+      },
+      "first_progress_seconds": 0.6827039000054356,
+      "first_finding_seconds": 18.53281030000653,
+      "first_answer_seconds": 131.80053079999925,
+      "total_seconds": 131.8015330000053
+    },
+    {
+      "id": "Q41",
+      "category": "B",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true,
+        "research_complete": true
+      },
+      "answer_status": "answered",
+      "turn_error": null,
+      "judge_error": null,
+      "facet_errors": [],
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 6,
+        "model_calls": 10,
+        "reserved_tokens": 256212,
+        "input_tokens": 167455,
+        "output_tokens": 12645,
+        "cached_tokens": 0,
+        "reasoning_tokens": 1283
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 2,
+          "input_tokens": 15935,
+          "output_tokens": 1980,
+          "cached_tokens": 0,
+          "reasoning_tokens": 402,
+          "seconds": 34.169,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 2
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 645,
+          "output_tokens": 318,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 6.869,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 2,
+          "input_tokens": 20857,
+          "output_tokens": 899,
+          "cached_tokens": 0,
+          "reasoning_tokens": 241,
+          "seconds": 21.209,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 2
+          }
+        },
+        "worker": {
+          "calls": 5,
+          "input_tokens": 130018,
+          "output_tokens": 9448,
+          "cached_tokens": 0,
+          "reasoning_tokens": 640,
+          "seconds": 53.966,
+          "models": {
+            "gpt-5.6-luna-2026-07-09": 3,
+            "gpt-5.6-terra-2026-07-09": 2
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 7.026,
+        "research": 22.541,
+        "reconcile": 0.307,
+        "answer": 55.251
+      },
+      "first_progress_seconds": 0.6786519000015687,
+      "first_finding_seconds": 17.394147500002873,
+      "first_answer_seconds": 85.98166360000323,
+      "total_seconds": 85.98631189999287
+    },
+    {
+      "id": "Q43",
+      "category": "B",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true,
+        "research_complete": true
+      },
+      "answer_status": "insufficient_evidence",
+      "turn_error": null,
+      "judge_error": null,
+      "facet_errors": [],
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 4,
+        "model_calls": 6,
+        "reserved_tokens": 121558,
+        "input_tokens": 78409,
+        "output_tokens": 3309,
+        "cached_tokens": 0,
+        "reasoning_tokens": 408
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 1,
+          "input_tokens": 2752,
+          "output_tokens": 351,
+          "cached_tokens": 0,
+          "reasoning_tokens": 71,
+          "seconds": 6.105,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 645,
+          "output_tokens": 235,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 5.738,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 1,
+          "input_tokens": 3207,
+          "output_tokens": 304,
+          "cached_tokens": 0,
+          "reasoning_tokens": 56,
+          "seconds": 6.895,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "worker": {
+          "calls": 3,
+          "input_tokens": 71805,
+          "output_tokens": 2419,
+          "cached_tokens": 0,
+          "reasoning_tokens": 281,
+          "seconds": 15.132,
+          "models": {
+            "gpt-5.6-terra-2026-07-09": 1,
+            "gpt-5.6-luna-2026-07-09": 2
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 5.772,
+        "research": 6.561,
+        "reconcile": 0.289,
+        "answer": 12.793
+      },
+      "first_progress_seconds": 0.6814172000013059,
+      "first_finding_seconds": 11.169773799992981,
+      "first_answer_seconds": 26.28277180000441,
+      "total_seconds": 26.28442840000207
+    },
+    {
+      "id": "Q49",
+      "category": "C",
+      "split": "dev",
+      "scores": {
+        "citation_contract_valid": true,
+        "source_match": null,
+        "numeric_exact": null,
+        "abstention_correct": null,
+        "conflict_flagged": null,
+        "calculator_used": null,
+        "catalogue_used": null,
+        "key_fact_recall": null,
+        "turn_completed": true,
+        "research_complete": true
+      },
+      "answer_status": "answered",
+      "turn_error": null,
+      "judge_error": null,
+      "facet_errors": [],
+      "retrieval_mode": "kg",
+      "usage": {
+        "retrieval_calls": 6,
+        "model_calls": 8,
+        "reserved_tokens": 230032,
+        "input_tokens": 162014,
+        "output_tokens": 12138,
+        "cached_tokens": 0,
+        "reasoning_tokens": 1243
+      },
+      "role_usage": {
+        "answer": {
+          "calls": 1,
+          "input_tokens": 7352,
+          "output_tokens": 1877,
+          "cached_tokens": 0,
+          "reasoning_tokens": 227,
+          "seconds": 33.704,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "planner": {
+          "calls": 1,
+          "input_tokens": 646,
+          "output_tokens": 297,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "seconds": 7.819,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "verifier": {
+          "calls": 1,
+          "input_tokens": 27870,
+          "output_tokens": 702,
+          "cached_tokens": 0,
+          "reasoning_tokens": 55,
+          "seconds": 15.136,
+          "models": {
+            "gpt-6.1-sol-2026-09-29": 1
+          }
+        },
+        "worker": {
+          "calls": 5,
+          "input_tokens": 126146,
+          "output_tokens": 9262,
+          "cached_tokens": 0,
+          "reasoning_tokens": 961,
+          "seconds": 55.613,
+          "models": {
+            "gpt-5.6-luna-2026-07-09": 3,
+            "gpt-5.6-terra-2026-07-09": 2
+          }
+        }
+      },
+      "step_seconds": {
+        "understand": 7.863,
+        "research": 24.843,
+        "reconcile": 0.375,
+        "answer": 48.718
+      },
+      "first_progress_seconds": 0.6386612999922363,
+      "first_finding_seconds": 16.9009420999937,
+      "first_answer_seconds": 82.52976350000245,
+      "total_seconds": 82.53524209999887
+    }
+  ],
+  "metrics": {
+    "citation_contract_valid": {
+      "rate": 1,
+      "measured": 6,
+      "unmeasured": 0
+    },
+    "source_match": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "numeric_exact": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "abstention_correct": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "conflict_flagged": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "calculator_used": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "catalogue_used": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "key_fact_recall": {
+      "rate": null,
+      "measured": 0,
+      "unmeasured": 6
+    },
+    "turn_completed": {
+      "rate": 1,
+      "measured": 6,
+      "unmeasured": 0
+    },
+    "research_complete": {
+      "rate": 1,
+      "measured": 6,
+      "unmeasured": 0
+    }
+  },
+  "statuses": {
+    "answered": 3,
+    "insufficient_evidence": 2,
+    "partial": 1
+  },
+  "turn_errors": {},
+  "facet_errors": {},
+  "first_answer_seconds_p50": 82.52976350000245,
+  "first_answer_seconds_p95": 131.80053079999925,
+  "first_finding_seconds_p50": 15.868763100006618,
+  "first_finding_seconds_p95": 18.53281030000653,
+  "step_seconds_p50": {
+    "answer": 36.599,
+    "reconcile": 0.309,
+    "research": 23.692,
+    "understand": 6.518
+  },
+  "role_usage_mean": {
+    "answer": {
+      "calls": 1.333,
+      "seconds": 23.924,
+      "input_tokens": 8166.667,
+      "output_tokens": 1332,
+      "reasoning_tokens": 256.167,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-6.1-sol-2026-09-29": 8
+      }
+    },
+    "planner": {
+      "calls": 1,
+      "seconds": 6.471,
+      "input_tokens": 647.5,
+      "output_tokens": 278,
+      "reasoning_tokens": 0,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-6.1-sol-2026-09-29": 6
+      }
+    },
+    "verifier": {
+      "calls": 1.333,
+      "seconds": 15.357,
+      "input_tokens": 15618.167,
+      "output_tokens": 710.167,
+      "reasoning_tokens": 114.167,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-6.1-sol-2026-09-29": 8
+      }
+    },
+    "worker": {
+      "calls": 4.5,
+      "seconds": 61.843,
+      "input_tokens": 111252.667,
+      "output_tokens": 6791.5,
+      "reasoning_tokens": 572.333,
+      "cached_tokens": 0,
+      "models": {
+        "gpt-5.6-luna-2026-07-09": 19,
+        "gpt-5.6-terra-2026-07-09": 8
+      }
+    }
+  },
+  "gate_failures": [
+    "source_match: not measured",
+    "numeric_exact: not measured",
+    "abstention_correct: not measured",
+    "conflict_flagged: not measured",
+    "key_fact_recall_A: not measured",
+    "key_fact_recall_BC: not measured",
+    "calculator_used: not measured",
+    "catalogue_used: not measured",
+    "first_answer_seconds_p95: not measured or above 25 seconds"
+  ],
+  "gates_passed": false
+}

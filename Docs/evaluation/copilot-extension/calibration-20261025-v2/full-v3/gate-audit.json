@@ -1,0 +1,438 @@
+{
+  "calibration_id": "calibration-20261025-v3-development",
+  "audited_at_utc": "2026-10-25T15:05:20.9692982Z",
+  "attempts": 72,
+  "reused_attempts": 18,
+  "new_attempts": 54,
+  "valid_attempts": 72,
+  "valid_fraction": 1,
+  "cases_with_valid_majority": 24,
+  "raw_majority_review_agreement_count": 24,
+  "raw_majority_review_agreement_fraction": 1,
+  "aggregate_review_agreement_count": 24,
+  "critical_false_pass_attempts": 0,
+  "checks": {
+    "complete_unique_attempts": true,
+    "valid_attempt_fraction": true,
+    "every_case_has_valid_majority": true,
+    "frozen_review_agreement": true,
+    "no_critical_false_passes": true,
+    "source_hashes_unchanged": true,
+    "reused_attempts_unchanged": true,
+    "requested_sdk_model_confirmed": true
+  },
+  "development_gate_passed": true,
+  "independent_validation": false,
+  "stakeholder_approved": false,
+  "full_466_rejudge_started": false,
+  "cases": [
+    {
+      "id": "Q77",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q93",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q101",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q109",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q129",
+      "expected_verdict": "needs_review",
+      "judge_majority": "needs_review",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "needs_review",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q138",
+      "expected_verdict": "fail",
+      "judge_majority": "fail",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "fail",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "fail",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q145",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q156",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q193",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q236",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q237",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q279",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q281",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q282",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q284",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q291",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q304",
+      "expected_verdict": "needs_review",
+      "judge_majority": "needs_review",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "needs_review",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "needs_review",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q325",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q345",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q346",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q398",
+      "expected_verdict": "fail",
+      "judge_majority": "fail",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "fail",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "fail",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q408",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q481",
+      "expected_verdict": "partial",
+      "judge_majority": "partial",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "partial",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "partial",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    },
+    {
+      "id": "Q511",
+      "expected_verdict": "pass",
+      "judge_majority": "pass",
+      "attempts": 3,
+      "valid_attempts": 3,
+      "label_counts": [
+        {
+          "Name": "pass",
+          "Count": 3
+        }
+      ],
+      "agrees": true,
+      "aggregate_verdict": "pass",
+      "aggregate_agrees": true,
+      "critical_false_pass_attempts": 0
+    }
+  ]
+}

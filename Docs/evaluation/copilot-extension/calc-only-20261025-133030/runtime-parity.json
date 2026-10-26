@@ -1,0 +1,12 @@
+{
+  "hashes": {
+    "domain/evidence.py": "cc2c7a90f922eefab8f965c5b67dabe6a5e53e588f9435ae8718b9f9a1be3631",
+    "services/calculation.py": "26c16b593610732b97b673afd9d0840c659888c545107fb78a48fb2ba4b3b493",
+    "adapters/models.py": "18b8b28335f4251cf094635ea76ffa361c11efe8d6af6cab36ce4a63942b2947",
+    "orchestration/nodes/research.py": "a9eaef668e66cac5beb823fb65b0bf5d977c5f30ea5a2dcf48e159fe290dcb3b",
+    "orchestration/prompts.py": "16c5f2e8d42369f155ac1b507bafa8d73bacb9da443ce20b76c1c5a65f1887c5",
+    "orchestration/extraction.py": "e465328e1abe9cd041780b35a74d893e8895aee1424453dc27aff25b64c75a7f"
+  },
+  "comparison_claim": true,
+  "extraction_has_fragment": false
+}

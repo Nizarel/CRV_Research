@@ -1,0 +1,15 @@
+{
+  "deployment": "crv-eval-manadry-20261024-190257",
+  "command": "python -P -m crv_agent check --models",
+  "search_release": "crv-v1",
+  "kg_documents": 1848,
+  "kg_table_select_denied": true,
+  "memory_ddl_denied": true,
+  "models": {
+    "planner": {"deployment": "gpt-6.1-sol", "reasoning_effort": "low", "schema": "QueryPlan", "ok": true, "seconds": 2.263, "served_model": "gpt-6.1-sol-2026-09-29", "reasoning_tokens": 0},
+    "worker": {"deployment": "model-router", "reasoning_effort": "low", "schema": "Extraction", "ok": true, "seconds": 1.483, "served_model": "gpt-5.6-luna-2026-07-09", "reasoning_tokens": 0},
+    "answer": {"deployment": "gpt-6.1-sol", "reasoning_effort": "medium", "schema": "ComposedAnswer", "ok": true, "seconds": 1.35, "served_model": "gpt-6.1-sol-2026-09-29", "reasoning_tokens": 0},
+    "verifier": {"deployment": "gpt-6.1-sol", "reasoning_effort": "low", "schema": "Verdict", "ok": true, "seconds": 1.829, "served_model": "gpt-6.1-sol-2026-09-29", "reasoning_tokens": 0}
+  },
+  "failures": []
+}

@@ -1,0 +1,16 @@
+{
+  "cases": 449,
+  "manually_source_reviewed": 15,
+  "remaining_cases_requiring_source_review": 434,
+  "cases_with_reference_codes": 154,
+  "hybrid_has_reference_code": 141,
+  "reference_code_only_in_oracle": 6,
+  "original_citation_overlap_in_hybrid": 390,
+  "corrected_identifier_cases": [
+    "Q225",
+    "Q226",
+    "Q333"
+  ],
+  "semantic_support_scored": false,
+  "original_queries_unchanged": true
+}
