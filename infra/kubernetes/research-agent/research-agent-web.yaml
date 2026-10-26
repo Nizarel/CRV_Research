@@ -70,6 +70,8 @@ spec:
             - {name: CRV_WORKER_MAX_CLAIMS, value: "${WORKER_MAX_CLAIMS}"}
             - {name: CRV_EXTRACT_BATCHES, value: "${EXTRACT_BATCHES}"}
             - {name: CRV_REPAIR_MODE, value: "${REPAIR_MODE}"}
+            # azure or postgres (crv_retrieval); rollback is a redeploy with azure.
+            - {name: CRV_SEARCH_BACKEND, value: "${SEARCH_BACKEND}"}
             # Lets the UI open cited source PDFs (read-only access, crv-sources container).
             - {name: CRV_SOURCES_ACCOUNT_URL, value: "${SOURCES_ACCOUNT_URL}"}
           # Exec probes: kubelet httpGet probes come from the node and cannot reach pod loopback.

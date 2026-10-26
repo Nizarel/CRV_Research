@@ -27,6 +27,9 @@ param(
     [Parameter(ParameterSetName = 'Deploy')] [ValidateRange(1, 4)] [int] $ExtractBatches = 1,
     # 'prune' (adopted 2026-10-22, PR arm) and ExtractBatches > 1 need agent image rd15+/rd16+.
     [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('recompose', 'prune')] [string] $RepairMode = 'prune',
+    # Evidence search: postgres reads crv_retrieval (pipeline migration 0022) after the parity,
+    # recall and answer gates; azure is the rollback.
+    [Parameter(ParameterSetName = 'Deploy')] [ValidateSet('azure', 'postgres')] [string] $SearchBackend = 'azure',
     [Parameter(ParameterSetName = 'Deploy')] [ValidatePattern('^https://[a-z0-9]+\.blob\.core\.windows\.net$')] [string] $SourcesAccountUrl = 'https://stawmc6icu2kueq.blob.core.windows.net',
     [Parameter(ParameterSetName = 'Deploy')] [ValidateRange(30, 280)] [int] $TurnSeconds = 180,
     [Parameter(ParameterSetName = 'Deploy')] [string] $AcrLoginServer = 'acrcrvscus.azurecr.io',
@@ -74,6 +77,7 @@ $values = [ordered]@{
     WORKER_MAX_CLAIMS   = $WorkerMaxClaims.ToString()
     EXTRACT_BATCHES     = $ExtractBatches.ToString()
     REPAIR_MODE         = $RepairMode
+    SEARCH_BACKEND      = $SearchBackend
     SOURCES_ACCOUNT_URL = $SourcesAccountUrl
     TURN_SECONDS        = $TurnSeconds.ToString()
 }

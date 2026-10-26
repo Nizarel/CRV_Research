@@ -3,7 +3,6 @@ analysis, fusion, scopes, table neighbours, index build and the reader's execute
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pytest
@@ -103,7 +102,7 @@ async def test_table_neighbors_and_release_status(loaded: Any) -> None:
     async with loaded.acquire() as connection:
         rows = await connection.fetch(
             "SELECT projection_id FROM crv_retrieval.table_neighbors($1, $2::jsonb)",
-            RELEASE, json.dumps({C: [2, 3, 4], A: [1]}),
+            RELEASE, {C: [2, 3, 4], A: [1]},
         )
         status = await connection.fetchrow(
             "SELECT * FROM crv_retrieval.release_status($1)", RELEASE
@@ -136,3 +135,99 @@ async def test_reader_executes_search_but_cannot_read_the_table(loaded: Any) -> 
         finally:
             await connection.execute("RESET ROLE")
     assert rows[0]["projection_id"] == "flotation"
+
+
+PROJECTION_ITEMS = """
+INSERT INTO ingest.projection_item (store, target, projection_id, release_id, evidence_id,
+    chunk_id, placement_id, payload_sha256, state, created_at, updated_at, content_hash)
+SELECT $1, $2, c.projection_id, c.release_id, 'evd:' || c.projection_id, c.chunk_id, 'plc:1',
+    c.payload_sha256, 'verified', now(), now(), c.content_hash
+FROM crv_retrieval.chunk AS c WHERE c.release_id = $3
+"""
+
+
+async def test_verify_mirrors_the_vector_leg_and_gates_parity(loaded: Any) -> None:
+    from ingest_pipeline.adapters.postgres.retrieval_checks import (
+        _APPROXIMATE,
+        CANDIDATES,
+        CheckOptions,
+        verify_release,
+    )
+
+    options = CheckOptions(release_id=RELEASE, source_store="azure_search",
+                           source_target="crv-evidence-v1", sample=4, k=3)
+    async with loaded.acquire() as connection:
+        await connection.execute(PROJECTION_ITEMS, "azure_search", "crv-evidence-v1", RELEASE)
+        await connection.execute(PROJECTION_ITEMS, "postgres", "crv_retrieval", RELEASE)
+        await build_vector_index(
+            connection, "te3", m=16, ef_construction=64, maintenance_work_mem="64MB",
+            parallel_workers=0,
+        )
+        await connection.execute("RESET maintenance_work_mem")
+        await connection.execute("RESET statement_timeout")
+        mirrored = await connection.fetch(_APPROXIMATE, RELEASE, _vector(1), CANDIDATES, 4)
+        # The checks plan under the function's own settings (0023), even on four rows.
+        report = await verify_release(
+            connection, ["preflight", "parity", "recall", "explain"], options
+        )
+        await connection.execute(
+            "UPDATE crv_retrieval.chunk SET payload_sha256 = $1 WHERE projection_id = $2",
+            "e" * 64, "leaching",
+        )
+        drifted = await verify_release(connection, ["parity"], options)
+
+    assert [row["projection_id"] for row in mirrored] == await _search(loaded, "", axis=1, top=4)
+    failed = {name: part for name, part in report.items() if isinstance(part, dict)
+              and not part["ok"]}
+    assert report["ok"] is True, failed
+    assert report["preflight"]["has_0022"] is True
+    assert report["parity"]["source_rows"] == 4
+    assert report["recall"]["sampled"]["recall"] == 1.0
+    assert "chunk_te3_hnsw_idx" in report["explain"]["unscoped"]["indexes"]
+    assert report["explain"]["settings"]["enable_seqscan"] == "off"
+    assert report["explain"]["settings"]["hnsw.ef_search"] == "500"
+    assert (drifted["ok"], drifted["parity"]["digest_mismatches"]) == (False, 1)
+
+
+async def test_keyword_leg_skips_words_found_in_most_chunks(pg_pool: Any) -> None:
+    from datetime import UTC, datetime
+
+    rows = [
+        _row(f"row-{n}", f"{n % 3 + 1:064x}",
+             "Rapport sur le zirconium." if n == 7 else "Rapport sur la flottation.", n)
+        for n in range(300)
+    ]
+    projector = PostgresRetrievalProjector(pg_pool, ManualClock(datetime(2026, 10, 26, tzinfo=UTC)))
+    assert len((await projector.upload(rows, key_field="projection_id")).accepted) == 300
+
+    async def terms(text: str) -> str | None:
+        async with pg_pool.acquire() as connection:
+            return await connection.fetchval("SELECT crv_retrieval.match_terms($1)::text", text)
+
+    async def search(text: str, hashes: list[str] | None = None) -> list[str]:
+        async with pg_pool.acquire() as connection:
+            found = await connection.fetch(SEARCH, RELEASE, text, hashes or [], None, None, 10)
+        return [row["projection_id"] for row in found]
+
+    # Without statistics every word matches.
+    assert "rapport" in (await terms("rapport zirconium") or "")
+    async with pg_pool.acquire() as connection:
+        await connection.execute("ANALYZE crv_retrieval.chunk")
+
+    assert await terms("rapport zirconium") == "'zirconium'"
+    # Only common words: the least common one stays.
+    assert (await terms("rapport flottation") or "").count("'") == 2
+    assert await terms("le la de") is None
+    assert (await search("rapport zirconium"))[0] == "row-7"
+    # A scope is small, so it keeps every word.
+    scoped = await search("rapport", [f"{1:064x}"])
+    assert scoped
+    assert set(scoped) <= {f"row-{n}" for n in range(300) if n % 3 == 0}
+    # The words of query_terms are the lexemes of query_lexemes.
+    async with pg_pool.acquire() as connection:
+        same = await connection.fetchval(
+            "SELECT crv_retrieval.query_terms(t) = "
+            "(SELECT replace(array_to_tsvector(crv_retrieval.query_lexemes(t))::text, "
+            "''' ''', ''' | ''')::tsquery) FROM (SELECT 'Les essais de flottation à 80 °C') AS q(t)"
+        )
+    assert same is True

@@ -529,6 +529,8 @@ spec:
             - configMapRef: {name: crv-pipeline}
           env:
             - {name: TIZ_DB__USER, value: "${OPS_IDENTITY_NAME}"}
+            # One connection per concurrent content: each copy is bound by per-row round trips.
+            - {name: TIZ_DB__MAX_POOL_SIZE, value: "${RETRIEVAL_CONCURRENCY}"}
           resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 3Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
@@ -560,7 +562,8 @@ spec:
       containers:
         - name: retrieval-index
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
-          args: [retrieval-index, --model, "${RETRIEVAL_MODEL}"]
+          args: [retrieval-index, --model, "${RETRIEVAL_MODEL}",
+                 --maintenance-work-mem, "${RETRIEVAL_INDEX_MEMORY}", --parallel-workers, "${RETRIEVAL_INDEX_WORKERS}"]
           env:
             - {name: TIZ_DB__HOST, value: "${PG_HOST}"}
             - {name: TIZ_DB__DATABASE, value: ingestion-catalog}
@@ -571,6 +574,45 @@ spec:
             - {name: tmp, mountPath: /tmp}
       volumes:
         - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+# JOB retrieval-verify: read-only checks of the EVAL_RELEASE copy as the worker identity
+# (preflight, parity, recall, explain, latency). Golden questions are embedded only when the
+# crv-golden ConfigMap is rendered with it (-RetrievalQuestions).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crv-pilot-retrieval-verify-${RUN_ID}
+  namespace: crv
+  labels: {app.kubernetes.io/part-of: crv-pilot, crv.pilot/job: retrieval-verify}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: ${DEADLINE_SECONDS}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: crv-pilot-eval, azure.workload.identity/use: "true"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: crv-pipeline-worker
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: retrieval-verify
+          image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
+          args: [retrieval-verify${RETRIEVAL_VERIFY_ARGS}, --release, "${EVAL_RELEASE}"]
+          envFrom:
+            - configMapRef: {name: crv-pipeline}
+          env:
+            - {name: TIZ_DB__USER, value: "${WORKER_IDENTITY_NAME}"}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 1Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: golden, mountPath: /golden, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
+      volumes:
+        - {name: golden, configMap: {name: crv-golden, optional: true}}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
 ---
 # JOB golden-eval: retrieval quality on the golden questions (Docs/AGENTIC_ARCHITECTURE.md §7).
 # Runs as the worker identity (Search data reader, Azure OpenAI user, crv_kg_reader member);

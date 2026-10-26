@@ -50,6 +50,26 @@ def read_records(lines: Iterable[str]) -> list[dict[str, Any]]:
     return records
 
 
+def load_contexts(paths: Sequence[str]) -> list[dict[str, Any]]:
+    """Records of every file (``-`` is stdin), e.g. one per search backend scored together."""
+
+    records: list[dict[str, Any]] = []
+    for path in paths:
+        source = sys.stdin if path == "-" else open(path, encoding="utf-8")  # noqa: SIM115
+        try:
+            records.extend(read_records(source))
+        finally:
+            if source is not sys.stdin:
+                source.close()
+    seen: set[tuple[str, str]] = set()
+    for item in records:
+        key = (item["id"], item["arm"])
+        if key in seen:
+            raise SystemExit(f"Duplicate contexts for {key[0]} arm {key[1]}: label each run")
+        seen.add(key)
+    return records
+
+
 def _hit(context: dict[str, Any], key: str, text: str) -> Hit:
     return Hit(
         chunk_id=key,
@@ -252,12 +272,7 @@ async def run_score(args: argparse.Namespace) -> int:
     from .__main__ import load_golden
 
     questions = {q.id: q for q in load_golden(args.golden)}
-    source = sys.stdin if args.contexts == "-" else open(args.contexts, encoding="utf-8")  # noqa: SIM115
-    try:
-        records = read_records(source)
-    finally:
-        if source is not sys.stdin:
-            source.close()
+    records = load_contexts(args.contexts)
     unknown = sorted({r["id"] for r in records} - questions.keys())
     if unknown:
         raise SystemExit(f"Unknown question ids in contexts: {unknown[:5]}")
@@ -310,7 +325,8 @@ def add_parser(commands: Any) -> None:
         help="Score agent contexts (JSONL) with golden-eval anchors and judge",
     )
     score.add_argument("--golden", required=True)
-    score.add_argument("--contexts", required=True, help="JSONL path, or - for stdin")
+    score.add_argument("--contexts", required=True, action="append",
+                       help="JSONL path (repeatable), or - for stdin")
     score.add_argument("--judge-deployment", default="")
     score.add_argument("--openai-endpoint", default="")
     score.add_argument("--api-version", default="2025-04-01-preview")

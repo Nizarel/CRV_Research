@@ -69,6 +69,10 @@ param(
     [ValidatePattern('^$|^https://[A-Za-z0-9.\-/_]+$')] [string] $PgRerankerUrl = '',
     [ValidatePattern('^$|^[A-Za-z0-9._-]{1,64}$')] [string] $PgRerankerModel = '',
     [ValidatePattern('^$|^[A-Za-z0-9-]{1,16}$')] [string] $ArmLabel = '',
+    # retrieval-eval: the same arms on Azure (AZ_*) then PostgreSQL (PG_*), scored in one pass with
+    # each PG arm paired to its AZ arm. -AnchorsOnly scores anchors without any judge call.
+    [switch] $CompareBackends,
+    [switch] $AnchorsOnly,
     [string] $GoldenPath = (Join-Path $PSScriptRoot '../../../golden/crv_golden.jsonl'),
     [string] $RenderPath = '',
     [switch] $Invoke
@@ -79,13 +83,21 @@ if ($Job -eq 'kg-login' -and -not $PipelineDigest) { throw '-Job kg-login needs 
 if ($Job -ne 'kg-login' -and -not $AgentDigest) { throw "-Job $Job needs -AgentDigest." }
 if ($Job -in 'retrieval-eval', 'answer-eval' -and -not $PipelineDigest) { throw "-Job $Job needs -PipelineDigest (scorer)." }
 if ($Split -eq 'heldout' -and -not $AllowHeldout) { throw 'The held-out split needs -AllowHeldout (run once, for the frozen winner).' }
+if (($CompareBackends -or $AnchorsOnly) -and $Job -ne 'retrieval-eval') { throw '-CompareBackends and -AnchorsOnly apply to -Job retrieval-eval.' }
+if ($CompareBackends) {
+    if ($SearchBackend -ne 'azure' -or $ArmLabel) { throw '-CompareBackends labels the runs itself (AZ, PG); drop -SearchBackend/-ArmLabel.' }
+    if (-not $Arm) { throw '-CompareBackends needs explicit -Arm values (each arm runs twice).' }
+}
 $evalArgs = ''
 foreach ($item in $Arm) { $evalArgs += ", --arm, $item" }
 foreach ($item in $Only) { $evalArgs += ", --only, $item" }
 if ($KnowledgeBase) { $evalArgs += ", --knowledge-base, $KnowledgeBase" }
-if ($ArmLabel) { $evalArgs += ", --label, $ArmLabel" }
-if ($PgReranker -eq 'cohere' -and -not ($PgRerankerUrl -and $PgRerankerModel)) { throw '-PgReranker cohere needs -PgRerankerUrl and -PgRerankerModel.' }
 if ($Split -eq 'heldout') { $evalArgs += ', --allow-heldout' }
+$compareArgs = "$evalArgs, --label, PG"
+if ($CompareBackends) { $evalArgs += ', --label, AZ' }
+elseif ($ArmLabel) { $evalArgs += ", --label, $ArmLabel" }
+if ($PgReranker -eq 'cohere' -and -not ($PgRerankerUrl -and $PgRerankerModel)) { throw '-PgReranker cohere needs -PgRerankerUrl and -PgRerankerModel.' }
+$scoreReferences = if ($CompareBackends) { ($Arm | ForEach-Object { ", --reference, AZ_$_" }) -join '' } else { ', --reference, P16, --reference, A1' }
 $answerArgs = ''
 foreach ($item in $Only) { $answerArgs += ", --question-id, $item" }
 if ($Split -eq 'heldout') { $answerArgs += ', --allow-heldout' }
@@ -130,7 +142,7 @@ $values = [ordered]@{
     EVAL_ARGS           = $evalArgs
     ANSWER_ARGS         = $answerArgs
     TURN_SECONDS        = $TurnSeconds.ToString()
-    JUDGE_DEPLOYMENT    = $JudgeDeployment
+    JUDGE_DEPLOYMENT    = if ($AnchorsOnly) { '' } else { $JudgeDeployment }
     JUDGE_REPEATS       = $JudgeRepeats.ToString()
     SCORE_CONCURRENCY   = $ScoreConcurrency.ToString()
     DEADLINE_SECONDS    = $DeadlineSeconds.ToString()
@@ -138,11 +150,19 @@ $values = [ordered]@{
     PG_RERANKER         = $PgReranker
     PG_RERANKER_URL     = $PgRerankerUrl
     PG_RERANKER_MODEL   = $PgRerankerModel
+    COMPARE_EVAL_ARGS   = $compareArgs
+    COMPARE_CONTEXTS    = if ($CompareBackends) { ', --contexts, /results/contexts-pg.jsonl' } else { '' }
+    SCORE_REFERENCES    = $scoreReferences
 }
 foreach ($login in $AgentIdentityName, $AdminIdentityName) {
     if ($login -notmatch '^[a-z][a-z0-9-]{2,62}$') { throw "Unsafe login name: $login" }
 }
 $text = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'research-agent.yaml') -Raw
+$text = if ($CompareBackends) {
+    [regex]::Replace($text, '(?m)^[ \t]*# (BEGIN|END) compare-backends[^\n]*\n', '')
+} else {
+    [regex]::Replace($text, '(?ms)^[ \t]*# BEGIN compare-backends.*?# END compare-backends[^\n]*\n', '')
+}
 foreach ($key in $values.Keys) {
     if ($values[$key] -match '["\r\n]') { throw "Value for $key contains a quote or newline" }
     $text = $text.Replace('${' + $key + '}', $values[$key])

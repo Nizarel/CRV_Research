@@ -221,14 +221,33 @@ spec:
             - {name: golden, mountPath: /golden, readOnly: true}
             - {name: results, mountPath: /results}
             - {name: tmp, mountPath: /tmp}
+        # BEGIN compare-backends: kept only with -CompareBackends (contexts above run as AZ_*).
+        - name: contexts-pg
+          image: ${ACR_LOGIN_SERVER}/crv-research-agent@${AGENT_DIGEST}
+          args: [python, -m, crv_agent.evaluation.retrieval, --golden, /golden/crv_golden.jsonl,
+                 --split, "${EVAL_SPLIT}", --concurrency, "${EVAL_CONCURRENCY}",
+                 --out, /results/contexts-pg.jsonl, --confirm-live${COMPARE_EVAL_ARGS}]
+          envFrom:
+            - configMapRef: {name: crv-research-agent}
+          env:
+            - {name: CRV_SEARCH_BACKEND, value: postgres}
+            - {name: CRV_PG_RERANKER, value: "${PG_RERANKER}"}
+            - {name: CRV_PG_RERANKER_URL, value: "${PG_RERANKER_URL}"}
+            - {name: CRV_PG_RERANKER_MODEL, value: "${PG_RERANKER_MODEL}"}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: golden, mountPath: /golden, readOnly: true}
+            - {name: results, mountPath: /results}
+            - {name: tmp, mountPath: /tmp}
+        # END compare-backends
       containers:
         - name: score
           image: ${ACR_LOGIN_SERVER}/crv-pipeline@${PIPELINE_DIGEST}
           command: [python, -m, ingest_pipeline.tools.golden]
-          args: [score, --golden, /golden/crv_golden.jsonl, --contexts, /results/contexts.jsonl,
+          args: [score, --golden, /golden/crv_golden.jsonl, --contexts, /results/contexts.jsonl${COMPARE_CONTEXTS},
                  --judge-deployment, "${JUDGE_DEPLOYMENT}", --openai-endpoint, "${OPENAI_ENDPOINT}",
-                 --repeats, "${JUDGE_REPEATS}", --concurrency, "${SCORE_CONCURRENCY}",
-                 --reference, P16, --reference, A1]
+                 --repeats, "${JUDGE_REPEATS}", --concurrency, "${SCORE_CONCURRENCY}"${SCORE_REFERENCES}]
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:

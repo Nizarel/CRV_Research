@@ -19,6 +19,8 @@ Relative Python module paths below OverlayRoot for an explicit candidate.
 Candidate package root; defaults to src/backend/crv_agent. Use generated ablation sources here.
 .PARAMETER RenderCodePath
 Optional local JSON archive of generated Python source only, never credentials.
+.PARAMETER SearchBackend
+Evidence search of the isolated backend: azure, or postgres (crv_retrieval) for paired runs.
 .EXAMPLE
 ./Start-IsolatedBusinessEval.ps1 -RunId manadry-20261024-v1 -Apply
 .NOTES
@@ -38,6 +40,8 @@ param(
     [string[]] $CodeOverlay = @(),
     [string] $OverlayRoot,
     [string] $RenderCodePath,
+    [ValidateSet('azure', 'postgres')]
+    [string] $SearchBackend = 'azure',
     [switch] $Apply
 )
 $ErrorActionPreference = 'Stop'
@@ -185,6 +189,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         )).ToLowerInvariant()
         package_root = $Installed.package_root
         diagnostics_enabled = [bool] $Diagnostics
+        search_backend = $SearchBackend
         module_overlays = $OverlayHashes
         overlay_root = [IO.Path]::GetRelativePath($Repo, $OverlayRoot).Replace('\', '/')
         judge = @{ provider = 'github-copilot-sdk'; model = 'claude-haiku-5.5'; sdk_version = '1.0.26' }
@@ -216,6 +221,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     Set-ContainerSetting $Backend 'CRV_EVAL_DIAGNOSTICS' @{
         value = $Diagnostics.IsPresent.ToString().ToLowerInvariant()
     }
+    Set-ContainerSetting $Backend 'CRV_SEARCH_BACKEND' @{ value = $SearchBackend }
     $Backend.volumeMounts = @($Backend.volumeMounts) + @(
         foreach ($Module in $MountFiles.Keys) {
             @{ name = 'eval-code'; mountPath = "$($Installed.package_root)/$Module";

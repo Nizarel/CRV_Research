@@ -102,6 +102,7 @@ VECTOR_INDEXES: Mapping[str, tuple[str, str, str]] = {
     "m3": ("chunk_m3_hnsw_idx", "embedding_m3 vector_cosine_ops", "embedding_m3"),
 }
 _MEMORY = re.compile(r"^[1-9][0-9]{0,4}(MB|GB)$")
+GIN_INDEXES = ("crv_retrieval.chunk_search_text_idx", "crv_retrieval.chunk_identifier_keys_idx")
 
 
 def _record(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -224,7 +225,9 @@ async def build_vector_index(
     maintenance_work_mem: str,
     parallel_workers: int,
 ) -> dict[str, Any]:
-    """Create the model's HNSW index (after the bulk load) and refresh planner statistics."""
+    """Create the model's HNSW index (after the bulk load), merge the GIN pending lists the load
+    left behind and refresh planner statistics. Rerun after every backfill: the build is skipped
+    when the index exists."""
 
     if model not in VECTOR_INDEXES:
         raise InvalidInputError(f"Unknown embedding model {model!r}")
@@ -240,6 +243,12 @@ async def build_vector_index(
         f"CREATE INDEX IF NOT EXISTS {name} ON crv_retrieval.chunk USING hnsw ({expression})"
         f" WITH (m = {m}, ef_construction = {ef_construction})"
     )
+    # A bulk copy leaves unsorted GIN pending lists that every keyword search scans in full.
+    merged = 0
+    for gin in GIN_INDEXES:
+        merged += int(await connection.fetchval(
+            "SELECT gin_clean_pending_list(to_regclass($1))", gin
+        ) or 0)
     await connection.execute("ANALYZE crv_retrieval.chunk")
     counts = await connection.fetchrow(
         f"SELECT count(*) AS rows, count({column}) AS vectors FROM crv_retrieval.chunk"
@@ -250,4 +259,5 @@ async def build_vector_index(
     return {
         "index": name, "model": model, "m": m, "ef_construction": ef_construction,
         "rows": counts["rows"], "vectors": counts["vectors"], "size": size,
+        "gin_pending_pages_merged": merged,
     }

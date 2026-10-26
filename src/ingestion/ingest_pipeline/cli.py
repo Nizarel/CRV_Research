@@ -14,7 +14,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Coroutine
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +41,7 @@ from .adapters.postgres.migrations import apply_crv_baseline, apply_migrations, 
 from .adapters.postgres.pool import create_pool
 from .adapters.postgres.report import pipeline_status
 from .adapters.postgres.retrieval import VECTOR_INDEXES, build_vector_index
+from .adapters.postgres.retrieval_checks import CHECKS, CheckOptions, verify_release
 from .adapters.postgres.snapshots import PostgresSnapshots
 from .adapters.search.index_admin import ensure_index, render_schema
 from .adapters.servicebus.transport import ServiceBusMessageReceiver, open_receiver
@@ -1026,6 +1027,61 @@ async def _retrieval_index(
     return 0
 
 
+MAX_QUESTIONS = 200
+
+
+def read_questions(path: str) -> list[str]:
+    """The ``question`` of each golden JSONL line (bounded: each one is an embedding call)."""
+
+    questions = [
+        str(json.loads(line)["question"]).strip()
+        for line in Path(path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if not questions or len(questions) > MAX_QUESTIONS or not all(questions):
+        raise SystemExit(f"{path}: need 1-{MAX_QUESTIONS} non-empty questions")
+    return questions
+
+
+async def _retrieval_verify(
+    settings: PipelineSettings, telemetry: Telemetry, args: argparse.Namespace
+) -> int:
+    """Read-only checks of a crv_retrieval copy; embeds questions only with --questions."""
+
+    search = settings.search
+    options = CheckOptions(
+        release_id=args.release or search.release_id,
+        source_store=ProjectionSettings(target=search.index_name).store,
+        source_target=search.index_name,
+        sample=args.sample,
+        k=args.k,
+        ef_search=args.ef_search,
+        min_recall=args.min_recall,
+        max_p95_ms=args.max_p95_ms,
+    )
+    questions = read_questions(args.questions) if args.questions else []
+    database = settings.db.model_copy(update={
+        "min_pool_size": 1, "max_pool_size": 1, "statement_timeout_ms": 0,
+        "command_timeout_seconds": args.timeout_minutes * 60.0,
+    })
+    settings = settings.model_copy(update={"db": database})
+    async with AsyncExitStack() as stack:
+        vectors: list[list[float]] = []
+        if questions:
+            runtime = await stack.enter_async_context(
+                azure_runtime(settings, telemetry, blob=False, bus=False)
+            )
+            pool = runtime.pool
+            embedded = await runtime.services.require_embeddings().embed(questions)
+            vectors = [list(vector) for vector in embedded]
+        else:
+            pool = await stack.enter_async_context(_database(settings))
+        connection = await stack.enter_async_context(pool.acquire())
+        report = await verify_release(connection, args.checks, options, vectors, questions)
+    _print(report)
+    return 0 if report["ok"] else 1
+
+
 def _positive(value: str) -> int:
     number = int(value)
     if number < 1:
@@ -1222,6 +1278,25 @@ def build_parser() -> argparse.ArgumentParser:
     vector_index.add_argument("--parallel-workers", type=int, default=2)
     vector_index.add_argument("--timeout-minutes", type=_positive, default=240)
     vector_index.set_defaults(handler=_retrieval_index)
+
+    verify = commands.add_parser(
+        "retrieval-verify",
+        help="Read-only crv_retrieval checks: preflight, parity, recall, explain, latency",
+    )
+    verify.add_argument("checks", nargs="+", choices=CHECKS)
+    verify.add_argument("--release", help="Search release (default: TIZ_SEARCH__RELEASE_ID)")
+    verify.add_argument("--sample", type=int, default=30,
+                        help="Stored chunk vectors used as recall queries (free)")
+    verify.add_argument("--questions", default="",
+                        help="Golden JSONL whose questions are embedded as extra queries (paid)")
+    verify.add_argument("--k", type=_positive, default=50)
+    verify.add_argument("--ef-search", type=_positive, default=None,
+                        help="Override the search function's hnsw.ef_search (tuning only)")
+    verify.add_argument("--min-recall", type=float, default=0.95)
+    verify.add_argument("--max-p95-ms", type=float, default=1000.0,
+                        help="Latency gate: p95 of the first hybrid search of each query")
+    verify.add_argument("--timeout-minutes", type=_positive, default=60)
+    verify.set_defaults(handler=_retrieval_verify)
 
     kg_build = commands.add_parser(
         "kg-build",

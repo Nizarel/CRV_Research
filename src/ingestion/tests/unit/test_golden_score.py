@@ -13,6 +13,7 @@ from ingest_pipeline.tools.golden.score import (
     CONTEXTS_END,
     bootstrap,
     hits_of,
+    load_contexts,
     majority,
     read_records,
     score_record,
@@ -65,6 +66,17 @@ def test_read_records_tolerates_logs_and_markers() -> None:
     lines = ["log line", CONTEXTS_BEGIN, json.dumps(record("x")), CONTEXTS_END, "{ignored"]
     assert [r["arm"] for r in read_records(lines)] == ["P16"]
     assert len(read_records([json.dumps(record("x"))])) == 1
+
+
+def test_contexts_of_two_backends_load_together_but_never_twice(tmp_path: Any) -> None:
+    import pytest
+
+    azure, postgres = tmp_path / "az.jsonl", tmp_path / "pg.jsonl"
+    azure.write_text(json.dumps(record("x", arm="AZ_A1")) + "\n", encoding="utf-8")
+    postgres.write_text(json.dumps(record("x", arm="PG_A1")) + "\n", encoding="utf-8")
+    assert [r["arm"] for r in load_contexts([str(azure), str(postgres)])] == ["AZ_A1", "PG_A1"]
+    with pytest.raises(SystemExit, match="Duplicate contexts for Q1 arm AZ_A1"):
+        load_contexts([str(azure), str(azure)])
 
 
 def test_split_keeps_all_text_while_truncate_matches_golden_eval() -> None:

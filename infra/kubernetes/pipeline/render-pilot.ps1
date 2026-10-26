@@ -10,7 +10,7 @@ verify-raw, dbsetup, index (setup, dry runs by default) then stage -> convert ->
 (review) -> publish; after ingestion, kg-build (-KgDryRun first) -> kg-extract (KG-2 pilot) ->
 (review) -> kg-import -KgFile (-KgDryRun first) -> kg-release. PostgreSQL retrieval (after dbsetup
 applies migration 0022): retrieval-backfill (-RetrievalDryRun and -RetrievalLimit first) ->
-retrieval-index.
+retrieval-index, each checked with retrieval-verify (-RetrievalChecks).
 Every ${VAR} is substituted and the script refuses to continue if any placeholder survives.
 Images are referenced only by digest.
 
@@ -20,7 +20,7 @@ Images are referenced only by digest.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-import', 'kg-release', 'golden-eval', 'retrieval-backfill', 'retrieval-index')] [string] $Job,
+    [Parameter(Mandatory)] [ValidateSet('stage', 'convert', 'intake', 'publish', 'dbsetup', 'verify-raw', 'index', 'kg-build', 'kg-extract', 'kg-import', 'kg-release', 'golden-eval', 'retrieval-backfill', 'retrieval-index', 'retrieval-verify')] [string] $Job,
     [Parameter(Mandatory)] [guid] $OpsClientId,
     [Parameter(Mandatory)] [ValidatePattern('^sha256:[a-f0-9]{64}$')] [string] $PipelineDigest,
     [ValidatePattern('^$|^sha256:[a-f0-9]{64}$')] [string] $ConverterDigest = '',
@@ -65,6 +65,16 @@ param(
     [switch] $RetrievalAllowDrift,
     [switch] $RetrievalRefresh,
     [ValidateSet('te3', 'm3')] [string] $RetrievalModel = 'te3',
+    # HNSW build session settings; 1GB/1 worker peaked at 2.2 GB on a 4 GiB B2s-like server.
+    [ValidatePattern('^[1-9][0-9]{0,4}(MB|GB)$')] [string] $RetrievalIndexMemory = '1GB',
+    [ValidateRange(0, 8)] [int] $RetrievalIndexWorkers = 1,
+    # retrieval-verify: read-only checks; -RetrievalQuestions also embeds the golden questions
+    # (one paid embedding call each) as recall queries.
+    [ValidateSet('preflight', 'parity', 'recall', 'explain', 'latency')] [string[]] $RetrievalChecks = @('preflight'),
+    [ValidateRange(0, 500)] [int] $RetrievalSample = 30,
+    # 0 keeps the search function's own hnsw.ef_search.
+    [ValidateRange(0, 1000)] [int] $RetrievalEfSearch = 0,
+    [switch] $RetrievalQuestions,
     [switch] $DbApply,
     [switch] $IndexApply,
     [string] $IndexSchema = (Join-Path $PSScriptRoot '../../search/crv-evidence-index.json'),
@@ -130,6 +140,15 @@ $values = [ordered]@{
         if ($RetrievalRefresh) { ', --refresh' }
     ) -join '')
     RETRIEVAL_MODEL       = $RetrievalModel
+    RETRIEVAL_CONCURRENCY = $RetrievalConcurrency.ToString()
+    RETRIEVAL_INDEX_MEMORY = $RetrievalIndexMemory
+    RETRIEVAL_INDEX_WORKERS = $RetrievalIndexWorkers.ToString()
+    RETRIEVAL_VERIFY_ARGS = (@(
+        $RetrievalChecks | Select-Object -Unique | ForEach-Object { ", $_" }
+        ", --sample, '$RetrievalSample'"
+        if ($RetrievalEfSearch) { ", --ef-search, '$RetrievalEfSearch'" }
+        if ($RetrievalQuestions) { ', --questions, /golden/crv_golden.jsonl' }
+    ) -join '')
 }
 foreach ($name in 'PRINCIPAL_COORDINATOR', 'PRINCIPAL_WORKER', 'PRINCIPAL_OPS') {
     if ($values[$name] -notmatch '^[a-z][a-z0-9-]{2,62}=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
@@ -162,7 +181,7 @@ if ($Job -eq 'index') {
     }
     $rendered += "`n---`n" + ($configMap | ConvertTo-Json -Depth 5)
 }
-if ($Job -eq 'golden-eval') {
+if ($Job -eq 'golden-eval' -or ($Job -eq 'retrieval-verify' -and $RetrievalQuestions)) {
     $golden = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $GoldenPath).Path, [Text.UTF8Encoding]::new($false))
     $configMap = [ordered]@{
         apiVersion = 'v1'; kind = 'ConfigMap'

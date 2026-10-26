@@ -72,7 +72,9 @@ class _Connection:
     async def fetchrow(self, query: str, *args: Any) -> dict[str, int]:
         return self.counts
 
-    async def fetchval(self, query: str, *args: Any) -> str:
+    async def fetchval(self, query: str, *args: Any) -> Any:
+        if "gin_clean_pending_list" in query:
+            return 3
         return "12 MB"
 
 
@@ -146,7 +148,8 @@ async def test_vector_index_uses_half_precision_for_3072_dimensions() -> None:
     assert "m = 16, ef_construction = 128" in create
     assert "ANALYZE crv_retrieval.chunk" in connection.statements
     assert report == {"index": "chunk_te3_hnsw_idx", "model": "te3", "m": 16,
-                      "ef_construction": 128, "rows": 2, "vectors": 2, "size": "12 MB"}
+                      "ef_construction": 128, "rows": 2, "vectors": 2, "size": "12 MB",
+                      "gin_pending_pages_merged": 6}
 
 
 @pytest.mark.parametrize(
@@ -269,3 +272,37 @@ async def test_copy_records_failures_and_unplaced_contents_per_content(
     assert (unplaced.skipped_contents, unplaced.problems[0]["problem"]) == (
         1, "no_current_placement",
     )
+
+
+async def test_rebuilt_rows_fail_on_a_cache_miss_and_never_call_the_paid_embedder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ingest_pipeline.domain.errors import IntegrityError
+    from ingest_pipeline.stages import project_search
+
+    class _Cache:
+        async def get_many(self, keys: list[str], **_: Any) -> dict[str, list[float]]:
+            return {keys[0]: [0.25] * 3072}
+
+    class _PaidEmbedder:
+        async def embed(self, texts: Any) -> Any:
+            raise AssertionError("the copy must not pay for embeddings")
+
+    async def units(*_: Any) -> Any:
+        return "report", {}, ()
+
+    async def chunks(*_: Any) -> list[Any]:
+        return [SimpleNamespace(text_sha256="1" * 64), SimpleNamespace(text_sha256="2" * 64)]
+
+    monkeypatch.setattr(project_search, "evidence_units", units)
+    monkeypatch.setattr(project_search, "load_jsonl", chunks)
+    services = StageServices(
+        clock=ManualClock(START), planner=JobPlanner(versions={}),
+        embedding_cache=_Cache(), embeddings=_PaidEmbedder(),
+    )
+    record = SimpleNamespace(evidence_id="evd:1", chunk_set=None)
+
+    with pytest.raises(IntegrityError, match="Embedding cache misses"):
+        await project_search.projection_rows(
+            services, record, [], SETTINGS, model="text-embedding-3-large", dimensions=3072
+        )
