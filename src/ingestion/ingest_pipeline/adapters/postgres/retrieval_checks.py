@@ -60,11 +60,13 @@ SELECT candidate.projection_id FROM candidate
 ORDER BY candidate.embedding_te3 <=> {_VECTOR}, candidate.projection_id
 LIMIT $4
 """
+# The first stage of the keyword leg (migrations 0026, 0027).
 _LEXICAL = """
-SELECT c.projection_id FROM crv_retrieval.chunk AS c
-WHERE c.release_id = $1 AND c.search_text @@ crv_retrieval.match_terms($2)
-ORDER BY ts_rank(c.search_text, crv_retrieval.query_terms($2), 1) DESC, c.projection_id
-LIMIT 50
+SELECT t.projection_id FROM crv_retrieval.chunk_terms AS t
+WHERE t.release_id = $1 AND t.search_text @@ crv_retrieval.match_terms($2)
+ORDER BY ts_rank('{1, 1, 0.5, 1}', t.search_text, crv_retrieval.query_terms($2), 1) DESC,
+    t.projection_id
+LIMIT 600
 """
 _SEARCH = "SELECT * FROM crv_retrieval.search($1, $2, $3::text[], $4, $5::real[], $6)"
 # Sample keys first: computing the vector cast inside the ORDER BY ... LIMIT would read them all.
@@ -186,7 +188,8 @@ def plan_summary(explained: Any) -> dict[str, Any]:
         "nodes": sorted({str(node["Node Type"]) for node in nodes}),
         "indexes": sorted({str(node["Index Name"]) for node in nodes if "Index Name" in node}),
         "chunk_seq_scan": any(
-            node["Node Type"] == "Seq Scan" and node.get("Relation Name") == "chunk"
+            node["Node Type"] == "Seq Scan"
+            and node.get("Relation Name") in ("chunk", "chunk_terms")
             for node in nodes
         ),
         "execution_ms": top.get("Execution Time"),

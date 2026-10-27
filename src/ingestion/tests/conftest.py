@@ -29,6 +29,9 @@ def harness() -> Harness:
 
 LEDGER_TABLES = (
     "crv_retrieval.chunk",
+    "crv_retrieval.chunk_terms",
+    "crv_retrieval.lexeme_stats",
+    "crv_retrieval.release_stats",
     "ingest.extraction_cache",
     "ingest.job_replay",
     "ingest.legacy_reconciliation",

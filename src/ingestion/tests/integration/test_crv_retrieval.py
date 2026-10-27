@@ -123,6 +123,39 @@ async def test_hnsw_index_serves_the_same_nearest_rows(loaded: Any) -> None:
     assert (await _search(loaded, "zzz", axis=1))[0] == "leaching"
 
 
+async def test_keyword_terms_follow_every_write_of_the_worker(pg_pool: Any) -> None:
+    from contextlib import asynccontextmanager
+    from datetime import UTC, datetime
+
+    terms = ("SELECT t.projection_id, t.release_id, t.content_hash, t.search_text = c.search_text"
+             " AS same FROM crv_retrieval.chunk_terms AS t"
+             " LEFT JOIN crv_retrieval.chunk AS c USING (projection_id) ORDER BY 1")
+    changed = _row("leaching", C, "Essais de lixiviation du cobalt.", 1, language="fr",
+                   payload_sha256="e" * 64)
+    async with pg_pool.acquire() as connection:
+
+        class Worker:
+            @asynccontextmanager
+            async def acquire(self) -> Any:
+                yield connection
+
+        projector = PostgresRetrievalProjector(
+            Worker(), ManualClock(datetime(2026, 10, 27, tzinfo=UTC)))
+        await connection.execute("SET ROLE tizert_ingest_worker")
+        try:
+            await projector.upload(ROWS[:2], key_field="projection_id")
+            first = [tuple(row) for row in await connection.fetch(terms)]
+            await projector.upload([changed], key_field="projection_id")
+            await projector.delete(["flotation"], key_field="projection_id")
+            last = [tuple(row) for row in await connection.fetch(terms)]
+        finally:
+            await connection.execute("RESET ROLE")
+    assert first == [("flotation", RELEASE, A, True), ("leaching", RELEASE, B, True)]
+    assert last == [("leaching", RELEASE, C, True)]
+    assert await _search(pg_pool, "lixiviation") == ["leaching"]
+    assert await _search(pg_pool, "flottation") == []
+
+
 async def test_reader_executes_search_but_cannot_read_the_table(loaded: Any) -> None:
     import asyncpg
 
@@ -231,3 +264,35 @@ async def test_keyword_leg_skips_words_found_in_most_chunks(pg_pool: Any) -> Non
             "''' ''', ''' | ''')::tsquery) FROM (SELECT 'Les essais de flottation à 80 °C') AS q(t)"
         )
     assert same is True
+
+
+async def test_keyword_leg_ranks_with_bm25_once_statistics_exist(pg_pool: Any) -> None:
+    from datetime import UTC, datetime
+
+    rows = [_row(f"row-{n}", f"{n % 3 + 1:064x}", "Rapport sur la flottation.", n)
+            for n in range(200)]
+    rows += [
+        # The word in the title only, which every chunk of a document repeats.
+        _row("titled", "e" * 64, "Analyse granulometrique des rejets.", 300,
+             title="Bleida minerai.pdf - p. 1"),
+        # The word twice in the text.
+        _row("texted", "f" * 64, "Le minerai de Bleida et les essais de Bleida.", 301),
+    ]
+    projector = PostgresRetrievalProjector(pg_pool, ManualClock(datetime(2026, 10, 26, tzinfo=UTC)))
+    assert len((await projector.upload(rows, key_field="projection_id")).accepted) == 202
+
+    async def keyword(text: str) -> list[str]:
+        async with pg_pool.acquire() as connection:
+            found = await connection.fetch(SEARCH, RELEASE, text, [], None, None, 2)
+        return [row["projection_id"] for row in found]
+
+    # Without statistics the leg keeps ts_rank, which weighs the title five times the text.
+    assert await keyword("Bleida") == ["titled", "texted"]
+    async with pg_pool.acquire() as connection:
+        refreshed = await connection.fetchval("SELECT crv_retrieval.refresh_keyword_stats()")
+        frequency = await connection.fetchval(
+            "SELECT chunks FROM crv_retrieval.lexeme_stats"
+            " WHERE release_id = $1 AND lexeme = 'bleida'", RELEASE)
+    assert refreshed[RELEASE]["chunks"] == 202
+    assert frequency == 2
+    assert await keyword("Bleida") == ["texted", "titled"]

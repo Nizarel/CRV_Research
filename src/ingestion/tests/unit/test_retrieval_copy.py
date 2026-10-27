@@ -75,6 +75,8 @@ class _Connection:
     async def fetchval(self, query: str, *args: Any) -> Any:
         if "gin_clean_pending_list" in query:
             return 3
+        if "refresh_keyword_stats" in query:
+            return '{"crv-v1": {"chunks": 2, "lexemes": 5}}'
         return "12 MB"
 
 
@@ -149,7 +151,8 @@ async def test_vector_index_uses_half_precision_for_3072_dimensions() -> None:
     assert "ANALYZE crv_retrieval.chunk" in connection.statements
     assert report == {"index": "chunk_te3_hnsw_idx", "model": "te3", "m": 16,
                       "ef_construction": 128, "rows": 2, "vectors": 2, "size": "12 MB",
-                      "gin_pending_pages_merged": 6}
+                      "gin_pending_pages_merged": 6,
+                      "keyword_stats": {"crv-v1": {"chunks": 2, "lexemes": 5}}}
 
 
 @pytest.mark.parametrize(

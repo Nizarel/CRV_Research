@@ -7,6 +7,7 @@ two stores. Text search columns are derived in SQL from the same fields Search a
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -226,8 +227,8 @@ async def build_vector_index(
     parallel_workers: int,
 ) -> dict[str, Any]:
     """Create the model's HNSW index (after the bulk load), merge the GIN pending lists the load
-    left behind and refresh planner statistics. Rerun after every backfill: the build is skipped
-    when the index exists."""
+    left behind, refresh planner statistics and the keyword-ranking statistics (0025). Rerun
+    after every backfill: the build is skipped when the index exists."""
 
     if model not in VECTOR_INDEXES:
         raise InvalidInputError(f"Unknown embedding model {model!r}")
@@ -250,6 +251,7 @@ async def build_vector_index(
             "SELECT gin_clean_pending_list(to_regclass($1))", gin
         ) or 0)
     await connection.execute("ANALYZE crv_retrieval.chunk")
+    keyword_stats = await connection.fetchval("SELECT crv_retrieval.refresh_keyword_stats()")
     counts = await connection.fetchrow(
         f"SELECT count(*) AS rows, count({column}) AS vectors FROM crv_retrieval.chunk"
     )
@@ -260,4 +262,6 @@ async def build_vector_index(
         "index": name, "model": model, "m": m, "ef_construction": ef_construction,
         "rows": counts["rows"], "vectors": counts["vectors"], "size": size,
         "gin_pending_pages_merged": merged,
+        "keyword_stats": json.loads(keyword_stats) if isinstance(keyword_stats, str)
+        else keyword_stats,
     }
