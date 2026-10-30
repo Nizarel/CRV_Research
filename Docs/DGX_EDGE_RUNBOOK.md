@@ -2,7 +2,7 @@
 title: CRV Edge Runbook for dgx-niz01 and dgx-niz02
 description: Step-by-step procedure to build the ARM64 images, create edge logins and memory, re-embed the corpus with BGE-M3, start the edge stack, and check it, after the staging restore passes.
 author: CRV Research
-ms.date: 2026-10-28
+ms.date: 2026-10-29
 ms.topic: how-to
 keywords:
   - dgx spark
@@ -88,7 +88,8 @@ export CRV_BACKEND_IMAGE="crv-backend:edge-$rev" CRV_WEB_IMAGE="crv-web:edge-$re
 edge() { docker compose -f infra/dgx/edge/compose.yaml "$@"; }
 ```
 
-`CRV_NIZ02_ADDRESS` defaults to 192.168.88.8 (dgx-niz02); it matters only in phase 2.
+`CRV_NIZ02_ADDRESS` defaults to 192.168.88.8 (dgx-niz02 on Wi-Fi); it matters only in phase 2. Set
+it to 192.168.100.11, the direct link where the dgx-niz02 model server listens.
 
 ## 2a. Copy the source PDFs
 
@@ -274,3 +275,32 @@ restarts by itself while the volume is locked.
 | `chunk(s) lack m3 vectors` at startup | Step 5 is incomplete, or rows failed; rerun `retrieval-embed` |
 | `Embedding response has an unexpected shape` | The embedding server returns a dimension other than 1,024, or a different model |
 | Web returns 502 on `/api/v1` | `edge logs backend`; the backend must be healthy and share the web network namespace |
+| dgx-niz01 restarted on its own (`last -x` shows a boot with no shutdown) | See [Unclean restarts](#unclean-restarts) |
+
+### Unclean restarts
+
+Between 2026-10-28 and 2026-10-29 dgx-niz01 restarted four times without a shutdown sequence
+(boots ending 10-28 08:01, 09:57, 11:33 and 10-29 20:35). The journal of each boot stops
+mid-activity, with no panic, watchdog, thermal or GPU (Xid) message, and pstore is empty. Automatic
+updates are not the cause: `unattended-upgrades` is not installed.
+
+* Two resets hit both hosts at once: dgx-niz02 also restarted without a shutdown at 10-28 09:58
+  (the same second as dgx-niz01) and 10-29 20:38. A shared power event (outlet, power strip or
+  circuit) explains these.
+* The other two hit dgx-niz01 only, 2 to 4 seconds after a USB-C device failed to enumerate on bus 6
+  port 1 (`device not accepting address, error -71`, then `attempt power cycle`); a USB Ethernet
+  adapter (`r8152`) appeared on that port before the 11:33 reset.
+
+DGX Spark draws power over USB-C. Put both hosts on a UPS or separate circuits, use the supplied
+power adapter and cable on the power port, seat it firmly, and keep USB-C dongles and hubs off the
+adjacent ports. To capture evidence of the next one:
+
+```bash
+last -x -F reboot shutdown | head          # a boot with no shutdown line is unclean
+journalctl --list-boots
+journalctl -b -1 -n 50 --no-pager          # last messages of the previous boot
+journalctl -b -1 -k -p warning --no-pager  # kernel warnings, including USB errors
+sudo ls /sys/fs/pstore                     # a kernel panic record, if any
+```
+
+After any restart the stack stays down until the volume is opened again (step 2).

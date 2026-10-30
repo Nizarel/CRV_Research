@@ -2,7 +2,7 @@
 title: CRV Edge Placement on Two DGX Spark Hosts
 description: Starting service placement, memory budgets, serving runtime, inter-host traffic, failure modes, and model compatibility for the CRV edge deployment on dgx-niz01 and dgx-niz02.
 author: CRV Research
-ms.date: 2026-10-28
+ms.date: 2026-10-29
 ms.topic: concept
 keywords:
   - dgx spark
@@ -22,9 +22,9 @@ stays unchanged.
 | Decision | Value |
 |----------|-------|
 | Topology | One edge over two hosts; services are placed, not duplicated |
-| Hosts | dgx-niz01 is spark-7bef (192.168.88.10); dgx-niz02 is spark-ce60 (192.168.88.8) |
+| Hosts | dgx-niz01 is spark-7bef (192.168.88.10, direct link 192.168.100.10); dgx-niz02 is spark-ce60 (192.168.88.8, direct link 192.168.100.11) |
 | Retrieval data | Restored `ingestion-catalog` (PostgreSQL 16.15, AGE 1.6.0, pgvector 0.8.2) |
-| Embeddings | BGE-M3 (1,024 dimensions), served locally, after re-embedding into `embedding_m3`; TE3 only as the parity baseline |
+| Embeddings | BGE-M3 (1,024 dimensions), served locally, after re-embedding into `embedding_m3` |
 | Reranker | bge-reranker-v2-m3 cross-encoder, served locally (optional at first) |
 | Generation, phase 1 | NVIDIA API catalog models (hosted, OpenAI-compatible) with the operator's key (decided 2026-10-28) |
 | Generation, phase 2 | The same models served locally (see [serving guidance](./DGX_SPARK_SERVING_OPTIMIZATION.md)) |
@@ -66,15 +66,72 @@ test sent 20 real planner prompts to each configuration. Neither test measures a
 The API also returned HTTP 429 (rate limit) under 20 concurrent requests; the backend retries with
 the server's `Retry-After`, but the limit caps parallel facets.
 
-> [!WARNING]
-> End-to-end smoke chats on 2026-10-28 ran without errors but did not yet produce verified answers.
-> The worker models paraphrase source text, and the backend rejects every claim whose quotation is
-> not verbatim (`worker_claim_rejected`), so answers end as `insufficient_evidence`. This is the
-> intended guard, not a fault. Choosing a model that extracts exact quotations is the first task of
-> the validation kit's end-to-end arm.
+> [!NOTE]
+> End-to-end smoke chats on 2026-10-28 ended as `insufficient_evidence`. The 2026-10-29 diagnosis
+> ([validation progress](./DGX_EDGE_VALIDATION.md#progress-2026-10-29)) found that quotation
+> fidelity was not the main cause: the planner, the composer and hosted latency were.
 
-dgx-niz02 has no generation load in phase 1; it can host the retrieval models or the backups until
-phase 2.
+### Diagnosis and configuration, 2026-10-29
+
+A quote-fidelity probe (`python -m crv_agent.evaluation.quote_probe`) froze the passages production
+shows for 21 golden dev questions and sent them to each worker candidate through the production
+extraction prompt. Most quotations came back exact (68 to 97% as returned). After two anchoring
+repairs (an unprinted qualifier is cleared, and literal JSON escapes are decoded), 80 to 98% of
+claims passed validation. The remaining rejections are real errors (changed words or numbers,
+spliced table rows), which the guard must keep rejecting.
+
+| Finding | Evidence | Change |
+|---------|----------|--------|
+| The planner routed research questions away from the worker | lightning with reasoning off sent 36 of 44 research questions to `catalogue` or `clarify` (local NVFP4: 42 of 47); bolt sent 11 of 47 | Planner prompt narrowed (`d743294`): 11 to 1 for bolt, 36 to 11 for lightning, 42 to 6 locally; planner is bolt |
+| The composer returned drafts without claim numbers or citation markers | lightning drafts had empty `claim_numbers`, so the verifier saw no sources | Composer is bolt; a draft that only fails the citation contract falls back to the cited claim list (`206498d`) |
+| Hosted lightning calls stalled past the turn budget | 2 of 10 turns timed out at 120 s in the answer stage | No lightning role in phase 1 |
+| bolt returned few claims per call | 1.6 accepted claims per question with one batch | `CRV_EXTRACT_BATCHES=4` (4.0 per question, 19 of 21 questions with a claim) |
+
+The edge backend runs `crv-backend:edge-206498d` with bolt in every role since 2026-10-29. On 10 dev
+questions it gave 3 verified answers and 3 more with verified claims, with no turn errors (before:
+0 answered, the worker reached in 1 of 10 questions). The previous settings are in
+`/srv/crv-secure/secrets/edge.env.bak-20261029`.
+
+The edge sends no generation to dgx-niz02 in phase 1; it can also host the backups.
+
+## Phase 2 start: local generation on dgx-niz02
+
+Since 2026-10-29 dgx-niz02 serves `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4` (revision
+`cc84af2f`) as `nemotron-3.5-lightning` from container `crv-system2` (`nvcr.io/nvidia/vllm:26.09-py3`,
+vLLM 0.29.0). Nothing in the edge uses it yet.
+
+| Setting | Value |
+|---------|-------|
+| Listen address | `192.168.100.11:8000`, the direct 200 Gb/s link whose only neighbor is dgx-niz01 (`192.168.100.10`); not reachable on Wi-Fi |
+| Authentication | `VLLM_API_KEY` from `~/crv-models/secrets/vllm.env` (0600) on dgx-niz02; the same key in `/srv/crv-secure/secrets/niz02-vllm.key` on dgx-niz01 |
+| Flags | `--max-model-len 65536 --gpu-memory-utilization 0.5 --max-num-seqs 8 --enable-prefix-caching --reasoning-parser nemotron_v3 --default-chat-template-kwargs '{"enable_thinking": false}'` |
+| Memory | 17.9 GiB of weights; load takes about 145 s |
+
+```bash
+docker run -d --name crv-system2 --gpus all --ipc=host --restart no \
+    -p 192.168.100.11:8000:8000 -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+    --env-file "$HOME/crv-models/secrets/vllm.env" -e HF_HUB_OFFLINE=1 \
+    nvcr.io/nvidia/vllm:26.09-py3 vllm serve nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4 \
+    --revision cc84af2fe71647d87f4486c064f320e1e7535243 --served-model-name nemotron-3.5-lightning \
+    --max-model-len 65536 --gpu-memory-utilization 0.5 --max-num-seqs 8 --enable-prefix-caching \
+    --reasoning-parser nemotron_v3 --default-chat-template-kwargs '{"enable_thinking": false}' \
+    --host 0.0.0.0 --port 8000
+```
+
+Measured on the frozen probe passages, the local model extracts like the hosted one (80 to 88% of
+claims accepted, a claim for 20 or 21 of 21 questions), but each extraction call took 43 to 58 s at
+concurrency 4. vLLM reports no native FP4 kernels for GB10 in this image and falls back to
+weight-only FP4 (Marlin). The next steps are a build with native GB10 FP4 kernels or FP8 weights,
+a smaller worker model (`Qwen/Qwen3.5-9B` is cached on dgx-niz02), and the latency protocol of the
+validation kit. With the narrowed prompt the local model planned 41 of 47 research questions for
+the worker.
+
+> [!IMPORTANT]
+> The dgx-niz02 host firewall rule that admits only dgx-niz01 to port 8000 is not set yet (it needs
+> `sudo`). Until then the bind address and the API key are the only controls. To point the edge at
+> it, set `CRV_NIZ02_ADDRESS=192.168.100.11` for Compose (the default is the Wi-Fi address) and use
+> `CRV_MODEL_ENDPOINT=http://dgx-niz02:8000/v1` with the key file above. The backend has one model
+> endpoint for all roles, so phase 2 moves every role at once.
 
 ## Starting placement for phase 2 (local generation)
 
@@ -249,6 +306,7 @@ encrypted volume on dgx-niz02, plus an independent copy outside the two-host fai
 ## Open questions
 
 * Approval of the phase 1 data flow: CRV excerpts in prompts to the NVIDIA API.
-* Phase 2 System 1 and System 2 models, precisions and licenses.
-* Whether the evaluation judge may stay on Azure as an offline measurement tool.
+* Phase 2 System 1 and System 2 models, precisions and licenses; native FP4 or FP8 serving on GB10.
+* The dgx-niz02 firewall rule for the model port (needs `sudo`).
+* The evaluation judge stays on Azure as an offline measurement tool (decided 2026-10-29).
 * Backup target, retention, recovery point and recovery time objectives (P8).

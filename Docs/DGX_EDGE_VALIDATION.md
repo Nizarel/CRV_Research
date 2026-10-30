@@ -2,7 +2,7 @@
 title: CRV Edge Validation Kit
 description: Pinned inputs, comparison arms, commands, thresholds, latency protocol, and the Azure-independence test for the CRV edge deployment on two DGX Spark hosts.
 author: CRV Research
-ms.date: 2026-10-28
+ms.date: 2026-10-29
 ms.topic: how-to
 keywords:
   - dgx spark
@@ -16,9 +16,10 @@ estimated_reading_time: 12
 ## Purpose
 
 Prove, with the same questions and the same judge, that the edge retrieves and answers at least as
-well as the Azure baseline, then prove it keeps working with Azure unreachable. Nothing here has
-been run yet. Every command is a template; replace each `REPLACE_*` value and keep secrets out of
-command lines.
+well as the Azure baseline, then prove it keeps working with Azure unreachable. The EDGE-M3
+contexts and the m3 recall check ran on 2026-10-29 ([progress](#progress-2026-10-29)); scoring and
+the other arms have not run yet. Every command is a template; replace each `REPLACE_*` value and
+keep secrets out of command lines.
 
 ## Pinned inputs
 
@@ -40,14 +41,19 @@ a changed hash means a new baseline.
 | Arm | Search | Embeddings | Reranker | Generation | Kind |
 |-----|--------|------------|----------|------------|------|
 | AZ | Azure AI Search | Azure TE3 | Azure semantic ranker | Azure | Baseline (existing reports) |
-| EDGE-TE3 | Edge PostgreSQL, `te3` column | Azure TE3 query vectors | None | Not used | Retrieval parity |
 | EDGE-M3 | Edge PostgreSQL, `m3` column | Local BGE-M3 | None | Not used | Retrieval |
 | EDGE-M3RR | Edge PostgreSQL, `m3` column | Local BGE-M3 | Local bge-reranker-v2-m3 | Not used | Retrieval |
 | EDGE-LOCAL | Best of the retrieval arms | Local | As chosen | NVIDIA API in phase 1, local System 1 and 2 in phase 2 | End to end |
 
-EDGE-TE3 is the only edge arm that still calls Azure (for query embeddings); it isolates the
-database move from the embedding change. Arm labels use letters, digits and hyphens only, as the
-evaluation CLI requires.
+No edge arm calls Azure. Arm labels use letters, digits and hyphens only, as the evaluation CLI
+requires.
+
+> [!NOTE]
+> The EDGE-TE3 parity arm (Azure TE3 query vectors against the restored `te3` column) was dropped on
+> 2026-10-29. It needs the DGX to reach the private Azure OpenAI endpoint, which requires a
+> site-to-site VPN. Its purpose is already covered: the restore matched the source exactly (P6), and
+> searches over the restored Azure vectors on the DGX found 100% of the exact nearest chunks
+> (`retrieval-verify recall --model te3`).
 
 The retrieval CLI arms `A0`, `A1`, `LEX` and `CEIL` call search only, never a chat model, so
 retrieval comparisons are not confounded by generation
@@ -63,15 +69,16 @@ retrieval comparisons are not confounded by generation
 | [PGVECTOR_RETRIEVAL_TEST_PLAN.md](./PGVECTOR_RETRIEVAL_TEST_PLAN.md) | Adoption gates and the Stage 1 AZ and PG configurations |
 | Preflight historical baseline | Run `b1027214054` and the earlier PG versus AZ comparison ([preflight](./DGX_MIGRATION_PREFLIGHT.md)) |
 
-Earlier AZ and PG runs were scored separately in their pods, so they were unpaired. This kit scores
-all exported contexts together with one judge configuration.
+Earlier AZ and PG runs were scored separately in their pods, so they were unpaired. Their contexts
+went to the pod log and were not kept, so a fresh AZ export is needed. This kit scores all exported
+contexts together with one judge configuration.
 
 ## Commands
 
 ### Retrieval contexts per arm
 
 Run from the backend image on dgx-niz01 with the arm's settings (see
-[edge.env.example](../infra/dgx/edge/edge.env.example); the parity arm uses the commented TE3 block).
+[edge.env.example](../infra/dgx/edge/edge.env.example)).
 
 ```bash
 python -m crv_agent.evaluation.retrieval --golden golden/crv_golden.jsonl --split dev \
@@ -79,9 +86,9 @@ python -m crv_agent.evaluation.retrieval --golden golden/crv_golden.jsonl --spli
     --out /srv/crv-secure/eval/REPLACE_RUN/REPLACE_ARM_LABEL-contexts.jsonl --confirm-live
 ```
 
-`--confirm-live` acknowledges model and search calls; for the edge arms those calls are local,
-except the TE3 query embeddings of EDGE-TE3. Export the AZ contexts from the AKS job of the same
-code revision, or reuse a stored context file only if its revision and release match.
+`--confirm-live` acknowledges model and search calls; for the edge arms those calls are local.
+Export the AZ contexts from the AKS job of the same code revision; the retrieval arms are unchanged
+since `4520b64`.
 
 ### Paired scoring
 
@@ -90,7 +97,7 @@ repeats:
 
 ```bash
 python -m ingest_pipeline.tools.golden score --golden golden/crv_golden.jsonl \
-    --contexts AZ-contexts.jsonl --contexts EDGE-TE3-contexts.jsonl \
+    --contexts AZ-contexts.jsonl \
     --contexts EDGE-M3-contexts.jsonl --contexts EDGE-M3RR-contexts.jsonl \
     --reference AZ_A1 --reference AZ_CEIL --repeats 3 \
     --judge-deployment REPLACE_JUDGE --openai-endpoint REPLACE_JUDGE_ENDPOINT \
@@ -108,7 +115,8 @@ docker run --rm --network container:crv-edge-postgres-1 \
     --release crv-v1 --sample 50
 ```
 
-Run it once with `--model te3` and once with `--model m3`, each after its HNSW index exists.
+Run it with `--model m3` after its HNSW index exists. The `te3` column passed the same check after
+the restore.
 
 ### End-to-end answers
 
@@ -129,8 +137,6 @@ the AZ answers of the same split, judged by the same judge.
 
 | Metric | Arm | Required result |
 |--------|-----|-----------------|
-| A1 judge@10 | EDGE-TE3 | Within 0.03 of AZ |
-| CEIL anchor@50 | EDGE-TE3 | Within 0.02 of AZ |
 | A1 judge@10 | EDGE-M3, EDGE-M3RR | No more than 0.03 below AZ; report per category |
 | CEIL anchor@50 | EDGE-M3, EDGE-M3RR | No more than 0.02 below AZ |
 | ANN versus exact recall@50 | Each vector column | At least 0.95 |
@@ -143,12 +149,12 @@ ties, not wins.
 
 ### Judge decision
 
-The judge must be identical across every compared arm. Two options are open:
+The judge must be identical across every compared arm. Decided 2026-10-29: keep the Azure judge
+(`gpt-5.4-mini`) as an offline measurement tool. Scoring runs on the operator laptop over the VPN;
+the edge runtime never calls it. The exported contexts travel from dgx-niz01 to an encrypted laptop
+folder for scoring and are deleted there afterwards.
 
-* Keep the Azure judge as an offline measurement tool. The edge runtime never calls it.
-* Move to a local judge, then re-score the AZ contexts with it so the baseline uses the same judge.
-
-Record the chosen option and the judge's model revision in the evidence folder.
+Record the judge's model revision in the evidence folder.
 
 ## Latency protocol
 
@@ -180,19 +186,38 @@ Keep evidence outside Git, on the encrypted volume:
     summary.md           filled results table below
 ```
 
+Creating `/srv/crv-secure/eval` needs `sudo` (the volume root belongs to root; runbook step 2).
+Until it exists, runs write to `/srv/crv-secure/bundles/eval/<run-id>/` on the same encrypted
+volume; move them once the folder is created.
+
 ## Results template
 
 | Arm | A1 judge@10 | CEIL anchor@50 | LEX anchor@10 | ANN recall@50 | Retrieval p95 | Pass |
 |-----|-------------|----------------|---------------|---------------|---------------|------|
 | AZ | | | | n/a | | Baseline |
-| EDGE-TE3 | | | | | | |
-| EDGE-M3 | | | | | | |
+| EDGE-M3 | | | | 0.9996 | | |
 | EDGE-M3RR | | | | | | |
 
 | Arm | Citation contract | Key-fact recall A | Key-fact recall B and C | Abstention | Full answer p95 | Pass |
 |-----|-------------------|-------------------|-------------------------|------------|-----------------|------|
 | AZ | | | | | | Baseline |
 | EDGE-LOCAL | | | | | | |
+
+## Progress 2026-10-29
+
+| Step | Result | Evidence |
+|------|--------|----------|
+| EDGE-M3 contexts, dev split, arms A0, A1, LEX, CEIL | 212 records, no errors, retrieval p50 0.04 to 0.25 s | `bundles/eval/retrieval-20261029/EDGE-M3-contexts.jsonl` (SHA-256 `f6bb2489…`) |
+| `retrieval-verify recall explain --model m3 --sample 50` | Recall@50 0.9996 (minimum 0.98), approximate p95 489 ms, plans use `chunk_m3_hnsw_idx` with no sequential scan | `bundles/eval/retrieval-20261029/verify-m3.json` |
+| AZ contexts | Not stored by earlier runs; export needed from AKS | n/a |
+| Paired scoring | Not run | n/a |
+| Quote-fidelity probe, 21 dev questions, 50 frozen passages each | Hosted bolt, lightning and minimax plus local lightning: 68 to 97% of quotes exact as returned; 80 to 98% accepted after the anchoring repairs (`cc020ad`) | `bundles/eval/quote-probe-20261029/score-final/` |
+| Planner intent, 53 dev questions | Research questions routed away from the worker: lightning 36 of 44, bolt 11 of 47; after the prompt change (`d743294`) 11 and 1 | `bundles/eval/quote-probe-20261029/plan-*.jsonl` |
+| End to end, 10 dev questions (A, B, C, D, E, G), no judge | Before: 0 answered, 3 turn errors. bolt in every role on `206498d`: 3 answered, 3 more with verified claims, 0 turn errors, first answer p50 24 s and p95 71 s | `bundles/eval/e2e-20261029/EDGE-{OLD,B}-report.json` |
+
+`bundles/eval` stands for `/srv/crv-secure/bundles/eval` on dgx-niz01. The images were
+`crv-backend:edge-4520b64-edge1` and `crv-pipeline:edge-4520b64-edge1`; the retrieval code is
+unchanged in later commits.
 
 ## Azure-independence test
 
