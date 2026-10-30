@@ -1,11 +1,13 @@
 """Re-anchor worker claims on the exact text shown to the worker, before validation.
 
 The extractor sometimes copies a quote with other whitespace, case or typography (or table cell
-separators), cites a passage ID other than the one holding the quote, joins several shown lines
-into one quote or elides text with "[...]", or sets a calculation index on a plain value. Each
-repair only replaces the quote with an exact span of shown text (or narrows it to one shown line
-that prints the value) and rebinds the evidence IDs to passages that contain it. A date whose
-year no cited passage prints (a filename year) is cleared rather than failing the claim.
+separators), copies the JSON escapes of the passage payload (a literal ``\\n``), cites a passage
+ID other than the one holding the quote, joins several shown lines into one quote or elides text
+with "[...]", or sets a calculation index on a plain value. Each repair only replaces the quote
+with an exact span of shown text (or narrows it to one shown line that prints the value) and
+rebinds the evidence IDs to passages that contain it. A date whose year no cited passage prints
+(a filename year) is cleared rather than failing the claim, and so is a qualifier (``>``, ``~``)
+the quoted span does not print when it prints the bare value.
 A quote in the leading fragment of a chunk that continues a sentence from the preceding page
 also cites that preceding chunk, so the subject named before the page break stays checkable.
 ``claim_errors`` still decides acceptance, unchanged.
@@ -26,6 +28,8 @@ _PUNCTUATION = str.maketrans({
 _FRAGMENTS = re.compile(r"\s*(?:\n+|\[\s*(?:…|\.\.\.)\s*\]|…|\.\.\.)\s*")
 _ELLIPSIS = re.compile(r"\s*(?:\[\s*(?:…|\.\.\.)\s*\]|…|\.\.\.)\s*")
 _OCR_MARKS = re.compile(r":(?:un)?selected:")
+_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|[nrt\"\\/])")
+_ESCAPES = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\", "/": "/"}
 _YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)|\n\s*\n")
 MIN_FRAGMENT = 8
@@ -48,6 +52,15 @@ def _normalized(text: str) -> tuple[str, list[int]]:
                 chars.append(folded)
                 origin.append(index)
     return "".join(chars), origin
+
+
+def unescape(text: str) -> str:
+    """JSON escape sequences copied literally from the JSON passage payload, decoded."""
+    def replace(match: re.Match[str]) -> str:
+        code = match[1]
+        return chr(int(code[1:], 16)) if code[0] == "u" else _ESCAPES[code]
+
+    return _ESCAPE.sub(replace, text)
 
 
 def locate(quote: str, text: str) -> str | None:
@@ -95,33 +108,47 @@ def anchor_claim(claim: Claim, shown: Sequence[Evidence]) -> Claim:
     return claim
 
 
+def _printed(claim: Claim, span: str) -> Claim | None:
+    """The claim as ``span`` prints it: unchanged, or without a qualifier the span does not
+    print when it prints the bare value; None when the span does not state the value."""
+    if claim.value is None or stated(claim, span):
+        return claim
+    bare = claim.model_copy(update={"qualifier": None})
+    return bare if claim.qualifier is not None and stated(bare, span) else None
+
+
 def _anchor(claim: Claim, shown: Sequence[Evidence]) -> Claim:
     if claim.calculation_index is not None:
         # Worker claims are never derived; derived values come from the calculator only.
         claim = claim.model_copy(update={"calculation_index": None})
     texts = [(item.id, text) for item in shown if not item.generated for text in exposed_text(item)]
-    candidates = [claim.quote]
+    quotes = list(dict.fromkeys((claim.quote, unescape(claim.quote))))
+    candidates = list(quotes)
     if claim.value is not None:
-        candidates += [part for part in _FRAGMENTS.split(claim.quote) if len(part) >= MIN_FRAGMENT]
+        candidates += [
+            part for quote in quotes for part in _FRAGMENTS.split(quote)
+            if len(part) >= MIN_FRAGMENT
+        ]
     for candidate in candidates:
         found = [(pid, span) for pid, text in texts if (span := locate(candidate, text))]
         if not found:
             continue
         span = found[0][1]
-        if claim.value is not None and not stated(claim, span):
+        printed = _printed(claim, span)
+        if printed is None:
             continue
         holders = [pid for pid, other in found if other == span]
         ids = [cid for cid in claim.evidence_ids if cid in holders] or holders[:1]
-        return claim.model_copy(update={"quote": span, "evidence_ids": ids})
+        return printed.model_copy(update={"quote": span, "evidence_ids": ids})
     stitched = [
-        (pid, span) for pid, text in texts if (span := stitch(claim.quote, text))
-        and (claim.value is None or stated(claim, span))
+        (pid, span, printed) for pid, text in texts for quote in quotes
+        if (span := stitch(quote, text)) and (printed := _printed(claim, span))
     ]
     if stitched:
-        pid, span = next(
+        pid, span, printed = next(
             (item for item in stitched if item[0] in claim.evidence_ids), stitched[0],
         )
-        return claim.model_copy(update={"quote": span, "evidence_ids": [pid]})
+        return printed.model_copy(update={"quote": span, "evidence_ids": [pid]})
     return claim
 
 

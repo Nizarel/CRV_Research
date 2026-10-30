@@ -125,6 +125,37 @@ def test_a_date_whose_year_the_cited_passage_does_not_print_is_cleared() -> None
     assert anchor_claim(undated, [PAGE]).date == "février"
 
 
+def test_a_qualifier_the_quote_does_not_print_is_cleared_when_the_value_is_printed() -> None:
+    tonnage = "Tonnage traité : 13 360 t."
+    spurious = anchor_claim(claim(tonnage, "13360", ">"), [PAGE])
+    assert (spurious.quote, spurious.qualifier) == (tonnage, None)
+    assert claim_errors(spurious, {"S1": PAGE}) == []
+    cased = anchor_claim(claim(tonnage.upper(), "13360", ">="), [PAGE])
+    assert (cased.quote, cased.qualifier) == (tonnage, None)
+    approximate = anchor_claim(claim(tonnage, "13360", "~"), [PAGE])
+    assert approximate.qualifier == "~"  # already stated: "about X" never says more
+    printed = anchor_claim(claim("aux alentours de 85 %", "85", "~"), [PAGE])
+    assert printed.qualifier == "~"
+    # The source prints the opposite bound, or another value: never repaired.
+    bound = PAGE.model_copy(update={"content": "Récupération < 85 % sur le circuit."})
+    opposite = anchor_claim(claim("Récupération < 85 %", "85", ">"), [bound])
+    assert opposite.qualifier == ">" and claim_errors(opposite, {"S1": bound})
+    other = anchor_claim(claim(tonnage, "13400", ">"), [PAGE])
+    assert other.qualifier == ">" and claim_errors(other, {"S1": PAGE})
+
+
+def test_json_escapes_copied_from_the_payload_anchor_on_the_source_span() -> None:
+    from crv_agent.services.anchoring import unescape
+
+    assert unescape('a\\nb \\"c\\" \\u00e9\\\\') == 'a\nb "c" é\\'
+    escaped = claim("Teneur du concentré : 21,5 % Cu ;\\n\\n• Tonnage", "21.5")
+    repaired = anchor_claim(escaped, [PAGE])
+    assert repaired.quote == "Teneur du concentré : 21,5\u00a0% Cu ;\n\n• Tonnage"
+    assert claim_errors(repaired, {"S1": PAGE}) == []
+    invented = claim("Teneur du concentré : 22 % Cu ;\\n• Tonnage", None)
+    assert anchor_claim(invented, [PAGE]) == invented
+
+
 def test_anchoring_never_accepts_text_that_was_not_shown() -> None:
     invented = claim("Récupération en cuivre de 92 %", "92")
     assert anchor_claim(invented, [PAGE]) == invented
