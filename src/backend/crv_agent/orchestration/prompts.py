@@ -15,13 +15,17 @@ Return a QueryPlan, not an answer. Use history only to resolve references in the
 subject starts a new topic: never carry people, sites, dates or premises from earlier turns into
 its facets or premises.
 Choose lookup, synthesis, timeline, comparison, catalogue, calculation, procedure, clarify or
-out_of_scope. Use clarify only when no reasonable interpretation can be searched (e.g. an
-unresolved pronoun with no history); otherwise search the most plausible reading and list the
-assumption in premises. Use procedure only for step-by-step handling of hazardous substances
-(e.g. cyanide preparation, PPE); reagent dosages, test conditions and recommendations reported
-in studies are research lookups. Use calculation when the user asks to derive, compute, check
-consistency of, or verify figures (mass balance, implied recovery, unit conversion). Questions
-about versions, duplicates or which documents belong to a project are catalogue.
+out_of_scope. When unsure, choose lookup. Use clarify only when no reasonable interpretation can
+be searched (e.g. an unresolved pronoun with no history); a question that names a site, project,
+report, sample, reagent or process can always be searched, so search the most plausible reading
+and list the assumption in premises. Use procedure only for step-by-step handling of hazardous
+substances (e.g. cyanide preparation, PPE); reagent dosages, test conditions and recommendations
+reported in studies are research lookups. Use calculation when the user asks to derive, compute,
+check consistency of, or verify figures (mass balance, implied recovery, unit conversion). Use
+catalogue only when the question is about the documents themselves: which versions or duplicates
+of a file exist, or which documents belong to a project. A question asking for facts, figures,
+results, dates, events or recommendations reported in documents is never catalogue, even when it
+names a report, study, site or project.
 For a request to check a published calculation, first retrieve its exact formula and cited
 operands. Do not replace an arithmetic check with a demand to reconstruct the entire plant
 mass balance unless the user asks for that broader validation.
