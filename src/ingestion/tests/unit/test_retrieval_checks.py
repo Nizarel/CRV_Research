@@ -57,6 +57,22 @@ def test_version_parsing() -> None:
     assert version(None) == ()
 
 
+def test_vector_sql_follows_each_columns_index() -> None:
+    te3, m3 = retrieval_checks.vector_sql("te3"), retrieval_checks.vector_sql("m3")
+    assert "halfvec(3072)" in te3.approximate
+    assert te3.index == "chunk_te3_hnsw_idx"
+    assert "halfvec" not in m3.approximate
+    assert "vector(1024)" in m3.approximate
+    assert "embedding_m3" in m3.sample
+    assert m3.index == "chunk_m3_hnsw_idx"
+    with pytest.raises(InvalidInputError, match="model"):
+        retrieval_checks.vector_sql("bge")
+    with pytest.raises(InvalidInputError, match="model"):
+        CheckOptions(release_id="r", source_store="s", source_target="t", model="bge")
+    args = build_parser().parse_args(["retrieval-verify", "recall", "--model", "m3"])
+    assert args.model == "m3"
+
+
 @pytest.mark.parametrize(
     ("changes", "message"),
     [({"sample": -1}, "sample"), ({"k": 51}, "sample"), ({"ef_search": 5}, "ef_search"),

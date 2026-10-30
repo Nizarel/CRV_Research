@@ -296,3 +296,68 @@ async def test_keyword_leg_ranks_with_bm25_once_statistics_exist(pg_pool: Any) -
     assert refreshed[RELEASE]["chunks"] == 202
     assert frequency == 2
     assert await keyword("Bleida") == ["texted", "titled"]
+
+
+async def test_m3_backfill_index_and_search(loaded: Any) -> None:
+    from datetime import UTC, datetime
+
+    from ingest_pipeline.adapters.memory.evidence import InMemoryEvidenceStore
+    from ingest_pipeline.adapters.postgres.retrieval import RetrievalVectorStore
+    from ingest_pipeline.runtime.retrieval_embed import EmbedOptions, embed_release
+
+    axes = {row["content"]: index for index, row in enumerate(ROWS)}
+
+    class Provider:
+        model, dimensions = "BAAI/bge-m3", 1024
+
+        async def embed(self, texts: Any) -> list[tuple[float, ...]]:
+            vectors = []
+            for text in texts:
+                vector = [0.0] * 1024
+                vector[axes[text]] = 1.0
+                vectors.append(tuple(vector))
+            return vectors
+
+    store = RetrievalVectorStore(loaded)
+    clock = ManualClock(datetime(2026, 10, 28, tzinfo=UTC))
+    report = await embed_release(store, Provider(), InMemoryEvidenceStore(), clock,
+                                 EmbedOptions(RELEASE, batch_rows=2))
+    assert (report.selected, report.written, report.failed) == (4, 4, 0)
+    assert report.after == {"chunks": 4, "te3": 4, "m3": 4}
+    async with loaded.acquire() as connection:
+        await connection.execute(
+            "UPDATE crv_retrieval.chunk SET content = 'changed', embedding_m3 = NULL"
+            " WHERE projection_id = 'table'"
+        )
+        # A vector embedded from the old text must not land on the changed row.
+        stale = await store.write([{"projection_id": "table",
+                                    "content_sha256": "0" * 64, "vector": [0.5] * 1024}])
+        assert stale == 0
+        await connection.execute(
+            "UPDATE crv_retrieval.chunk SET content = $1 WHERE projection_id = 'table'",
+            ROWS[2]["content"],
+        )
+        index = await build_vector_index(
+            connection, "m3", m=16, ef_construction=64, maintenance_work_mem="64MB",
+            parallel_workers=0,
+        )
+        await connection.execute("RESET maintenance_work_mem")
+        await connection.execute("RESET statement_timeout")
+    rerun = await embed_release(store, Provider(), InMemoryEvidenceStore(), clock,
+                                EmbedOptions(RELEASE))
+    assert (rerun.selected, rerun.written) == (1, 1)
+    assert index["index"] == "chunk_m3_hnsw_idx"
+    query = [0.0] * 1024
+    query[1] = 1.0
+    async with loaded.acquire() as connection:
+        rows = await connection.fetch(SEARCH, RELEASE, "zzz", [], "m3", query, 3)
+    assert rows[0]["projection_id"] == "leaching"
+
+    from ingest_pipeline.adapters.postgres.retrieval_checks import CheckOptions, verify_release
+
+    options = CheckOptions(release_id=RELEASE, source_store="azure_search",
+                           source_target="crv-evidence-v1", sample=4, k=3, model="m3")
+    async with loaded.acquire() as connection:
+        report = await verify_release(connection, ["recall", "explain"], options)
+    assert report["recall"]["sampled"]["queries"] == 4
+    assert report["recall"]["ok"] is True

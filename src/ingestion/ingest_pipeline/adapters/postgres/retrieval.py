@@ -196,6 +196,56 @@ class PendingContent:
     """Search rows of the content: projection_id -> payload digest."""
 
 
+M3_DIMENSIONS = 1024
+_MISSING_M3 = """
+SELECT projection_id, content FROM crv_retrieval.chunk
+WHERE release_id = $1 AND embedding_m3 IS NULL AND projection_id > $2
+ORDER BY projection_id
+LIMIT $3
+"""
+# Only rows still unembedded whose text is still the text that was embedded.
+_WRITE_M3 = f"""
+UPDATE crv_retrieval.chunk AS c SET embedding_m3 = r.vector::vector({M3_DIMENSIONS})
+FROM jsonb_to_recordset($1::jsonb) AS r(projection_id TEXT, content_sha256 TEXT, vector REAL[])
+WHERE c.projection_id = r.projection_id AND c.embedding_m3 IS NULL
+    AND encode(sha256(convert_to(c.content, 'UTF8')), 'hex') = r.content_sha256
+"""
+
+
+@dataclass(frozen=True)
+class ChunkText:
+    projection_id: str
+    content: str
+
+
+class RetrievalVectorStore:
+    """The ``embedding_m3`` column: rows still missing a vector, guarded writes, release counts."""
+
+    def __init__(self, pool: PgPool) -> None:
+        self._pool = pool
+
+    async def missing(self, release_id: str, *, after: str, limit: int) -> list[ChunkText]:
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(_MISSING_M3, release_id, after, limit)
+        return [ChunkText(row["projection_id"], row["content"]) for row in rows]
+
+    async def write(self, rows: Sequence[Mapping[str, Any]]) -> int:
+        if not rows:
+            return 0
+        if any(len(row["vector"]) != M3_DIMENSIONS for row in rows):
+            raise InvalidInputError(f"m3 vectors must have {M3_DIMENSIONS} dimensions")
+        async with self._pool.acquire() as connection:
+            status = await connection.execute(_WRITE_M3, [dict(row) for row in rows])
+        return int(str(status).rsplit(" ", 1)[-1])
+
+    async def status(self, release_id: str) -> dict[str, int]:
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT * FROM crv_retrieval.release_status($1)", release_id
+            )
+        return {key: int(row[key]) for key in ("chunks", "te3", "m3")}
+
+
 async def pending_contents(
     pool: PgPool,
     *,

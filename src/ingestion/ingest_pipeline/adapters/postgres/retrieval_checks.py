@@ -1,9 +1,9 @@
 """Read-only checks of a ``crv_retrieval`` release copy: server preflight, row parity with the
 Search projection, approximate-versus-exact vector recall, query plans and search latency.
 
-The approximate query is the unscoped te3 leg of ``crv_retrieval.search`` (migration 0022), run
-under that function's own planner settings (``pg_proc.proconfig``); the exact query is a
-full-precision scan. Nothing here writes.
+The approximate query is the unscoped vector leg (te3 or m3) of ``crv_retrieval.search``
+(migration 0022), run under that function's own planner settings (``pg_proc.proconfig``); the
+exact query is a full-precision scan. Nothing here writes.
 """
 
 from __future__ import annotations
@@ -18,9 +18,10 @@ from typing import Any
 
 from ...domain.errors import InvalidInputError
 from .pool import PgConnection
-from .retrieval import STORE, TARGET, TE3_DIMENSIONS, VECTOR_INDEXES
+from .retrieval import M3_DIMENSIONS, STORE, TARGET, TE3_DIMENSIONS, VECTOR_INDEXES
 
 CHECKS = ("preflight", "parity", "recall", "explain", "latency")
+MODELS = ("te3", "m3")
 LATENCY_BUDGET_SECONDS = 900.0
 """Both latency passes stop starting new queries after this long (one query can take longer)."""
 MIN_VECTOR_VERSION = (0, 8, 0)
@@ -32,34 +33,79 @@ HNSW_INDEX = VECTOR_INDEXES["te3"][0]
 SEARCH_FUNCTION = "crv_retrieval.search(text, text, text[], text, real[], integer)"
 _PLANNER_SETTING = re.compile(r"^(hnsw\.[a-z_]+|enable_[a-z_]+)=([A-Za-z0-9_.]+)$")
 
-_VECTOR = f"$2::real[]::vector({TE3_DIMENSIONS})"
-_APPROXIMATE = f"""
+
+@dataclass(frozen=True)
+class VectorSql:
+    """One model's vector column: the queries mirror its leg of ``crv_retrieval.search``."""
+
+    model: str
+    dimensions: int
+    index: str
+    approximate: str
+    exact: str
+    scoped: str
+    sample: str
+
+
+def vector_sql(model: str) -> VectorSql:
+    if model not in MODELS:
+        raise InvalidInputError(f"Unknown embedding model {model!r}")
+    index, _, column = VECTOR_INDEXES[model]
+    dimensions = TE3_DIMENSIONS if model == "te3" else M3_DIMENSIONS
+    vector = f"$2::real[]::vector({dimensions})"
+    # te3 is indexed as halfvec (3,072 dimensions exceed the vector index limit); m3 as is.
+    order = (
+        f"c.{column}::halfvec({dimensions}) <=> {vector}::halfvec({dimensions})"
+        if model == "te3" else f"c.{column} <=> {vector}"
+    )
+    return VectorSql(
+        model=model, dimensions=dimensions, index=index,
+        approximate=f"""
 WITH candidate AS MATERIALIZED (
-    SELECT c.projection_id, c.embedding_te3 FROM crv_retrieval.chunk AS c
+    SELECT c.projection_id, c.{column} FROM crv_retrieval.chunk AS c
     WHERE c.release_id = $1
-    ORDER BY c.embedding_te3::halfvec({TE3_DIMENSIONS}) <=> {_VECTOR}::halfvec({TE3_DIMENSIONS})
+    ORDER BY {order}
     LIMIT $3)
-SELECT candidate.projection_id, candidate.embedding_te3 <=> {_VECTOR} AS distance
-FROM candidate WHERE candidate.embedding_te3 IS NOT NULL
+SELECT candidate.projection_id, candidate.{column} <=> {vector} AS distance
+FROM candidate WHERE candidate.{column} IS NOT NULL
 ORDER BY distance, candidate.projection_id
 LIMIT $4
-"""
-_EXACT = f"""
-SELECT c.projection_id, c.embedding_te3 <=> {_VECTOR} AS distance
+""",
+        exact=f"""
+SELECT c.projection_id, c.{column} <=> {vector} AS distance
 FROM crv_retrieval.chunk AS c
-WHERE c.release_id = $1 AND c.embedding_te3 IS NOT NULL
+WHERE c.release_id = $1 AND c.{column} IS NOT NULL
 ORDER BY distance, c.projection_id
 LIMIT $3
-"""
-_SCOPED = f"""
+""",
+        scoped=f"""
 WITH candidate AS MATERIALIZED (
-    SELECT c.projection_id, c.embedding_te3 FROM crv_retrieval.chunk AS c
+    SELECT c.projection_id, c.{column} FROM crv_retrieval.chunk AS c
     WHERE c.release_id = $1 AND c.content_hash = ANY ($3::text[])
-        AND c.embedding_te3 IS NOT NULL)
+        AND c.{column} IS NOT NULL)
 SELECT candidate.projection_id FROM candidate
-ORDER BY candidate.embedding_te3 <=> {_VECTOR}, candidate.projection_id
+ORDER BY candidate.{column} <=> {vector}, candidate.projection_id
 LIMIT $4
-"""
+""",
+        # Sample keys first: computing the vector cast inside the ORDER BY ... LIMIT would read
+        # them all.
+        sample=f"""
+WITH picked AS (
+    SELECT c.projection_id FROM crv_retrieval.chunk AS c
+    WHERE c.release_id = $1 AND c.{column} IS NOT NULL
+    ORDER BY md5(c.projection_id || $2), c.projection_id
+    LIMIT $3)
+SELECT c.projection_id, c.content_hash, c.title, c.{column}::real[] AS vector
+FROM picked JOIN crv_retrieval.chunk AS c USING (projection_id)
+ORDER BY md5(c.projection_id || $2), c.projection_id
+""",
+    )
+
+
+_TE3 = vector_sql("te3")
+_APPROXIMATE = _TE3.approximate
+_EXACT = _TE3.exact
+_SCOPED = _TE3.scoped
 # The first stage of the keyword leg (migrations 0026, 0027).
 _LEXICAL = """
 SELECT t.projection_id FROM crv_retrieval.chunk_terms AS t
@@ -69,17 +115,6 @@ ORDER BY ts_rank('{1, 1, 0.5, 1}', t.search_text, crv_retrieval.query_terms($2),
 LIMIT 600
 """
 _SEARCH = "SELECT * FROM crv_retrieval.search($1, $2, $3::text[], $4, $5::real[], $6)"
-# Sample keys first: computing the vector cast inside the ORDER BY ... LIMIT would read them all.
-_SAMPLE = """
-WITH picked AS (
-    SELECT c.projection_id FROM crv_retrieval.chunk AS c
-    WHERE c.release_id = $1 AND c.embedding_te3 IS NOT NULL
-    ORDER BY md5(c.projection_id || $2), c.projection_id
-    LIMIT $3)
-SELECT c.projection_id, c.content_hash, c.title, c.embedding_te3::real[] AS vector
-FROM picked JOIN crv_retrieval.chunk AS c USING (projection_id)
-ORDER BY md5(c.projection_id || $2), c.projection_id
-"""
 _SERVER = """
 SELECT (SELECT extversion FROM pg_extension WHERE extname = 'vector') AS installed,
     (SELECT default_version FROM pg_available_extensions WHERE name = 'vector') AS available,
@@ -92,10 +127,10 @@ SELECT (SELECT extversion FROM pg_extension WHERE extname = 'vector') AS install
     current_setting('max_connections') AS max_connections,
     has_table_privilege('ingest.schema_migration', 'SELECT') AS can_read_migrations
 """
-_SIZES = f"""
+_SIZES = """
 SELECT pg_table_size('crv_retrieval.chunk') AS table_bytes,
     pg_indexes_size('crv_retrieval.chunk') AS index_bytes,
-    coalesce(pg_relation_size(to_regclass('crv_retrieval.{HNSW_INDEX}')), 0) AS hnsw_bytes
+    coalesce(pg_relation_size(to_regclass('crv_retrieval.' || $1)), 0) AS hnsw_bytes
 """
 _SOURCE = """
 SELECT count(*) AS rows, count(DISTINCT content_hash) AS contents
@@ -139,8 +174,12 @@ class CheckOptions:
     max_p95_ms: float = 1000.0
     """Latency gate: p95 of the first hybrid search of each query."""
     seed: str = "crv-retrieval-verify"
+    model: str = "te3"
+    """Vector column checked by recall, explain and latency."""
 
     def __post_init__(self) -> None:
+        if self.model not in MODELS:
+            raise InvalidInputError(f"model must be one of {', '.join(MODELS)}")
         if not (0 <= self.sample <= 500 and 1 <= self.k <= CANDIDATES // 2):
             raise InvalidInputError("sample must be 0-500 and k 1-50")
         ef_ok = self.ef_search is None or 10 <= self.ef_search <= 1000
@@ -217,7 +256,7 @@ async def _preflight(connection: PgConnection, options: CheckOptions) -> dict[st
         report["latest_migration"] = applied[-1] if applied else None
         report["has_0022"] = "0022_crv_retrieval" in applied
     if server["has_schema"]:
-        report.update(dict(await connection.fetchrow(_SIZES)))
+        report.update(dict(await connection.fetchrow(_SIZES, vector_sql(options.model).index)))
     source = await connection.fetchrow(
         _SOURCE, options.source_store, options.source_target, options.release_id
     )
@@ -248,7 +287,9 @@ async def _parity(connection: PgConnection, options: CheckOptions) -> dict[str, 
 
 
 async def _sample(connection: PgConnection, options: CheckOptions) -> list[Mapping[str, Any]]:
-    return list(await connection.fetch(_SAMPLE, options.release_id, options.seed, options.sample))
+    return list(await connection.fetch(
+        vector_sql(options.model).sample, options.release_id, options.seed, options.sample
+    ))
 
 
 async def search_settings(
@@ -283,7 +324,8 @@ async def _approximate(
     async with connection.transaction():
         await _apply(connection, settings)
         rows = await connection.fetch(
-            _APPROXIMATE, options.release_id, list(vector), CANDIDATES, options.k
+            vector_sql(options.model).approximate, options.release_id, list(vector), CANDIDATES,
+            options.k,
         )
     return [(row["projection_id"], float(row["distance"])) for row in rows]
 
@@ -296,7 +338,9 @@ async def _exact(
         # The planner ignores out-of-line vectors when costing parallel scans.
         await connection.execute("SET LOCAL min_parallel_table_scan_size = 1")
         await connection.execute("SET LOCAL parallel_setup_cost = 1")
-        rows = await connection.fetch(_EXACT, options.release_id, list(vector), options.k)
+        rows = await connection.fetch(
+            vector_sql(options.model).exact, options.release_id, list(vector), options.k
+        )
     return [(row["projection_id"], float(row["distance"])) for row in rows]
 
 
@@ -310,9 +354,10 @@ async def _recall_of(
     recall: list[float] = []
     approximate_ms: list[float] = []
     exact_seconds = 0.0
+    dimensions = vector_sql(options.model).dimensions
     for vector in vectors:
-        if len(vector) != TE3_DIMENSIONS:
-            raise InvalidInputError(f"Query vectors need {TE3_DIMENSIONS} dimensions")
+        if len(vector) != dimensions:
+            raise InvalidInputError(f"Query vectors need {dimensions} dimensions")
         started = time.perf_counter()
         approximate = await _approximate(connection, options, settings, vector)
         approximate_ms.append((time.perf_counter() - started) * 1000)
@@ -365,14 +410,15 @@ async def _explain(
     if not sample:
         return {"ok": False, "error": "no vectors in the release"}
     vector, content_hash = list(sample[0]["vector"]), sample[0]["content_hash"]
+    sql = vector_sql(options.model)
     async with connection.transaction():
         await _apply(connection, settings)
         unscoped = plan_summary(await connection.fetchval(
-            f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {_APPROXIMATE}",
+            f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql.approximate}",
             options.release_id, vector, CANDIDATES, options.k,
         ))
         scoped = plan_summary(await connection.fetchval(
-            f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {_SCOPED}",
+            f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql.scoped}",
             options.release_id, vector, [content_hash], options.k,
         ))
         lexical = plan_summary(await connection.fetchval(
@@ -384,7 +430,7 @@ async def _explain(
         "unscoped": unscoped,
         "scoped": scoped,
         "lexical": {"query": sample[0]["title"], **lexical},
-        "ok": HNSW_INDEX in unscoped["indexes"]
+        "ok": sql.index in unscoped["indexes"]
         and not any(plan["chunk_seq_scan"] for plan in (unscoped, scoped, lexical)),
     }
 
@@ -427,7 +473,7 @@ async def _timed_search(
 ) -> float:
     started = time.perf_counter()
     await connection.fetch(
-        _SEARCH, options.release_id, text, list(scope), "te3" if vector else None,
+        _SEARCH, options.release_id, text, list(scope), options.model if vector else None,
         list(vector) if vector else None, options.k,
     )
     return (time.perf_counter() - started) * 1000

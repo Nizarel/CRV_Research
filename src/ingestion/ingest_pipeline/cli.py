@@ -41,7 +41,7 @@ from .adapters.postgres.migrations import apply_crv_baseline, apply_migrations, 
 from .adapters.postgres.pool import create_pool
 from .adapters.postgres.report import pipeline_status
 from .adapters.postgres.retrieval import VECTOR_INDEXES, build_vector_index
-from .adapters.postgres.retrieval_checks import CHECKS, CheckOptions, verify_release
+from .adapters.postgres.retrieval_checks import CHECKS, MODELS, CheckOptions, verify_release
 from .adapters.postgres.snapshots import PostgresSnapshots
 from .adapters.search.index_admin import ensure_index, render_schema
 from .adapters.servicebus.transport import ServiceBusMessageReceiver, open_receiver
@@ -1030,6 +1030,55 @@ async def _retrieval_index(
 MAX_QUESTIONS = 200
 
 
+async def _retrieval_embed(
+    settings: PipelineSettings, _: Telemetry, args: argparse.Namespace
+) -> int:
+    """Fill embedding_m3 for a release from the local OpenAI-compatible embedding server."""
+
+    import aiohttp
+
+    from .adapters.local_ai.embeddings import (
+        OpenAICompatibleEmbeddings,
+        check_endpoint,
+        read_key_file,
+    )
+    from .adapters.postgres.evidence import PostgresEvidenceStore
+    from .adapters.postgres.retrieval import M3_DIMENSIONS, RetrievalVectorStore
+    from .adapters.system import SystemClock
+    from .runtime.retrieval_embed import EmbedOptions, embed_release
+
+    local = settings.local_embeddings
+    if local.dimensions != M3_DIMENSIONS:
+        raise SystemExit(f"embedding_m3 holds {M3_DIMENSIONS}-dimension vectors")
+    options = EmbedOptions(
+        release_id=args.release or settings.search.release_id, batch_rows=args.batch_rows,
+        limit=args.limit, dry_run=args.dry_run,
+    )
+    base_url = "" if args.dry_run else check_endpoint(
+        require(local.url, "TIZ_LOCAL_EMBEDDINGS__URL"), local.private_http_hosts
+    )
+    api_key = read_key_file(local.api_key_file) if local.api_key_file else None
+    database = settings.db.model_copy(update={"min_pool_size": 1, "max_pool_size": 2})
+    async with (
+        _database(settings.model_copy(update={"db": database})) as pool,
+        aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=local.timeout_seconds)
+        ) as session,
+    ):
+        provider = OpenAICompatibleEmbeddings(
+            session, base_url=base_url, model=local.model,
+            served_model=local.served_model or local.model, dimensions=local.dimensions,
+            api_key=api_key, max_inputs_per_request=local.max_inputs_per_request,
+            concurrency=local.concurrency, attempts=local.attempts,
+        )
+        report = await embed_release(
+            RetrievalVectorStore(pool), provider, PostgresEvidenceStore(pool), SystemClock(),
+            options,
+        )
+    _print(asdict(report))
+    return 1 if report.failed else 0
+
+
 def read_questions(path: str) -> list[str]:
     """The ``question`` of each golden JSONL line (bounded: each one is an embedding call)."""
 
@@ -1058,7 +1107,10 @@ async def _retrieval_verify(
         ef_search=args.ef_search,
         min_recall=args.min_recall,
         max_p95_ms=args.max_p95_ms,
+        model=args.model,
     )
+    if args.questions and args.model != "te3":
+        raise SystemExit("--questions embeds with the Azure TE3 deployment; use it with te3 only")
     questions = read_questions(args.questions) if args.questions else []
     database = settings.db.model_copy(update={
         "min_pool_size": 1, "max_pool_size": 1, "statement_timeout_ms": 0,
@@ -1279,6 +1331,19 @@ def build_parser() -> argparse.ArgumentParser:
     vector_index.add_argument("--timeout-minutes", type=_positive, default=240)
     vector_index.set_defaults(handler=_retrieval_index)
 
+    embed_m3 = commands.add_parser(
+        "retrieval-embed",
+        help="Fill embedding_m3 of a release from a local OpenAI-compatible server (BGE-M3)",
+    )
+    embed_m3.add_argument("--release", help="Search release (default: TIZ_SEARCH__RELEASE_ID)")
+    embed_m3.add_argument("--batch-rows", type=_positive, default=256,
+                          help="Rows read and written per round")
+    embed_m3.add_argument("--limit", type=_positive, default=None,
+                          help="Stop after this many rows (rehearsals)")
+    embed_m3.add_argument("--dry-run", action="store_true",
+                          help="Report release counts only; no model calls or writes")
+    embed_m3.set_defaults(handler=_retrieval_embed)
+
     verify = commands.add_parser(
         "retrieval-verify",
         help="Read-only crv_retrieval checks: preflight, parity, recall, explain, latency",
@@ -1295,6 +1360,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--min-recall", type=float, default=0.95)
     verify.add_argument("--max-p95-ms", type=float, default=1000.0,
                         help="Latency gate: p95 of the first hybrid search of each query")
+    verify.add_argument("--model", choices=MODELS, default="te3",
+                        help="Vector column for recall, explain and latency")
     verify.add_argument("--timeout-minutes", type=_positive, default=60)
     verify.set_defaults(handler=_retrieval_verify)
 

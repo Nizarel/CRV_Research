@@ -105,6 +105,24 @@ class EmbeddingSettings(BaseModel):
     max_tokens_per_input: int = Field(default=8191, ge=1, le=8192)
 
 
+class LocalEmbeddingSettings(BaseModel):
+    """OpenAI-compatible embedding server on the edge (``retrieval-embed``): BGE-M3."""
+
+    url: str | None = None
+    """Base URL ending in ``/v1``; plain HTTP only to loopback or ``private_http_hosts``."""
+    model: str = "BAAI/bge-m3"
+    """Model identity in the embedding cache; never reuse one name for different weights."""
+    served_model: str | None = None
+    """Name the server knows the model by (default: ``model``)."""
+    dimensions: int = Field(default=1024, ge=1)
+    api_key_file: Path | None = None
+    private_http_hosts: tuple[str, ...] = ()
+    max_inputs_per_request: int = Field(default=32, ge=1, le=2048)
+    concurrency: int = Field(default=2, ge=1, le=16)
+    timeout_seconds: float = Field(default=120.0, gt=0)
+    attempts: int = Field(default=4, ge=1, le=10)
+
+
 class SearchSettings(BaseModel):
     endpoint: str | None = None
     index_name: str = "crv-evidence-v1"
@@ -325,6 +343,7 @@ class PipelineSettings(BaseSettings):
     blob: BlobSettings = Field(default_factory=BlobSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    local_embeddings: LocalEmbeddingSettings = Field(default_factory=LocalEmbeddingSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
     di: DocumentIntelligenceSettings = Field(default_factory=DocumentIntelligenceSettings)
     cu: ContentUnderstandingSettings = Field(default_factory=ContentUnderstandingSettings)
