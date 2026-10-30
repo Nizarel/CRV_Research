@@ -1,0 +1,76 @@
+# CRV PostgreSQL 16 staging server on dgx-niz01 (DGX migration rehearsal target).
+# Listens on the DGX loopback only; the superuser password comes from a 0600 file. Data, bundles
+# and the password live on the encrypted volume (luks-volume.sh); the server refuses to start while
+# that volume is locked and never restarts by itself. restore.sh runs pg_restore inside it.
+#   sudo bash infra/dgx/staging/luks-volume.sh open
+#   CRV_PG_IMAGE=crv-postgres16:age1.6.0-pgvector0.8.2 CRV_SECURE=/srv/crv-secure \
+#       docker compose -f infra/dgx/staging/compose.yaml up -d
+name: crv-pg16-staging
+
+services:
+  postgres:
+    image: ${CRV_PG_IMAGE:?set CRV_PG_IMAGE to the built crv-postgres16 image}
+    restart: "no"
+    # A parallel pgvector HNSW build puts its graph in one /dev/shm segment as large as
+    # maintenance_work_mem (4GB below); 2g failed the full restore. Keep shm_size above it.
+    shm_size: 8g
+    ports:
+      - "127.0.0.1:${CRV_PG_PORT:-5433}:5432"
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF8 --locale-provider=libc --locale=en_US.utf8
+    secrets:
+      - postgres_password
+    volumes:
+      - type: bind
+        source: ${CRV_SECURE:?set CRV_SECURE to the mounted encrypted volume}/pgdata
+        target: /var/lib/postgresql/data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${CRV_SECURE}/bundles
+        target: /bundle
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ../../sql/migration
+        target: /migration-sql
+        read_only: true
+    # Azure source settings where they affect results (jit, planner costs, TOAST compression);
+    # memory sized for the DGX instead of the B2s.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=age,pg_stat_statements
+      - -c
+      - jit=off
+      - -c
+      - random_page_cost=2
+      - -c
+      - seq_page_cost=1
+      - -c
+      - default_toast_compression=lz4
+      - -c
+      - timezone=UTC
+      - -c
+      - max_connections=150
+      - -c
+      - work_mem=4MB
+      - -c
+      - shared_buffers=4GB
+      - -c
+      - effective_cache_size=24GB
+      - -c
+      - maintenance_work_mem=4GB
+      - -c
+      - max_parallel_maintenance_workers=4
+      - -c
+      - max_wal_size=16GB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+secrets:
+  postgres_password:
+    file: ${CRV_SECURE}/secrets/pg16-staging.password

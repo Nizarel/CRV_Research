@@ -1,0 +1,156 @@
+# CRV edge stack on dgx-niz01: PostgreSQL 16 (restored ingestion-catalog + crv-agent-memory),
+# the research backend and the nginx web front end. Model servers run outside this file: the
+# BGE-M3 and reranker containers (crv-bge-m3, crv-reranker) join the crv-edge_models network,
+# generation runs on dgx-niz02. See Docs/DGX_EDGE_PLACEMENT.md and Docs/DGX_EDGE_RUNBOOK.md.
+#
+# The backend shares the web container's network namespace, as in the AKS pod: nginx proxies
+# /api/v1 to 127.0.0.1:8000 and the backend (single local owner) may only bind to loopback.
+# Every CRV byte (database files, password files, source PDFs) stays on the LUKS volume; the
+# stack refuses to start while it is locked and never restarts by itself.
+#
+#   sudo bash infra/dgx/staging/luks-volume.sh open
+#   docker compose -f infra/dgx/staging/compose.yaml down     # never run both PostgreSQL stacks
+#   CRV_PG_IMAGE=... CRV_BACKEND_IMAGE=... CRV_WEB_IMAGE=... CRV_SECURE=/srv/crv-secure \
+#   CRV_UID=$(id -u) CRV_GID=$(id -g) docker compose -f infra/dgx/edge/compose.yaml up -d
+# Backend settings come from $CRV_SECURE/secrets/edge.env (from edge.env.example).
+name: crv-edge
+
+services:
+  postgres:
+    image: ${CRV_PG_IMAGE:?set CRV_PG_IMAGE to the built crv-postgres16 image}
+    restart: "no"
+    # Above maintenance_work_mem (4GB below): a parallel HNSW build needs one /dev/shm segment
+    # that large; 2g failed the full staging restore.
+    shm_size: 8g
+    networks: [database]
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - type: bind
+        source: ${CRV_SECURE:?set CRV_SECURE to the mounted encrypted volume}/pgdata
+        target: /var/lib/postgresql/data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${CRV_SECURE}/bundles
+        target: /bundle
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ../../sql/migration
+        target: /migration-sql
+        read_only: true
+    # Same server settings as the staging restore (infra/dgx/staging/compose.yaml).
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=age,pg_stat_statements
+      - -c
+      - jit=off
+      - -c
+      - random_page_cost=2
+      - -c
+      - seq_page_cost=1
+      - -c
+      - default_toast_compression=lz4
+      - -c
+      - timezone=UTC
+      - -c
+      - max_connections=150
+      - -c
+      - work_mem=4MB
+      - -c
+      - shared_buffers=4GB
+      - -c
+      - effective_cache_size=24GB
+      - -c
+      - maintenance_work_mem=4GB
+      - -c
+      - max_parallel_maintenance_workers=4
+      - -c
+      - max_wal_size=16GB
+      - -c
+      - password_encryption=scram-sha-256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d ingestion-catalog"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  web:
+    image: ${CRV_WEB_IMAGE:?set CRV_WEB_IMAGE to the ARM64 front end built with VITE_BASE_PATH=/}
+    restart: "no"
+    networks: [database, models]
+    # Loopback by default: until edge sign-in exists every visitor shares one identity.
+    ports:
+      - "${CRV_EDGE_BIND:-127.0.0.1}:${CRV_EDGE_PORT:-8080}:8080"
+    extra_hosts:
+      - "dgx-niz02:${CRV_NIZ02_ADDRESS:-192.168.88.8}"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  backend:
+    image: ${CRV_BACKEND_IMAGE:?set CRV_BACKEND_IMAGE to the ARM64 crv-agent backend}
+    restart: "no"
+    network_mode: "service:web"
+    # The operator's uid reads the 0600 password files and source PDFs on the volume.
+    user: "${CRV_UID:?export CRV_UID=$(id -u)}:${CRV_GID:?export CRV_GID=$(id -g)}"
+    command: [crv-agent, serve, --host, 127.0.0.1, --port, "8000"]
+    env_file:
+      - path: ${CRV_EDGE_ENV:-${CRV_SECURE}/secrets/edge.env}
+        required: true
+    environment:
+      # Fixed by this topology; edge.env carries the rest (no secrets).
+      CRV_POSTGRES_HOST: postgres
+      CRV_POSTGRES_PORT: "5432"
+      CRV_POSTGRES_AUTH: password
+      CRV_POSTGRES_PASSWORD_FILE: /run/crv-secrets/crv_edge_agent.password
+      CRV_KG_DATABASE: ingestion-catalog
+      CRV_POSTGRES_USER: crv_edge_agent
+      CRV_MEMORY_DATABASE: crv-agent-memory
+      CRV_MEMORY_USER: crv_edge_agent
+      CRV_SOURCES_ROOT: /sources
+      HOME: /tmp
+    volumes:
+      - type: bind
+        source: ${CRV_SECURE}/secrets
+        target: /run/crv-secrets
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${CRV_SECURE}/sources
+        target: /sources
+        read_only: true
+        bind: {create_host_path: false}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      postgres: {condition: service_healthy}
+      web: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+networks:
+  # PostgreSQL has no route out and no published port.
+  database:
+    internal: true
+  # Retrieval model containers (crv-bge-m3, crv-reranker) and the route to dgx-niz02.
+  models: {}
+
+secrets:
+  postgres_password:
+    file: ${CRV_SECURE}/secrets/pg16-staging.password

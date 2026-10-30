@@ -70,7 +70,7 @@ param(
     [ValidateRange(0, 8)] [int] $RetrievalIndexWorkers = 1,
     # retrieval-verify: read-only checks; -RetrievalQuestions also embeds the golden questions
     # (one paid embedding call each) as recall queries.
-    [ValidateSet('preflight', 'parity', 'recall', 'explain', 'latency')] [string[]] $RetrievalChecks = @('preflight'),
+    [ValidateSet('preflight', 'parity', 'recall', 'explain')] [string[]] $RetrievalChecks = @('preflight'),
     [ValidateRange(0, 500)] [int] $RetrievalSample = 30,
     # 0 keeps the search function's own hnsw.ef_search.
     [ValidateRange(0, 1000)] [int] $RetrievalEfSearch = 0,

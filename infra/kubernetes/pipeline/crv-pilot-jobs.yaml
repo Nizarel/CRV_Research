@@ -576,8 +576,8 @@ spec:
         - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
 ---
 # JOB retrieval-verify: read-only checks of the EVAL_RELEASE copy as the worker identity
-# (preflight, parity, recall, explain, latency). Golden questions are embedded only when the
-# crv-golden ConfigMap is rendered with it (-RetrievalQuestions).
+# (preflight, parity, recall, explain). Golden questions are embedded only when the crv-golden
+# ConfigMap is rendered with it (-RetrievalQuestions).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -608,11 +608,9 @@ spec:
           volumeMounts:
             - {name: golden, mountPath: /golden, readOnly: true}
             - {name: tmp, mountPath: /tmp}
-            - {name: cu-config, mountPath: /etc/crv/cu, readOnly: true}
       volumes:
         - {name: golden, configMap: {name: crv-golden, optional: true}}
         - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
-        - {name: cu-config, configMap: {name: crv-pipeline-cu}}
 ---
 # JOB golden-eval: retrieval quality on the golden questions (Docs/AGENTIC_ARCHITECTURE.md §7).
 # Runs as the worker identity (Search data reader, Azure OpenAI user, crv_kg_reader member);
