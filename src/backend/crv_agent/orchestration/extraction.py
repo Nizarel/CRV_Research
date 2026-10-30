@@ -9,9 +9,11 @@ is bounded (about 1-2 model calls per facet) instead of growing with an agent lo
 
 import asyncio
 import json
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 
 from crv_agent.domain.evidence import (
     Claim,
@@ -26,7 +28,13 @@ from crv_agent.orchestration.middleware import UsageRecorder
 from crv_agent.orchestration.prompts import EXTRACT_RULES
 from crv_agent.ports.rerank import Reranker
 from crv_agent.services.candidates import ranked_candidates
-from crv_agent.services.evidence_pack import EvidencePolicy, build_pack, expose, merge_exposure
+from crv_agent.services.evidence_pack import (
+    EvidencePolicy,
+    Pack,
+    build_pack,
+    expose,
+    merge_exposure,
+)
 from crv_agent.services.retrieval import Retrieval, identifiers
 
 MAX_ROUNDS = 2
@@ -38,6 +46,57 @@ class Extraction(Contract):
     claims: list[Claim]
     gaps: list[str]
     rewrite: str | None
+
+
+def search_text(query: str, fixed: list[str]) -> str:
+    return (query + "\n" + " ".join(fixed)).strip()
+
+
+async def candidate_pack(
+    retrieval: Retrieval, text: str, fixed: list[str], release: str, hashes: list[str],
+    budget: Budget, policy: EvidencePolicy, reranker: Reranker | None, *, strict: bool,
+    exclude: set[str] | frozenset[str] = frozenset(),
+) -> Pack:
+    """The passages one extraction round shows, skipping IDs already shown to the facet."""
+    hits = await ranked_candidates(
+        retrieval, text, release, hashes, budget, policy, reranker, strict=strict,
+    )
+    return build_pack([hit for hit in hits if hit.id not in exclude], text, fixed, policy)
+
+
+def passage(hit: Evidence, span: tuple[int, int]) -> dict[str, object]:
+    """One passage exactly as the extractor sees it."""
+    return {
+        "id": hit.id, "title": hit.title, "source": hit.source_path or hit.source_uri,
+        "document_code": hit.document_code, "pages": hit.pages,
+        "source_role": hit.source_role, "citation_basis": hit.citation_basis,
+        "truncated": span != (0, len(hit.content)),
+        "text": hit.content[span[0]:span[1]],
+    }
+
+
+def batched(passages: list[dict[str, object]], batches: int) -> list[list[dict[str, object]]]:
+    """Round-robin batches, so each mixes top- and lower-ranked passages."""
+    return [group for i in range(batches) if (group := passages[i::batches])]
+
+
+def extraction_messages(
+    question: str, passages: list[dict[str, object]], round_number: int, max_claims: int,
+    previous: list[Claim],
+) -> list[BaseMessage]:
+    data = json.dumps({
+        "facet": question, "round": round_number + 1, "max_rounds": MAX_ROUNDS,
+        "max_claims": max_claims,
+        "claims_already_found": [c.text for c in previous], "passages": passages,
+    }, ensure_ascii=False)
+    return [SystemMessage(content=EXTRACT_RULES), HumanMessage(content=data)]
+
+
+def extractor(model: BaseChatModel, *, include_raw: bool = False) -> Runnable[Any, Any]:
+    """The strict structured-output call; ``include_raw`` keeps usage and parse errors."""
+    return model.with_structured_output(
+        Extraction, method="json_schema", strict=True, include_raw=include_raw,
+    )
 
 
 class ExtractionWorker:
@@ -62,13 +121,11 @@ class ExtractionWorker:
         rounds: list[ExtractionRound] = []
         query = question.split("\n", 1)[0]
         for round_number in range(MAX_ROUNDS):
-            text = (query + "\n" + " ".join(fixed)).strip()
-            hits = await ranked_candidates(
-                self.retrieval, text, release, hashes, budget, self.policy, self.reranker,
-                strict=strict,
+            text = search_text(query, fixed)
+            pack = await candidate_pack(
+                self.retrieval, text, fixed, release, hashes, budget, self.policy,
+                self.reranker, strict=strict, exclude=set(found),
             )
-            fresh = [hit for hit in hits if hit.id not in found]
-            pack = build_pack(fresh, text, fixed, self.policy)
             if not pack.shown:
                 gaps.append("A rewritten search returned no new candidates.")
                 break
@@ -78,18 +135,10 @@ class ExtractionWorker:
                 found[hit.id] = (
                     merge_exposure(found[hit.id], visible) if hit.id in found else visible
                 )
-                passages.append({
-                    "id": hit.id, "title": hit.title, "source": hit.source_path or hit.source_uri,
-                    "document_code": hit.document_code, "pages": hit.pages,
-                    "source_role": hit.source_role, "citation_basis": hit.citation_basis,
-                    "truncated": span != (0, len(hit.content)),
-                    "text": hit.content[span[0]:span[1]],
-                })
-            # Round-robin batches mix top- and lower-ranked passages; each is extracted in
-            # parallel, so one call no longer has to find every fact in ~50 full chunks.
-            groups = [
-                group for i in range(self.batches) if (group := passages[i::self.batches])
-            ]
+                passages.append(passage(hit, span))
+            # Each batch is extracted in parallel, so one call no longer has to find every
+            # fact in ~50 full chunks.
+            groups = batched(passages, self.batches)
             results = await asyncio.gather(*(
                 self.extract(question, group, round_number, claims, budget) for group in groups
             ), return_exceptions=True)
@@ -127,18 +176,14 @@ class ExtractionWorker:
         self, question: str, passages: list[dict[str, object]], round_number: int,
         previous: list[Claim], budget: Budget,
     ) -> Extraction:
-        data = json.dumps({
-            "facet": question, "round": round_number + 1, "max_rounds": MAX_ROUNDS,
-            "max_claims": self.max_claims,
-            "claims_already_found": [c.text for c in previous], "passages": passages,
-        }, ensure_ascii=False)
+        messages = extraction_messages(
+            question, passages, round_number, self.max_claims, previous,
+        )
         await budget.reserve(model=1, tokens=(
-            estimate_tokens(EXTRACT_RULES + data + self.schema) + self.output_tokens
+            estimate_tokens(EXTRACT_RULES + str(messages[1].content) + self.schema)
+            + self.output_tokens
         ), headroom=ANSWER_HEADROOM_TOKENS)
-        result = await budget.wait(self.model.with_structured_output(
-            Extraction, method="json_schema", strict=True,
-        ).ainvoke(
-            [SystemMessage(content=EXTRACT_RULES), HumanMessage(content=data)],
-            {"callbacks": [UsageRecorder(budget, "worker", "evidence_extractor")]},
+        result = await budget.wait(extractor(self.model).ainvoke(
+            messages, {"callbacks": [UsageRecorder(budget, "worker", "evidence_extractor")]},
         ))
         return Extraction.model_validate(result)
