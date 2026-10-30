@@ -9,6 +9,8 @@ Three steps, each writing JSONL that holds CRV text (keep outputs on the encrypt
 * ``score`` (offline, no model calls) anchors and validates every claim with the production
   code (``anchor_claim`` then ``claim_errors``) and classifies each rejected quotation, so
   near misses a normalization fix could recover are separated from real paraphrase.
+* ``plan`` sends each golden question to the production planner call and reports how often a
+  research question is routed to an intent that never calls the worker (such as catalogue).
 
 Re-running ``score`` after changing the anchoring code measures that change with no new calls.
 """
@@ -306,11 +308,30 @@ def _done(path: Path) -> set[tuple[str, str, int, int]]:
     }
 
 
-async def _run(args: argparse.Namespace) -> int:
-    from langchain_openai import ChatOpenAI
-
-    from crv_agent.orchestration.extraction import batched, extraction_messages, extractor
+async def _role_models(
+    stack: AsyncExitStack, settings: Any, specs: Sequence[str], role: str,
+) -> dict[str, tuple[str, str | None, Any]]:
+    """One chat model per ``name[@effort]`` spec, configured as production configures ``role``."""
     from crv_agent.runtime.infrastructure import COGNITIVE_SCOPE, create_chat_models
+
+    token_provider = None
+    if settings.effective_model_auth == "entra":
+        from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
+
+        credential = await stack.enter_async_context(DefaultAzureCredential())
+        token_provider = get_bearer_token_provider(credential, COGNITIVE_SCOPE)
+    models: dict[str, tuple[str, str | None, Any]] = {}
+    for spec in specs:
+        name, effort = parse_model(spec)
+        configured = settings.model_copy(update={
+            f"{role}_deployment": name, f"{role}_reasoning_effort": effort,
+        })
+        models[spec] = (name, effort, create_chat_models(stack, configured, token_provider)[role])
+    return models
+
+
+async def _run(args: argparse.Namespace) -> int:
+    from crv_agent.orchestration.extraction import batched, extraction_messages, extractor
     from crv_agent.runtime.settings import Settings
 
     settings = Settings()
@@ -321,21 +342,7 @@ async def _run(args: argparse.Namespace) -> int:
     done = _done(out_path)
     gate = asyncio.Semaphore(args.concurrency)
     async with AsyncExitStack() as stack:
-        token_provider = None
-        if settings.effective_model_auth == "entra":
-            from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
-
-            credential = await stack.enter_async_context(DefaultAzureCredential())
-            token_provider = get_bearer_token_provider(credential, COGNITIVE_SCOPE)
-        models: dict[str, tuple[str, str | None, ChatOpenAI]] = {}
-        for spec in args.model:
-            name, effort = parse_model(spec)
-            configured = settings.model_copy(update={
-                "worker_deployment": name, "worker_reasoning_effort": effort,
-            })
-            models[spec] = (name, effort, create_chat_models(stack, configured, token_provider)[
-                "worker"
-            ])
+        models = await _role_models(stack, settings, args.model, "worker")
         out = stack.enter_context(out_path.open("a", encoding="utf-8"))
 
         async def call(
@@ -392,6 +399,88 @@ async def _run(args: argparse.Namespace) -> int:
                             tasks.append(call(record, label, batches, batch, group))
         print(f"{len(tasks)} calls ({len(done)} already done)", file=sys.stderr)
         await asyncio.gather(*tasks)
+    return 0
+
+
+# ---------------------------------------------------------------------------------------------
+# plan
+# ---------------------------------------------------------------------------------------------
+
+NO_RESEARCH = {"catalogue", "clarify", "out_of_scope", "procedure"}
+"""Intents whose research path never calls the evidence worker."""
+CATALOGUE_CATEGORY = "E"
+ABSTAIN_CATEGORY = "F"
+
+
+def plan_summary(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Per model: how often the planner routes research questions away from the worker."""
+    by_label: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        by_label[record["label"]].append(record)
+    summary: dict[str, Any] = {"models": []}
+    for label, group in sorted(by_label.items()):
+        planned = [item for item in group if not item.get("error")]
+        research = [
+            item for item in planned
+            if item["category"] not in {CATALOGUE_CATEGORY, ABSTAIN_CATEGORY}
+        ]
+        catalogue = [item for item in planned if item["category"] == CATALOGUE_CATEGORY]
+        seconds = [item["seconds"] for item in planned]
+        summary["models"].append({
+            "label": label, "questions": len(group), "errors": len(group) - len(planned),
+            "research_questions": len(research),
+            "research_routed_away": sum(item["intent"] in NO_RESEARCH for item in research),
+            "research_as_catalogue": sum(item["intent"] == "catalogue" for item in research),
+            "catalogue_questions": len(catalogue),
+            "catalogue_recognised": sum(item["intent"] == "catalogue" for item in catalogue),
+            "facets_mean": round(statistics.fmean(
+                [len(item["facets"]) for item in planned]), 2) if planned else None,
+            "intents": dict(Counter(item["intent"] for item in planned).most_common()),
+            "seconds_p50": percentile(seconds, 0.5), "seconds_p95": percentile(seconds, 0.95),
+        })
+    return summary
+
+
+async def _plan(args: argparse.Namespace) -> int:
+    from crv_agent.adapters.models import LangChainModels
+    from crv_agent.domain.execution import Budget
+    from crv_agent.evaluation.dataset import load_questions
+    from crv_agent.runtime.settings import Settings
+
+    settings = Settings()
+    questions = load_questions(Path(args.golden), args.split)
+    gate = asyncio.Semaphore(args.concurrency)
+    records: list[dict[str, Any]] = []
+    async with AsyncExitStack() as stack:
+        models = await _role_models(stack, settings, args.model, "planner")
+
+        async def one(question: Any, label: str) -> None:
+            _, _, model = models[label]
+            planner = LangChainModels(model, model, model, settings.output_tokens)
+            entry: dict[str, Any] = {
+                "question_id": question.id, "category": question.category, "label": label,
+            }
+            async with gate:
+                started = time.perf_counter()
+                try:
+                    plan = await planner.plan(question.question, [], Budget(seconds=600))
+                    entry.update({
+                        "intent": plan.intent, "facets": [f.question for f in plan.facets],
+                        "error": None,
+                    })
+                except Exception as error:  # recorded per call, never dropped
+                    entry.update({"intent": None, "facets": [],
+                                  "error": f"{type(error).__name__}: {error}"[:300]})
+                entry["seconds"] = round(time.perf_counter() - started, 2)
+            records.append(entry)
+
+        await asyncio.gather(*(
+            one(question, label) for question in questions for label in models
+        ))
+    with Path(args.out).open("w", encoding="utf-8") as out:
+        for record in sorted(records, key=lambda item: (item["label"], item["question_id"])):
+            out.write(json.dumps(record, ensure_ascii=False) + "\n")
+    print(json.dumps(plan_summary(records), indent=2))
     return 0
 
 
@@ -534,6 +623,16 @@ def main(argv: list[str] | None = None) -> int:
     scoring.add_argument("--max-claims", type=int, default=8)
     scoring.add_argument("--out-dir", required=True)
 
+    planning = steps.add_parser("plan", help="Planner intent per golden question and model")
+    planning.add_argument("--golden", required=True)
+    planning.add_argument("--split", choices=["dev", "heldout"], default="dev")
+    planning.add_argument("--model", action="append", required=True,
+                          help="Served model name, optionally name@effort (repeatable)")
+    planning.add_argument("--concurrency", type=int, default=4)
+    planning.add_argument("--out", required=True)
+    planning.add_argument("--confirm-live", action="store_true",
+                          help="Acknowledge model calls (questions leave the host if remote)")
+
     args = parser.parse_args(argv)
     if args.step == "score":
         return _score(args)
@@ -543,8 +642,9 @@ def main(argv: list[str] | None = None) -> int:
         args.batches = sorted(set(args.batches or [1]))
         if any(not 1 <= batches <= 4 for batches in args.batches):
             parser.error("--batches must be 1-4")
+    step = {"freeze": _freeze, "run": _run, "plan": _plan}[args.step]
     with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
-        return runner.run(_freeze(args) if args.step == "freeze" else _run(args))
+        return runner.run(step(args))
 
 
 if __name__ == "__main__":

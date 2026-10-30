@@ -49,7 +49,9 @@ def test_classify_quote_names_the_cheapest_explanation(quote: str, expected: str
 
 
 def test_normalization_helpers() -> None:
-    assert probe.unescape('a\\nb \\"c\\" \\u00e9') == 'a\nb "c" é'
+    from crv_agent.services.anchoring import unescape
+
+    assert unescape('a\\nb \\"c\\" \\u00e9') == 'a\nb "c" é'
     assert probe.join_line_hyphens("pri-\nmaire and pri- maire") == "primaire and primaire"
     assert probe.strip_accents("récupération") == "recuperation"
     assert probe.containment("a b c d", "x a b c d y") == 1.0
@@ -126,6 +128,24 @@ def test_selection_is_stratified_and_skips_abstentions() -> None:
     assert [q.id for q in probe.select_questions(pool, 2, ["a3"], False)] == ["a3"]
     assert probe.parse_model("m@none") == ("m", "none")
     assert probe.parse_model("org/m") == ("org/m", None)
+
+
+def test_plan_summary_counts_research_questions_routed_away_from_the_worker() -> None:
+    def record(qid: str, category: str, intent: str | None, label: str = "m") -> dict[str, object]:
+        return {"question_id": qid, "category": category, "label": label, "intent": intent,
+                "facets": ["f"] if intent else [], "seconds": 1.0,
+                "error": None if intent else "Timeout"}
+
+    summary = probe.plan_summary([
+        record("q1", "A", "lookup"), record("q2", "A", "catalogue"),
+        record("q3", "B", "clarify"), record("q4", "E", "catalogue"),
+        record("q5", "F", "out_of_scope"), record("q6", "A", None),
+    ])
+    [model] = summary["models"]
+    assert (model["questions"], model["errors"], model["research_questions"]) == (6, 1, 3)
+    assert (model["research_routed_away"], model["research_as_catalogue"]) == (2, 1)
+    assert (model["catalogue_questions"], model["catalogue_recognised"]) == (1, 1)
+    assert model["intents"]["catalogue"] == 2
 
 
 def test_score_cli_writes_reports(tmp_path: Path) -> None:
