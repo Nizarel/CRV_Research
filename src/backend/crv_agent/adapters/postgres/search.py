@@ -40,7 +40,7 @@ def _evidence(row: DictRow) -> Evidence:
 class PostgresSearch:
     def __init__(
         self, pool: Pool, release: str, embedder: QueryEmbedder, *,
-        model: Literal["te3"] = "te3", reranker: CrossEncoder | None = None,
+        model: Literal["te3", "m3"] = "te3", reranker: CrossEncoder | None = None,
     ) -> None:
         self.pool = pool
         self.release = release

@@ -23,7 +23,7 @@ MEMORY_TABLES = (
     "crv_threads", "crv_runs", "crv_feedback",
     "checkpoints", "checkpoint_blobs", "checkpoint_writes",
 )
-_LOGIN = re.compile(r"^[a-z][a-z0-9-]{2,62}$")
+_LOGIN = re.compile(r"^[a-z][a-z0-9_-]{2,62}$")
 
 
 async def grant_memory_runtime(

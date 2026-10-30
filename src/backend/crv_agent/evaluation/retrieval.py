@@ -248,6 +248,8 @@ async def _run(args: argparse.Namespace) -> int:
             )
             knowledge_base = None
             if args.knowledge_base:
+                if not settings.search_endpoint:
+                    raise SystemExit("--knowledge-base needs CRV_SEARCH_ENDPOINT")
                 credential = await stack.enter_async_context(DefaultAzureCredential())
                 knowledge_base = await stack.enter_async_context(_knowledge_base(
                     settings.search_endpoint, args.knowledge_base, args.knowledge_source,
