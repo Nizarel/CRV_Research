@@ -277,8 +277,14 @@ def prune(draft: AnswerDraft, verdict: Verdict) -> AnswerDraft | None:
 def findings(
     draft: AnswerDraft, verdict: Verdict, calculations: list[Calculation], language: str,
 ) -> AnswerDraft | None:
-    """Unrejected, self-grounded claims listed with citations; None for a blanket rejection."""
-    if not verdict.unsupported_claims and not verdict.unsupported_sentences:
+    """Unrejected, self-grounded claims listed with citations; None for a blanket rejection.
+
+    Also used when the verifier accepted the draft but the deterministic contract failed (for
+    example a composer that left out citation markers): the listed lines cite each claim.
+    """
+    if not verdict.supported and not verdict.unsupported_claims and not (
+        verdict.unsupported_sentences
+    ):
         return None
     draft = clear_bindings(draft, verdict)
     rejected = set(verdict.unsupported_claims)

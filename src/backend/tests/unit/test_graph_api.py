@@ -854,6 +854,39 @@ def test_findings_list_only_unrejected_self_grounded_claims() -> None:
     assert findings(draft, Verdict(supported=False, reasons=["x"]), [], "en") is None
     assert findings(draft, specific.model_copy(update={"unsupported_claims": [0, 1, 2]}),
                     [], "en") is None
+    # Verifier accepted everything; only the deterministic contract failed (missing markers).
+    accepted = findings(draft, Verdict(supported=True, reasons=[]), [], "en")
+    assert accepted is not None and accepted.claims == [CLAIM, rejected]
+    assert accepted.content.endswith(
+        "- Recovery was 87.5 % [S1]\n- Recovery was the best ever [S1]",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_draft_without_citation_markers_falls_back_to_the_verified_findings() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+
+    class Models(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.compositions += 1
+            return AnswerDraft(content="Recovery was 87.5 %.", claims=list(claims),
+                               insufficient=False)
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            return Verdict(supported=True, reasons=[])
+
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=Models(), knowledge=FakeKnowledge(), worker=FakeWorker(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    answer = result["answer"]
+    assert answer.status == "partial"
+    assert answer.content.endswith("\n\n- Recovery was 87.5 % [S1]")
+    assert answer.claims == [CLAIM] and answer.citations == [SOURCE]
 
 
 @pytest.mark.asyncio
