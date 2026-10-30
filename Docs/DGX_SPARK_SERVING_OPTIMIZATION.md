@@ -1,7 +1,7 @@
 ---
 title: Dual DGX Spark Model Serving Optimization
-description: Recommendations for quantization, sparsity, pruning, and serving topology on two NVIDIA DGX Sparks.
-ms.date: 2026-10-23
+description: Recommendations for local model routing, fast and reasoning models, quantization, and serving topology on one or two NVIDIA DGX Sparks.
+ms.date: 2026-10-27
 ms.topic: concept
 ---
 
@@ -9,6 +9,12 @@ ms.topic: concept
 
 Prioritize quantization and serving-engine tuning. Consider sparsification or
 pruning only after benchmarking shows a remaining performance gap.
+
+For interactive workloads, start with a small local System 1 model, a larger
+local System 2 model, and a lightweight rule-based router. These components serve
+different purposes: a fast model handles routine tasks, while the router selects
+the appropriate model or workflow. A dedicated generative router model is not
+required initially.
 
 These recommendations assume primarily large language model (LLM) inference.
 They are hardware-informed guidance, not benchmark results from this project's
@@ -38,6 +44,66 @@ overhead between machines.
 > Pruning is not a prerequisite for using the hardware effectively.
 
 See the [NVIDIA DGX Spark hardware specifications][hardware].
+
+## Local System 1, System 2, and routing
+
+### Starting configuration
+
+System 1 means fast responses without extended reasoning. System 2 means
+deliberate reasoning for more complex tasks. These are workload roles, not
+guarantees associated with a model size.
+
+| Component      | Role                                                       | Starting point                                              |
+|----------------|------------------------------------------------------------|-------------------------------------------------------------|
+| System 1 model | Extraction, classification, simple Q&A, routine tool choice | A local 4B-8B instruction model                              |
+| Local router   | Select a model or workflow                                 | Deterministic rules; add a small classifier only when needed  |
+| System 2 model | Complex reasoning, planning, and difficult coding          | A quantized local 24B-32B model; benchmark larger models later |
+
+Disable thinking or extended reasoning for System 1 where the model and serving
+runtime support it. Model sizes are starting candidates, not measured winners
+or a prescribed checkpoint selection.
+
+```text
+Request -> Local router
+              |-> Simple or structured task -> System 1
+              |-> Complex reasoning task    -> System 2
+              |-> Unsupported task          -> Explicit fallback
+```
+
+Keep unsupported tasks explicit. A fallback can report that the request is not
+supported; an external model should only be used if the deployment allows it.
+
+### Keep routing lightweight
+
+Start with rules based on task type, requested reasoning, context size, and tool
+requirements. Do not send every request through an additional generative router
+model: it adds latency and competes for the same hardware.
+
+For ambiguous classification, let System 1 assist if evaluation shows that this
+improves routing. Add a dedicated learned router only when measured benefits
+justify its latency, memory, and maintenance costs.
+
+Escalate using task rules and observable failures, such as invalid structured
+output or failed tests, rather than relying only on a model's self-reported
+confidence. Define a bounded escalation path so failures do not cause repeated
+model calls without an explicit outcome.
+
+### Model residency and shared resources
+
+Keep the small model resident to avoid loading delays. Keep the larger model
+resident as well only when the complete working set fits with sufficient
+headroom. Budget for both models' weights, KV caches, activations, serving
+buffers, and operating-system memory.
+
+Two models that fit in memory still compete for compute and memory bandwidth
+when generating simultaneously. Measure mixed workloads, not only isolated
+model performance. Large-model capacity is not a guarantee of fast responses.
+
+On one Spark, begin with the 4B-8B fast model and a quantized 24B-32B reasoning
+model behind a rule-based router. With two Sparks, benchmark placing the fast
+model on one and the reasoning model on the other against the independent
+replica and pipeline-stage options below. Do not assume either placement is
+faster without measuring the intended workload.
 
 ## Why quantization is the first optimization
 
@@ -159,6 +225,26 @@ Do not select a configuration using single-request tokens per second alone.
 Accept an optimization only when it meets the required quality and latency
 thresholds at the intended load.
 
+### Validate the routing architecture
+
+Compare the two-model configuration with a baseline that sends the same requests
+to the reasoning model alone. Use representative simple, complex, ambiguous, and
+unsupported requests, including structured-output and tool-use cases.
+
+Record:
+
+* End-to-end p50 and p95 request latency, including routing and escalation
+* Task success and domain-specific answer quality
+* Routing mistakes, including complex tasks incorrectly sent to System 1
+* Escalation frequency and success
+* Cold-start or model-loading delays and warm-model latency
+* Peak combined memory and performance during simultaneous generation
+
+Set workload-specific quality and latency acceptance thresholds before choosing
+the configuration. Retain the router only if its end-to-end benefit justifies
+its complexity without unacceptable quality loss. No latency or throughput
+targets have been verified on this project's Spark deployment.
+
 ## Conclusion
 
 For two DGX Sparks, quantization plus serving-engine tuning is the recommended
@@ -169,6 +255,11 @@ or a larger model distributed across both.
 Pruning remains optional and workload-dependent. Choose it only when supported
 execution paths and measured benefits justify the additional development and
 quality-recovery effort.
+
+For fast local interaction, pair a resident 4B-8B System 1 model with a quantized
+24B-32B System 2 model and a rule-based router as the initial experiment. Measure
+against the reasoning-only baseline before increasing model sizes or introducing
+a dedicated learned router.
 
 ## Source
 
