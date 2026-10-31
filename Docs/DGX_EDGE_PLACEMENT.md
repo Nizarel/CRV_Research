@@ -2,7 +2,7 @@
 title: CRV Edge Placement on Two DGX Spark Hosts
 description: Starting service placement, memory budgets, serving runtime, inter-host traffic, failure modes, and model compatibility for the CRV edge deployment on dgx-niz01 and dgx-niz02.
 author: CRV Research
-ms.date: 2026-10-29
+ms.date: 2026-10-30
 ms.topic: concept
 keywords:
   - dgx spark
@@ -87,10 +87,15 @@ spliced table rows), which the guard must keep rejecting.
 | Hosted lightning calls stalled past the turn budget | 2 of 10 turns timed out at 120 s in the answer stage | No lightning role in phase 1 |
 | bolt returned few claims per call | 1.6 accepted claims per question with one batch | `CRV_EXTRACT_BATCHES=4` (4.0 per question, 19 of 21 questions with a claim) |
 
-The edge backend runs `crv-backend:edge-206498d` with bolt in every role since 2026-10-29. On 10 dev
+The edge backend ran `crv-backend:edge-206498d` with bolt in every role from 2026-10-29. On 10 dev
 questions it gave 3 verified answers and 3 more with verified claims, with no turn errors (before:
 0 answered, the worker reached in 1 of 10 questions). The previous settings are in
 `/srv/crv-secure/secrets/edge.env.bak-20261029`.
+
+Since 2026-10-30 it runs `crv-backend:edge-73ddd1d` with `CRV_MODEL_NOT_FOUND_RETRIES=2`: 33 of 53
+dev questions answered with no judge, against 10 to 14 before
+([full-split results](./DGX_EDGE_VALIDATION.md#progress-2026-10-30-full-dev-split-no-judge)). The
+previous settings are in `/srv/crv-secure/secrets/edge.env.bak-20261030`.
 
 The edge sends no generation to dgx-niz02 in phase 1; it can also host the backups.
 

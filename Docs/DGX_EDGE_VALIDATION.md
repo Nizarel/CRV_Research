@@ -2,7 +2,7 @@
 title: CRV Edge Validation Kit
 description: Pinned inputs, comparison arms, commands, thresholds, latency protocol, and the Azure-independence test for the CRV edge deployment on two DGX Spark hosts.
 author: CRV Research
-ms.date: 2026-10-29
+ms.date: 2026-10-30
 ms.topic: how-to
 keywords:
   - dgx spark
@@ -218,6 +218,44 @@ volume; move them once the folder is created.
 `bundles/eval` stands for `/srv/crv-secure/bundles/eval` on dgx-niz01. The images were
 `crv-backend:edge-4520b64-edge1` and `crv-pipeline:edge-4520b64-edge1`; the retrieval code is
 unchanged in later commits.
+
+## Progress 2026-10-30: full dev split, no judge
+
+Six passes over the 53 dev questions against a twin of the edge backend with diagnostics on
+(`127.0.0.1:8001`, same settings as the live backend), concurrency 2. Without the judge, the
+deterministic measure is golden anchor recall: the share of each question's key-fact anchors
+(numbers, codes, names) present in the shown passages, the extracted claims and the answer text,
+over questions that did not error.
+
+| Pass | Code and setup | Answered | Partial | Insufficient | Errors | Shown | Claims | Answer | F abstained | First answer p50 / p95 |
+|------|----------------|----------|---------|--------------|--------|-------|--------|--------|-------------|------------------------|
+| R1 | `206498d`, bolt everywhere | 10 | 4 | 20 | 19 | 0.678 | 0.250 | 0.105 | 3 of 3 | 26 / 72 s |
+| R2 | Same | 14 | 10 | 26 | 3 | 0.734 | 0.213 | 0.088 | 3 of 3 | 22 / 76 s |
+| R3 | `ded2c71`: claim citations, 404 retries | 25 | 4 | 23 | 0 | 0.699 | 0.206 | 0.098 | 3 of 3 | 18 / 54 s |
+| R4 | Same | 25 | 1 | 26 | 1 | 0.728 | 0.191 | 0.088 | 2 of 3 | 18 / 45 s |
+| R5 | `73ddd1d`: plus complete extraction, ledger fallback | 33 | 5 | 13 | 1 | 0.715 | 0.283 | 0.214 | 1 of 3 | 35 / 84 s |
+| R6 | As R5, hosted lightning worker | 21 | 5 | 4 | 22 | 0.657 | 0.440 | 0.245 | 0 of 3 | 50 / 108 s |
+
+Findings, each fixed in the commit named:
+
+* The hosted catalog answered HTTP 404 for bolt in bursts (19 turns of R1); the SDK does not retry
+  404. `CRV_MODEL_NOT_FOUND_RETRIES` (`ded2c71`) resends them; none failed after it.
+* The composer confused claim numbers with source handles (`[S16]` among 15 handles) and cited
+  sources of claims it did not list. It now cites claims (`[C3]`) and code expands them to
+  source markers (`94f40f4`): contract failures fell from 10 to 1.
+* bolt often wrote only `insufficient true` as the answer (34 drafts in R3) while the ledger held
+  validated claims. Those claims are now verified once more and listed (`73ddd1d`).
+* Extraction is the largest loss: the shown passages hold about 0.7 of the anchors, the claims
+  0.2. Asking for every distinct fact (`715be08`) raised claims to 0.28. Hosted lightning extracts
+  0.44 but timed out in 22 of 53 turns, so it waits for faster local serving.
+* Retrieval misses remain: for Q29, Q43, Q45 and Q75 the specific values were not in the shown
+  passages.
+
+The live backend runs `crv-backend:edge-73ddd1d` with the R5 settings and
+`CRV_MODEL_NOT_FOUND_RETRIES=2` since 2026-10-30. Two risks need the judge: fewer category F
+abstentions (1 of 3 in R5; R4 also answered one), and higher latency (p95 84 s). The run files are in
+`bundles/eval/dev53-20261030/`. Anchors match as in `AnchorText` of
+[the golden dataset](../src/ingestion/ingest_pipeline/tools/golden/dataset.py).
 
 ## Azure-independence test
 
