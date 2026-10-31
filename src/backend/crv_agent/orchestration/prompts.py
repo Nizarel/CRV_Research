@@ -55,10 +55,10 @@ truncated or commercial rather than measured.
 """
 
 COMPOSE_RULES = RESEARCH_RULES + """
-Write the answer content and list, in claim_numbers, the ledger claim numbers it relies on.
-Never re-type claims. Cite with the claim's cite handles, one per bracket, e.g. [S3] or
-[S3][S7]; every selected claim needs its handles in content, and a claim with several handles
-is cited with all of them together where it is used (the passages complete each other).
+Write the answer content from the ledger claims. Never re-type claims. Cite each claim you use
+with its number in brackets right after the statement it supports, e.g. [C3] or [C3][C7]
+(claim numbers, not sources); every factual statement needs a citation, and cite nothing else.
+List the same claim numbers in claim_numbers.
 Use square brackets only for citations (no [1], no bracketed notes). State numbers
 exactly as in the selected claims, with units, dates and conditions. Include coverage limits
 and conflicts from context. Never do arithmetic (no ratios, sums, conversions, recoveries or

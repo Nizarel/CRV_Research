@@ -293,7 +293,7 @@ def test_structured_output_schemas_have_no_regex_patterns() -> None:
 
 
 @pytest.mark.asyncio
-async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_numbers() -> None:
+async def test_composer_cites_claims_and_the_citations_select_them() -> None:
     from crv_agent.adapters.models import LangChainModels
     from crv_agent.domain.answers import ComposedAnswer
 
@@ -302,10 +302,10 @@ async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_number
             self.output_tokens, self.answer = 10, None
 
         async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
-            assert schema is ComposedAnswer and '"number": 1' in data and '"cite": ["S1"]' in data
+            assert schema is ComposedAnswer and '"number": 1' in data and '"cite"' not in data
             assert role == "answer"
             assert '"evidence_ids"' not in data
-            return ComposedAnswer(content="87.5 % [S1] [S9]", claim_numbers=[1, 1, 7, -1],
+            return ComposedAnswer(content="87.5 % [C1] [C9]", claim_numbers=[1, 7, -1],
                                   insufficient=False, unanswered=["2016 value"], conflicts=[])
 
     ledger = [
@@ -315,11 +315,39 @@ async def test_composer_selects_ledger_claims_by_number_and_drops_unknown_number
     draft = await Models().compose("Q?", ledger, "{}", Budget())
     assert draft.claims == [ledger[1]]
     assert draft.unanswered == ["2016 value"]
-    assert draft.content == "87.5 % [long-opaque-id] [S9]"  # unknown handle kept, then rejected
+    assert draft.content == "87.5 % [long-opaque-id] [C9]"  # unknown claim kept, then rejected
     evidence = [source(id="long-opaque-id")]
     assert "Answer contains unknown citation markers" in verify_draft(draft, evidence, "r1")
     fixed = draft.model_copy(update={"content": "87.5 % [long-opaque-id]"})
     assert verify_draft(fixed, evidence, "r1") == []
+
+
+@pytest.mark.asyncio
+async def test_cited_but_unlisted_claims_are_selected_and_listed_uncited_ones_dropped() -> None:
+    from crv_agent.adapters.models import LangChainModels
+    from crv_agent.domain.answers import ComposedAnswer
+
+    class Models(LangChainModels):
+        def __init__(self) -> None:
+            self.output_tokens, self.answer = 10, None
+
+        async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
+            return ComposedAnswer(
+                content="Recovery 87.5 % [C0][C2]; feed 80 % [c 1, C2].", claim_numbers=[3, 0],
+                insufficient=False, unanswered=[], conflicts=[],
+            )
+
+    ledger = [
+        claim(evidence_ids=["S1"]), claim(value="80", quote="Recovery 80 % at pilot scale.",
+                                          evidence_ids=["S2"]),
+        claim(evidence_ids=["S1"]), claim(evidence_ids=["S9"]),
+    ]
+    draft = await Models().compose("Q?", ledger, "{}", Budget())
+    # [C0][C2] share one source: one marker. [c 1, C2] is a list. C3 is listed, never cited.
+    assert draft.content == "Recovery 87.5 % [S1]; feed 80 % [S2][S1]."
+    assert draft.claims == [ledger[0], ledger[2], ledger[1]]
+    evidence = [source(), source(id="S2", content="Recovery 80 % at pilot scale.")]
+    assert verify_draft(draft, evidence, "r1") == []
 
 
 @pytest.mark.asyncio
@@ -332,8 +360,8 @@ async def test_composer_conflicts_need_two_selected_claims_that_differ() -> None
             self.output_tokens, self.answer, self.conflicts = 10, None, conflicts
 
         async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
-            return ComposedAnswer(content="[S1]", claim_numbers=[0, 1, 2], insufficient=False,
-                                  unanswered=[], conflicts=self.conflicts)
+            return ComposedAnswer(content="[C0][C1][C2]", claim_numbers=[0, 1, 2],
+                                  insufficient=False, unanswered=[], conflicts=self.conflicts)
 
     ledger = [claim(), claim(value="80", quote="Recovery 80 % at pilot scale."), claim()]
     differing = ComposedConflict(subject="sample A", quantity="recovery", claim_numbers=[0, 1])
@@ -344,7 +372,7 @@ async def test_composer_conflicts_need_two_selected_claims_that_differ() -> None
 
 
 @pytest.mark.asyncio
-async def test_composer_shows_every_citation_of_a_partly_cited_claim() -> None:
+async def test_a_claim_citation_shows_every_source_of_the_claim() -> None:
     from crv_agent.adapters.models import LangChainModels
     from crv_agent.domain.answers import ComposedAnswer
 
@@ -353,13 +381,12 @@ async def test_composer_shows_every_citation_of_a_partly_cited_claim() -> None:
             self.output_tokens, self.answer = 10, None
 
         async def _invoke(self, model, schema, system, data, budget, *, role):  # type: ignore[no-untyped-def]
-            assert '"cite": ["S1", "S2"]' in data
-            return ComposedAnswer(content="87.5 % [S2].", claim_numbers=[0],
+            return ComposedAnswer(content="87.5 % [C0].", claim_numbers=[0],
                                   insufficient=False, unanswered=[], conflicts=[])
 
     ledger = [claim(evidence_ids=["context", "S1"])]
     draft = await Models().compose("Q?", ledger, "{}", Budget())
-    assert draft.content == "87.5 % [S1][context]."
+    assert draft.content == "87.5 % [context][S1]."
     evidence = [source(), source(id="context", content="Le stock intermédiaire qui a un")]
     assert verify_draft(draft, evidence, "r1") == []
 

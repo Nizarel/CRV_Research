@@ -16,6 +16,9 @@ from crv_agent.orchestration.prompts import COMPOSE_RULES, PLAN_RULES, RERANK_RU
 from crv_agent.services.evidence_pack import exposed_text, quote_windows
 
 T = TypeVar("T", bound=BaseModel)
+# A claim citation: [C3], or a list [C3, C7] / [C3; 7].
+_CLAIM_CITE = re.compile(r"\[\s*[Cc]\s*(\d+(?:\s*[,;]\s*[Cc]?\s*\d+)*)\s*\]")
+_MARKER_RUN = re.compile(r"(?:\[[^\[\]\n]+\])+")
 
 def reject_unapproved_tracing() -> None:
     if any(
@@ -62,40 +65,41 @@ class LangChainModels:
     async def compose(
         self, question: str, claims: list[Claim], context: str, budget: Budget,
     ) -> AnswerDraft:
-        # Short citation handles: long opaque evidence IDs are error-prone to copy.
-        handles = {
-            evidence_id: f"S{n}" for n, evidence_id in enumerate(
-                dict.fromkeys(e for c in claims for e in c.evidence_ids), 1,
-            )
-        }
         composed = await self._invoke(
             self.answer, ComposedAnswer, COMPOSE_RULES,
             json.dumps({
                 "question": question,
                 "claims": [
                     {
-                        "number": n, "cite": [handles[e] for e in c.evidence_ids],
+                        "number": n,
                         **c.model_dump(mode="json", exclude_none=True, exclude={"evidence_ids"}),
                     } for n, c in enumerate(claims)
                 ],
                 "context": context,
             }, ensure_ascii=False), budget, role="answer",
         )
-        evidence_ids = {handle: evidence_id for evidence_id, handle in handles.items()}
-        content = re.sub(
-            r"\[(S\d+)\]", lambda m: f"[{evidence_ids.get(m.group(1), m.group(1))}]",
-            composed.content,
+        # The composer cites claims ([C3]); each becomes its claim's source markers, so the
+        # cited claims are the selected ones and no source handle is ever copied by a model.
+        cited: list[int] = []
+
+        def expand(match: re.Match[str]) -> str:
+            numbers = [int(n) for n in re.findall(r"\d+", match.group(1))]
+            if not all(0 <= n < len(claims) for n in numbers):
+                return match.group(0)
+            cited.extend(numbers)
+            return "".join(f"[{e}]" for n in numbers for e in claims[n].evidence_ids)
+
+        content = _MARKER_RUN.sub(
+            lambda run: "".join(dict.fromkeys(re.findall(r"\[[^\[\]]+\]", run.group(0)))),
+            _CLAIM_CITE.sub(expand, composed.content),
         )
-        # Unknown numbers are dropped here; deterministic verification then rejects any
-        # citation marker or number not backed by a selected ledger claim.
-        selected = [
-            claims[n] for n in dict.fromkeys(composed.claim_numbers) if 0 <= n < len(claims)
+        markers = set(re.findall(r"\[([^\[\]]+)\]", content))
+        # Listed but uncited claims are kept only when their sources are visibly cited.
+        listed = [
+            n for n in composed.claim_numbers
+            if 0 <= n < len(claims) and set(claims[n].evidence_ids) <= markers
         ]
-        for claim in selected:
-            present = [e for e in claim.evidence_ids if f"[{e}]" in content]
-            missing = "".join(f"[{e}]" for e in claim.evidence_ids if f"[{e}]" not in content)
-            if present and missing:
-                content = content.replace(f"[{present[0]}]", f"[{present[0]}]{missing}", 1)
+        selected = [claims[n] for n in dict.fromkeys(cited + listed)]
         position = {id(claim): n for n, claim in enumerate(selected)}
         conflicts = []
         for item in composed.conflicts:
