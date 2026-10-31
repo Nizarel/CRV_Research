@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     turn_seconds: float = Field(default=120, ge=30, le=600)
     # SDK retries (Retry-After honoured) for 429/5xx, always bounded by the turn deadline.
     model_retries: int = Field(default=4, ge=0, le=6)
+    # Extra attempts after an HTTP 404 from the model endpoint. The hosted NVIDIA catalog
+    # intermittently answers 404 for models it serves; keep 0 for Azure and local servers.
+    model_not_found_retries: int = Field(default=0, ge=0, le=4)
     evidence_pack_size: int = Field(default=50, ge=1, le=50)
     evidence_excerpt_characters: int = Field(default=8000, ge=200, le=8000)
     evidence_anchor: Literal["lexical", "caption"] = "lexical"

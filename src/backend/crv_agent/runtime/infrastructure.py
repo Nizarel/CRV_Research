@@ -1,9 +1,12 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 import aiohttp
+import httpx
 from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
 from azure.search.documents.aio import SearchClient
 from azure.storage.blob.aio import ContainerClient
@@ -35,6 +38,7 @@ from crv_agent.runtime.database import kg_profile, memory_profile
 from crv_agent.runtime.settings import Settings
 
 Pool = AsyncConnectionPool[AsyncConnection[DictRow]]
+logger = logging.getLogger(__name__)
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
 VECTOR_DIMENSIONS = {"te3": 3072, "m3": 1024}
 # vLLM and similar servers ignore the key unless started with one; the SDK needs a value.
@@ -77,6 +81,28 @@ def close_clients(stack: AsyncExitStack, chat_model: ChatOpenAI) -> None:
         stack.callback(chat_model.root_client.close)
 
 
+class NotFoundRetry(httpx.AsyncBaseTransport):
+    """Resends a request answered with HTTP 404, a bounded number of times with backoff."""
+
+    def __init__(
+        self, inner: httpx.AsyncBaseTransport, retries: int, delay: float = 1.0,
+    ) -> None:
+        self.inner, self.retries, self.delay = inner, retries, delay
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        for attempt in range(self.retries + 1):
+            response = await self.inner.handle_async_request(request)
+            if response.status_code != 404 or attempt == self.retries:
+                return response
+            await response.aclose()
+            logger.warning("model_not_found_retry attempt=%d", attempt + 1)
+            await asyncio.sleep(self.delay * 2 ** attempt)
+        raise AssertionError("unreachable")
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
+
+
 def create_chat_models(
     stack: AsyncExitStack, settings: Settings,
     token_provider: Callable[[], Awaitable[str]] | None,
@@ -98,6 +124,12 @@ def create_chat_models(
             raise ValueError("Entra model access needs an Azure credential")
         api_key = token_provider
     models: dict[str, ChatOpenAI] = {}
+    http_async_client = None
+    if settings.model_not_found_retries:
+        http_async_client = httpx.AsyncClient(transport=NotFoundRetry(
+            httpx.AsyncHTTPTransport(), settings.model_not_found_retries,
+        ))
+        stack.push_async_callback(http_async_client.aclose)
     for role, deployment, effort in (
         ("planner", settings.planner_deployment, settings.planner_reasoning_effort),
         ("worker", settings.worker_deployment, settings.worker_reasoning_effort),
@@ -111,6 +143,7 @@ def create_chat_models(
             ),
             reasoning_effort=effort,
             max_retries=settings.model_retries, timeout=60, include_response_headers=False,
+            http_async_client=http_async_client,
         )
         close_clients(stack, chat_model)
         models[role] = chat_model

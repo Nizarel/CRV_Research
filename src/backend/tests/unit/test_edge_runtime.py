@@ -131,6 +131,40 @@ async def test_chat_models_use_local_endpoint_without_credential(tmp_path: Any) 
 
 
 @pytest.mark.asyncio
+async def test_not_found_retry_resends_a_bounded_number_of_times(tmp_path: Any) -> None:
+    import httpx
+
+    from crv_agent.runtime.infrastructure import NotFoundRetry, create_chat_models
+
+    statuses = iter([404, 404, 200])
+    seen: list[bytes] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        seen.append(request.content)
+        return httpx.Response(next(statuses), json={})
+
+    async with httpx.AsyncClient(
+        transport=NotFoundRetry(httpx.MockTransport(reply), 2, delay=0),
+    ) as client:
+        response = await client.post("http://dgx-niz02/v1/chat/completions", json={"a": 1})
+    assert response.status_code == 200 and seen == [b'{"a":1}'] * 3
+
+    always = NotFoundRetry(httpx.MockTransport(lambda _: httpx.Response(404)), 1, delay=0)
+    async with httpx.AsyncClient(transport=always) as client:
+        assert (await client.get("http://dgx-niz02/v1/models")).status_code == 404
+    other = NotFoundRetry(httpx.MockTransport(lambda _: httpx.Response(400)), 3, delay=0)
+    async with httpx.AsyncClient(transport=other) as client:
+        assert (await client.get("http://dgx-niz02/v1/models")).status_code == 400
+
+    async with AsyncExitStack() as stack:
+        plain = create_chat_models(stack, edge(tmp_path), None)
+        retrying = create_chat_models(stack, edge(tmp_path, model_not_found_retries=2), None)
+        assert plain["worker"].http_async_client is None
+        assert isinstance(retrying["worker"].http_async_client._transport, NotFoundRetry)
+        assert retrying["planner"].http_async_client is retrying["worker"].http_async_client
+
+
+@pytest.mark.asyncio
 async def test_openai_compatible_embedder_sends_model_and_no_auth_header() -> None:
     seen: list[dict[str, Any]] = []
 
