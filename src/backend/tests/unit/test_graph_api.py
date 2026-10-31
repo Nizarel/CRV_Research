@@ -923,6 +923,46 @@ async def test_unprunable_synthesis_falls_back_to_the_verified_findings() -> Non
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_composer_that_cites_nothing_falls_back_to_the_verified_ledger() -> None:
+    from crv_agent.domain.answers import AnswerDraft, Verdict
+
+    other = CLAIM.model_copy(update={"text": "Recovery was the best ever"})
+
+    class TwoClaims(FakeWorker):
+        async def run(self, question, release, hashes, budget, *, strict=False):  # type: ignore[no-untyped-def]
+            result, found = await super().run(question, release, hashes, budget, strict=strict)
+            return result.model_copy(update={"claims": [CLAIM, other]}), found
+
+    class Models(FakeModels):
+        async def compose(self, question, claims, context, budget):  # type: ignore[no-untyped-def]
+            self.compositions += 1
+            return AnswerDraft(content="insufficient true", claims=[], insufficient=True)
+
+        async def verify(self, draft, evidence, context, budget):  # type: ignore[no-untyped-def]
+            self.verified.append(draft)
+            if not draft.claims:
+                return Verdict(supported=False, reasons=["no claims"])
+            return Verdict(supported=False, reasons=["x"], unsupported_claims=[1])
+
+    models = Models()
+    models.verified = []  # type: ignore[attr-defined]
+    result = await build_graph(InMemorySaver(serde=serializer())).ainvoke(
+        {"question": "Recovery?", "history": []},
+        {"configurable": {"thread_id": str(uuid4())}},
+        context=ResearchContext(
+            models=models, knowledge=FakeKnowledge(), worker=TwoClaims(), budget=Budget(),
+            search_release="r1", kg_release="kg1", trace_id="t",
+        ),
+    )
+    answer = result["answer"]
+    # The composer's insufficiency stands, but the answer now shows what was verified.
+    assert answer.status == "insufficient_evidence"
+    assert answer.claims == [CLAIM] and answer.citations == [SOURCE]
+    assert answer.content.endswith("\n\n- Recovery was 87.5 % [S1]")
+    assert models.verified[-1].claims == [CLAIM, other]  # type: ignore[attr-defined]
+
+
 def test_markers_must_bind_to_selected_claims_and_orphans_are_pruned() -> None:
     from crv_agent.domain.answers import AnswerDraft, Verdict
     from crv_agent.orchestration.nodes.answer import prune

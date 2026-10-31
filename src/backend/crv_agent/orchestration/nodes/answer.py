@@ -133,6 +133,34 @@ async def answer(
             ):
                 draft, reasons, listed = candidate, [], True
                 audit("findings", draft=candidate.model_dump(mode="json"))
+        if reasons and draft is not None and not draft.claims and claims:
+            # The composer cited no claim (a small model may write only its flags); list the
+            # validated ledger claims and keep those a fresh verification does not reject.
+            ledger = AnswerDraft(
+                content="\n".join(
+                    f"- {claim.text} " + " ".join(f"[{cid}]" for cid in claim.evidence_ids)
+                    for claim in claims
+                ),
+                claims=claims, insufficient=draft.insufficient,
+            )
+            used = {cid for claim in claims for cid in claim.evidence_ids}
+            review: Verdict | None
+            try:
+                review = await context.models.verify(
+                    ledger, [item for item in evidence if item.id in used], details,
+                    context.budget,
+                )
+            except BudgetExceeded:
+                review = None
+            if review is not None:
+                audit("ledger_verified", draft=ledger.model_dump(mode="json"),
+                      verifier=review.model_dump(mode="json"))
+                candidate = findings(ledger, review, state["calculations"], plan.language)
+                if candidate is not None and not verify_draft(
+                    candidate, evidence, context.search_release, state["calculations"],
+                ):
+                    draft, reasons, listed = candidate, [], True
+                    audit("findings", draft=candidate.model_dump(mode="json"))
         if reasons or draft is None:
             status, text, claims = "insufficient_evidence", (
                 "La réponse n'a pas passé la vérification des sources."

@@ -55,7 +55,10 @@ truncated or commercial rather than measured.
 """
 
 COMPOSE_RULES = RESEARCH_RULES + """
-Write the answer content from the ledger claims. Never re-type claims. Cite each claim you use
+Write the answer content from the ledger claims. Never re-type claims. content is the prose
+shown to the user: never leave it empty and never write field names or flags in it (such as
+"insufficient true"); when the claims do not settle the question, still state what they
+establish, with citations, and what is missing. Cite each claim you use
 with its number in brackets right after the statement it supports, e.g. [C3] or [C3][C7]
 (claim numbers, not sources); every factual statement needs a citation, and cite nothing else.
 List the same claim numbers in claim_numbers.
